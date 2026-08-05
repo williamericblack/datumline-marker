@@ -6,7 +6,7 @@ from datumline_mcp.harvester import npm_package
 from datumline_mcp.normalize import derive
 from datumline_mcp.scorer import ScoreInput, score_record
 
-OUT = pathlib.Path("out"); OUT.mkdir(exist_ok=True)
+OUT = pathlib.Path("docs"); OUT.mkdir(exist_ok=True)
 now = dt.datetime.now(dt.timezone.utc).isoformat()
 cohort = json.loads(pathlib.Path("cohort.json").read_text())
 
