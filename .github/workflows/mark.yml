@@ -1,22 +1,83 @@
-name: datumline-daily-mark
+name: daily mark
+
+# Hardening notes (read before editing):
+#  - workflow_dispatch is deliberate: GitHub cron is best-effort and can be delayed
+#    or skipped entirely. A manual trigger is the only way to force a run.
+#  - The heartbeat file is written on EVERY run whether or not grades changed.
+#    Without it a run that produces no diff makes no commit, the repo looks
+#    inactive, and GitHub auto-disables scheduled workflows after 60 days of
+#    inactivity. The heartbeat guarantees a commit and keeps the schedule alive.
+#  - Failure notification goes to ntfy. A failed notification never fails the job.
+
 on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+
 permissions:
   contents: write
+
+concurrency:
+  group: daily-mark
+  cancel-in-progress: false
+
 jobs:
   mark:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: python run_cohort.py
-      - name: Commit results
+        with:
+          python-version: "3.12"
+
+      - name: Run cohort marking
+        id: mark
+        run: python run_cohort.py
+
+      - name: Write heartbeat
+        if: always()
         run: |
-          git config user.name  "datumline-marker"
-          git config user.email "watch@datumline.dev"
+          mkdir -p docs
+          printf '{"heartbeat":"%s","run_id":"%s","status":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${GITHUB_RUN_ID}" \
+            "${{ steps.mark.outcome }}" > docs/heartbeat.json
+
+      - name: Verify feed is fresh and well-formed
+        if: steps.mark.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import json, sys, datetime
+          feed = json.load(open("docs/feed.json"))
+          marked = feed.get("last_marked") or feed.get("meta", {}).get("last_marked")
+          if not marked:
+              sys.exit("FAIL: feed.json carries no last_marked")
+          age = (datetime.datetime.now(datetime.timezone.utc)
+                 - datetime.datetime.fromisoformat(marked.replace("Z", "+00:00")))
+          if age.total_seconds() > 3600:
+              sys.exit(f"FAIL: last_marked is {age} old — the run did not update the feed")
+          entries = feed.get("entries") or feed.get("items") or []
+          if not entries:
+              sys.exit("FAIL: feed.json has zero entries")
+          bad = [e for e in entries if str(e.get("grade", "")) in ("DL-4", "DL-5")]
+          if bad:
+              sys.exit(f"FAIL: low-band suppression breached — {len(bad)} entry/entries would publish")
+          print(f"OK: {len(entries)} entries, last_marked {marked}, suppression intact")
+          PY
+
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name "datumline-marker"
+          git config user.email "actions@users.noreply.github.com"
           git add docs/
-          git diff --staged --quiet || git commit -m "mark: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git diff --staged --quiet || git commit -m "mark: $(date -u +%Y-%m-%d)"
           git push
+
+      - name: Alert on failure
+        if: failure()
+        run: |
+          curl -s -m 10 -d "datumline-marker FAILED run ${GITHUB_RUN_ID}" \
+            ntfy.sh/${{ secrets.NTFY_TOPIC }} || true
