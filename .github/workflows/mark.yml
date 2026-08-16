@@ -8,6 +8,15 @@ name: daily mark
 #    inactive, and GitHub auto-disables scheduled workflows after 60 days of
 #    inactivity. The heartbeat guarantees a commit and keeps the schedule alive.
 #  - Failure notification goes to ntfy. A failed notification never fails the job.
+#  - A dead publisher is FATAL, not a skipped row. Before, a publisher going
+#    down dropped its entity into errors[], removed it from the feed, and still
+#    exited 0 — the feed silently shrank and the run stayed green. run_cohort.py
+#    now exits non-zero naming the publisher, and leaves the previously sealed
+#    docs/ snapshot untouched rather than overwriting it with a partial mark.
+#  - docs/capture_state.json tracks whether a DAY was missed, which the
+#    heartbeat cannot answer: the heartbeat says the workflow executed, not
+#    that the capture collected anything. A skipped cron day surfaces there as
+#    MISSED_CAPTURE_DAY and turns the run red.
 
 on:
   schedule:
@@ -34,7 +43,9 @@ jobs:
 
       - name: Run cohort marking
         id: mark
-        run: python run_cohort.py
+        run: |
+          set -o pipefail
+          python run_cohort.py 2>&1 | tee /tmp/mark.log
 
       - name: Write heartbeat
         if: always()
@@ -79,5 +90,12 @@ jobs:
       - name: Alert on failure
         if: failure()
         run: |
-          curl -s -m 10 -d "datumline-marker FAILED run ${GITHUB_RUN_ID}" \
+          # Carry the named reason to the phone. "FAILED run 123" forces a
+          # laptop trip to learn which publisher died or which day was missed;
+          # the FAIL: lines already say it, so send them.
+          REASON="$(grep '^FAIL:' /tmp/mark.log 2>/dev/null | head -5)"
+          [ -n "$REASON" ] || REASON="job failed before the capture reported a reason"
+          curl -s -m 10 -H "Title: datumline-marker RED" \
+            -d "run ${GITHUB_RUN_ID}
+          ${REASON}" \
             ntfy.sh/${{ secrets.NTFY_TOPIC }} || true

@@ -11,6 +11,7 @@ from datumline_mcp.harvester import npm_package
 from datumline_mcp.normalize import derive
 from datumline_mcp.scorer import ScoreInput, score_record
 from datumline_mcp.model import WEIGHT_VECTORS, LAYERS, GRADE_BANDS
+from datumline_mcp import continuity
 
 OUT = pathlib.Path("docs"); OUT.mkdir(exist_ok=True)
 now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -177,9 +178,59 @@ Methodology <strong>v0.3-rc — PROVISIONAL</strong>. Marks as of {last_marked}.
 """
 
 
-(OUT / "marks.json").write_text(json.dumps(marks_doc, indent=2))
-(OUT / "feed.json").write_text(json.dumps(feed_doc, indent=2))
-(OUT / "index.html").write_text(render_index_html(marks_doc, feed_doc))
+# --- Continuity and sealing -------------------------------------------------
+#
+# Two failure modes are handled here, both of which previously produced a
+# green run:
+#
+#   1. A publisher goes dead. The entity simply dropped out of the cohort
+#      loop into errors[], vanished from the feed, and the run exited 0 —
+#      the feed shrank silently and nothing alerted. A dead publisher is now
+#      fatal and is named in the exit.
+#
+#   2. A day is missed. Nothing compared this run against the previous one,
+#      so a skipped run left no trace at all. Gaps are now recorded as an
+#      explicit MISSED_CAPTURE_DAY state.
+#
+# On any capture failure the previously sealed snapshot is left untouched.
+# Overwriting it would destroy the last-known-good mark with a partial or
+# empty one, which is the opposite of what a preservation layer owes.
 
-print(f"marked {len(marks)}/{len(cohort)}  rated={marks_doc['rated']}"
-      f"  errors={len(errors)}  last_marked={now}  wrote docs/index.html docs/feed.json docs/marks.json")
+STATE = OUT / "capture_state.json"
+today = dt.datetime.now(dt.timezone.utc).date()
+verdict = continuity.evaluate(continuity.load_state(STATE), today)
+
+dead_publishers = [e["entity_id"] for e in errors]
+captured = not errors
+
+state_doc = continuity.record(STATE, verdict, today,
+                              captured=captured, dead_publishers=dead_publishers)
+
+if captured:
+    (OUT / "marks.json").write_text(json.dumps(marks_doc, indent=2))
+    (OUT / "feed.json").write_text(json.dumps(feed_doc, indent=2))
+    (OUT / "index.html").write_text(render_index_html(marks_doc, feed_doc))
+    print(f"marked {len(marks)}/{len(cohort)}  rated={marks_doc['rated']}"
+          f"  errors=0  last_marked={now}  wrote docs/index.html docs/feed.json docs/marks.json")
+else:
+    print(f"SEALED SNAPSHOT PRESERVED — docs/feed.json, docs/marks.json and "
+          f"docs/index.html were NOT rewritten (last good capture: "
+          f"{state_doc.get('last_capture_date') or 'none'})", file=sys.stderr)
+
+failures = []
+if dead_publishers:
+    failures.append("DEAD_PUBLISHER: capture failed for "
+                    + ", ".join(sorted(dead_publishers)))
+    for e in errors:
+        print(f"  {e['entity_id']}: {e['error']}", file=sys.stderr)
+if verdict["status"] == continuity.MISSED_CAPTURE_DAY:
+    failures.append("MISSED_CAPTURE_DAY: no capture on "
+                    + ", ".join(verdict["missed"])
+                    + f" (last capture {verdict['last_capture_date']})")
+
+if failures:
+    for line in failures:
+        print(f"FAIL: {line}", file=sys.stderr)
+    sys.exit(1)
+
+print(f"continuity OK  status={state_doc['status']}  last_capture={state_doc['last_capture_date']}")
