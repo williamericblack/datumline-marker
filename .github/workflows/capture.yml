@@ -1,0 +1,139 @@
+name: capture
+
+# CAPTURE ONLY. This workflow reads public files and writes them down.
+#
+# It does not score, grade, rank, band, compare, assess or publish anything, and
+# it never touches docs/. That inertness is not incidental - it is the reason
+# capture was approved to run at all, and it is enforced here by a step that
+# fails the job if this run has modified anything under docs/.
+#
+# This is a SEPARATE workflow from mark.yml on purpose. The marking job publishes
+# to a public feed and has run green for weeks; capture is broad, slow, and
+# touches hundreds of third-party hosts. Coupling them would let a capture
+# problem take the published feed down with it, and would let a capture change
+# land in a file that has to stay stable. They share no steps and no files.
+#
+# Budgets: the first run stops hard at 45 minutes or 200MB, whichever comes
+# first. A stopped run records that it was truncated rather than looking
+# complete.
+
+on:
+  schedule:
+    # Deliberately far from mark.yml's 06:17 so the two never contend for the
+    # same branch and a capture commit cannot delay a mark commit.
+    - cron: "40 2 * * *"
+  workflow_dispatch:
+    inputs:
+      max_seconds:
+        description: "Hard wall-clock stop in seconds"
+        required: false
+        default: "2700"
+      max_bytes:
+        description: "Hard byte stop"
+        required: false
+        default: "209715200"
+      universes:
+        description: "components, companies, or components,companies"
+        required: false
+        default: "components,companies"
+      dry_run:
+        description: "Discover and report only; write nothing"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    # 45 minute budget inside the program, plus headroom for checkout, the
+    # guards and the commit. The program stops itself; this is the backstop.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Record pre-run state
+        run: |
+          echo "records before: $(wc -l < capture/store/index/records.ndjson 2>/dev/null || echo 0)"
+          git status --porcelain | tee /tmp/tree-before.txt
+
+      - name: Capture
+        id: capture
+        run: |
+          python capture/capture.py \
+            --max-seconds "${{ github.event.inputs.max_seconds || '2700' }}" \
+            --max-bytes "${{ github.event.inputs.max_bytes || '209715200' }}" \
+            --universes "${{ github.event.inputs.universes || 'components,companies' }}" \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Assert capture published nothing
+        if: always()
+        run: |
+          set -euo pipefail
+          # The whole legal position rests on capture being inert. If a capture
+          # run has touched the published site, stop before it can be committed.
+          if [ -n "$(git status --porcelain -- docs/)" ]; then
+            echo "::error::capture modified docs/ - capture must never publish. Refusing to commit."
+            git status --porcelain -- docs/
+            exit 1
+          fi
+          OUTSIDE=$(git status --porcelain | awk '{print $NF}' | grep -vE '^capture/' || true)
+          if [ -n "$OUTSIDE" ]; then
+            echo "::error::capture changed files outside capture/:"
+            echo "$OUTSIDE"
+            exit 1
+          fi
+          echo "OK: this run wrote only under capture/ and did not touch docs/"
+
+      - name: Append-only guard
+        if: always()
+        run: python capture/append_only_guard.py
+
+      - name: Commit capture
+        if: success()
+        run: |
+          set -euo pipefail
+          git config user.name "datumline-capture"
+          git config user.email "actions@users.noreply.github.com"
+          git add capture/
+          if git diff --staged --quiet; then
+            echo "nothing captured changed; no commit"
+            exit 0
+          fi
+          python - > /tmp/commit-msg.txt <<'PY'
+          import json, pathlib
+          p = pathlib.Path("capture/store/last_run.json")
+          if not p.exists():
+              print("capture run")
+          else:
+              r = json.loads(p.read_text())
+              print("capture: %s  %d records, %d changes%s" % (
+                  r.get("started_at", "")[:10],
+                  r.get("records_appended", 0),
+                  r.get("changes_appended", 0),
+                  " (TRUNCATED)" if r.get("truncated") else ""))
+          PY
+          git commit -F /tmp/commit-msg.txt
+          git push
+
+      - name: Run summary
+        if: always()
+        run: |
+          if [ -f capture/store/last_run.json ]; then
+            {
+              echo "### Capture run"
+              echo '```json'
+              cat capture/store/last_run.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
