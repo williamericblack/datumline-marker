@@ -1,0 +1,3128 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "3.1.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:219a3952b444]",
+    "name": "vantreeseba"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.10.0",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.7.1",
+   "0.7.2",
+   "0.8.0",
+   "0.9.0",
+   "1.0.0",
+   "2.0.0",
+   "2.1.0",
+   "2.2.0",
+   "2.3.0",
+   "2.4.0",
+   "2.4.1",
+   "2.4.2",
+   "2.4.3",
+   "2.4.4",
+   "2.5.0",
+   "2.6.0",
+   "3.0.0",
+   "3.1.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@cubicecho/agent-mcp-pool",
+  "_rev": "27-f941ebf79f632a46cd2582ac888d2c0b",
+  "author": {
+   "email": "[redacted-email:219a3952b444]",
+   "name": "Benjamin Van Treese"
+  },
+  "bugs": {
+   "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+  },
+  "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+  "dist-tags": {
+   "latest": "3.1.0"
+  },
+  "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "openai",
+   "agent",
+   "tool-calling",
+   "stdio",
+   "streamable-http",
+   "connection-pool",
+   "typescript"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:219a3952b444]",
+    "name": "vantreeseba"
+   }
+  ],
+  "name": "@cubicecho/agent-mcp-pool",
+  "readme": "# @cubicecho/agent-mcp-pool\n\nA pool of long-lived Model Context Protocol clients, exposing every connected server's tools to\nan OpenAI-compatible agent loop as `<slug>__<tool name>`.\n\nConnections are long-lived and shared across runs: a stdio server is a child process, and\nspawning one per run would cost more than the run.\n\n## Install\n\n```sh\nnpm install @cubicecho/agent-mcp-pool @modelcontextprotocol/sdk\n```\n\n`@modelcontextprotocol/sdk` (`>=1.30`) is the one peer dependency, because `client()` hands back\nthe SDK's own `Client` and an `instanceof` against a second copy in the tree means nothing.\n`openai` is **not** one: `tools()` returns `ToolDefinition`, which is declared here and assignable\nto OpenAI's `ChatCompletionTool` because TypeScript is structural. It was a required peer for two\ntype positions that are erased at compile time, so a consumer proxying MCP and never calling a\nmodel installed 24 MB to satisfy them. ESM only, Node >=22.\n\n## The seam\n\nThe two servers this came from both did `import { db }` and read an `mcp_servers` table. The\npool now asks for its rows instead:\n\n```ts\nimport { McpPool } from \"@cubicecho/agent-mcp-pool\";\n\nexport const mcp = new McpPool({\n  load: () => db.select().from(mcpServers),\n  clientName: \"task-server\",\n  clientVersion: SERVER_VERSION,\n});\n```\n\n`clientName` and `clientVersion` are the `clientInfo` of the MCP handshake \u2014 the whole of what a\ndialled server learns about who is calling it, and so what it logs, gates a behaviour on, or\nquotes back in a support channel. The version defaults to this package's own, read from its\nmanifest; set it beside the name, since a name that is yours next to a version that is the\npool's tells the server something untrue.\n\nA row is one of two shapes, discriminated on `transport`, and carries only its own arm's fields:\n\n```ts\n{ id: \"git\",  label: \"Git\",  enabled: true, transport: \"stdio\", command: \"uvx\", args: [\"mcp-server-git\"] }\n{ id: \"docs\", label: \"Docs\", enabled: true, transport: \"http\",  url: \"https://mcp.example.com/mcp\" }\n```\n\n`StdioServerConfig` and `HttpServerConfig` are both exported; `McpServerConfig` is their union.\nFlat, an http row still had to write `command: \"\"`, `args: null`, `env: null` \u2014 three fields\nnothing would ever read, and a `command` that reads as configured rather than absent \u2014 while a\nstdio row with no `command` at all compiled, and `createTransport` could only refuse it at runtime,\none connect too late. **Migrating:** a row written as an object *literal* that supplies the other\narm's fields now fails excess-property checking; one that arrives from a typed variable \u2014 a Drizzle\nselect, a parsed config \u2014 is unaffected. The fix is deleting the fields that row's transport never\nused.\n\nA stdio server may also name a `cwd`; absent, it inherits this process's. Several servers resolve\nrelative paths \u2014 a filesystem root, a sqlite file \u2014 against their working directory rather than\nagainst an argument, and it counts as part of the connection: editing it restarts the child.\n\n`sync(configs?)` reconciles against what it is given, or against `load` when given nothing.\n`syncSoon()` debounces a reconcile past a transaction commit, and `flush()` pays one off early\nfor a reader that would otherwise be shown the pool as it stood before its own write.\n\n`load` is optional: a consumer that owns its own configuration passes the rows every time instead.\nOn such a pool, a `sync()` or `reconnect(id)` with no configs has nothing to reconcile against and\nis refused with a `no-configs` `McpPoolError` rather than treated as an empty set \u2014 reconciling\nagainst nothing closes and forgets every server, and doing that because an argument was left off\nis the most destructive thing this API could do by accident. `sync([])` still closes everything,\nfrom a caller who said so.\n\n## State\n\n`state()` reports every configured server **in the order it was configured**, and hands back the\nrow it was configured from:\n\n```ts\nfor (const { config, status, error, tools, pid, startedAt, instructions } of mcp.state()) {\n  // config is a copy of the row you passed in, minus its credentials;\n  // everything beside it is what the pool made of it, or what the server said for itself\n}\n```\n\nBoth halves exist so a consumer does not have to keep its own copy of the rows beside the pool's.\nA UI that draws the edit form and the connection state as one line needs the row, and a shadow\nmap of the same rows goes stale the moment anything reconciles without going through it \u2014 which\n`syncSoon()` and a `load`-driven `sync()` both do. The order is the caller's array rather than\n`Map` insertion order for the same reason: entries are created by parallel connects, so without\nthis the operator's list reorders itself according to which child started quickest.\n\n`id`, `slug` and `label` stay alongside `config` \u2014 those are the *effective* values the pool\nactually used.\n\nEach tool in `state().tools` carries both of its names: `name` is the server's own, `qualified` is\n`<slug>__<name>` \u2014 what the model is offered and what `call()` takes. Both, because an operator\nreads the first and debugs with the second, and because `catalog()`'s identically shaped list\ncarries the *qualified* one under `name`. Two `{ name, description }` lists meaning different\nthings is a transposition waiting to happen, and the fix is to stop making the reader remember\nwhich is which.\n\n**`env` and `headers` are left out of it.** That UI is a browser, sending `state()` to it is the\nshortest way to draw that line, and for a real server those two fields are an API key and an\n`Authorization: Bearer` \u2014 so the default is the safe one, and the caller genuinely rendering the\nedit form *server-side* is the one that asks:\n\n```ts\nmcp.state({ secrets: true }); // config carries env and headers again\n```\n\n`config` is a **copy** rather than the row itself. A caller that holds its rows and edits one in\nplace used to get a pool that never reconnected \u2014 `sameConnection` was being asked whether a row\ndiffered from itself \u2014 while `state()` reported the edit as though the child had been restarted\nfor it.\n\n`pid` and `startedAt` describe the connection rather than the configuration, so both are absent\nunless one is up, and `pid` over http, which has no child. They are what make `ready` mean\nsomething concrete to an operator: a pid finds a wedged child in `ps`, and a start time is how a\nserver that is quietly crash-looping is spotted, since `status` reads `ready` either side of a\nrestart.\n\n`instructions` and `capabilities` are the rest of what `initialize` returned, and are absent for\nthe same reason \u2014 a server that is not connected has no handshake to report:\n\n```ts\nconst guidance = mcp\n  .state()\n  .flatMap(({ label, instructions }) => (instructions ? [`## ${label}\\n${instructions}`] : []))\n  .join(\"\\n\\n\"); // straight into a system prompt, synchronously, spawning nothing\n```\n\n`instructions` is what a server says about itself for a model to read \u2014 the things a tool\ndescription has no room for, like \"resolve the library id before querying docs\" \u2014 so a system\nprompt is where it belongs. It is reported here rather than left to `client()` because that door\n*dials*: it connects an idle server by design, so under `lazy`, or with `idleTimeoutMs` set and a\nserver just reaped, building a prompt would spawn children. `capabilities` is what says whether\n`resources/list` or `prompts/list` on a `client()` is worth attempting at all; without it the\nchoice is an error round trip per server per surface, or not offering the surface. Both are\nreported under `indexTools: false` as well, unlike `tools` \u2014 they were already in hand, and the\nconsumer that turned indexing off is the one proxying the protocol.\n\n## Scope\n\n`tools`, `catalog` and `call` all take an optional set of server ids. **Absent means every\nconnected server; empty means none of them** \u2014 the two must not collapse, because \"this agent\nhas no servers linked\" is a real and correct state. `call` re-checks the scope rather than\ntrusting the definitions the caller was given: a model that has seen a tool name once will call\nit again from memory.\n\n**A scoped `call` does not start a server the run cannot reach.** A name the index cannot answer\nwakes the servers whose slug could have produced it \u2014 a cold one under `lazy`, a crashed one past\nits backoff \u2014 and the run's scope gates that too, not only the refusal after it. Otherwise a run\nscoped to one server spawned another's child, drained its tool list, and *then* said no server\noffers that tool: a process started for a run that may not reach it, and a latency difference that\nanswers the question the shared message exists to leave unanswered.\n\n`tools` names both of its own:\n\n```ts\npool.tools({ names: [\"echo__add\"], servers: [agent.serverId] });\n```\n\n`tools(names, servers)` was two collections of strings in an order nothing could check, so a\ntransposition was not a type error \u2014 and its answer is an empty array, which is also the right\nanswer for a run scoped to servers that offer nothing. A consumer adopting the pool swapped them,\nand the migration compiled, connected and offered its model no tools at all. `catalog(servers)`\nstays positional: it has no two arguments that could be confused for each other. `call` takes\nits scope as the third argument as before, or an object when it needs more:\n\n```ts\npool.call(\"echo__add\", input, { servers, signal, timeoutMs: 5000 });\n```\n\n## Hooks\n\nA row can carry `hooks`: tool calls of its own that the host makes at points in a session, the way\nClaude Code's hooks run at SessionStart or Stop \u2014 except a hook here is an MCP tool call and never\na command. Rows are edited from UIs, and a command hook would make \"can edit the server list\" the\nsame permission as \"can run anything on the host\".\n\nThe case it was written for is memory: a server that recalls before every turn and remembers\nafter it, without the model having to decide to call either.\n\n```ts\nconst memory = {\n  id: \"zeromem\",\n  label: \"Memory\",\n  // ...transport fields...\n  // The model is not offered these; hooks may still call them.\n  hiddenTools: [\"zeromem_remember\", \"zeromem_forget_session\"],\n  hooks: [\n    {\n      id: \"recall\", on: \"beforeTurn\", tool: \"zeromem_recall\", inject: true, maxTokens: 800,\n      args: { query: \"{{prompt}}\", exclude_session: \"app:{{session.id}}\", format: \"text\" },\n    },\n    {\n      id: \"remember\", on: \"afterTurn\", tool: \"zeromem_remember\",\n      args: { session_id: \"app:{{session.id}}\", turns: \"{{turn.messages}}\" },\n    },\n  ],\n};\n\n// Before the request:\nconst outcomes = await pool.runHooks(\"beforeTurn\", { session: { id }, prompt }, { signal, onNotice });\nconst { text } = contextBlocks(outcomes); // <context source=\"Memory\">\u2026</context>, or \"\"\n\n// After the reply \u2014 not awaited, and not on the turn's signal:\nvoid pool.runHooks(\"afterTurn\", { session: { id }, prompt, reply, turn: { index, messages } });\n```\n\nThe pool never fires a hook itself \u2014 only the host knows when a turn starts. It supplies the runner,\nso every host runs the same rows the same way.\n\n| Event | Runs | Context beyond `session.id`, `host`, `now`, `vars.*` | `inject` |\n|---|---|---|---|\n| `sessionStart` | before a session's first turn | `prompt` | yes |\n| `beforeTurn` | before each turn's request | `prompt`, `turn.index` | yes |\n| `afterTurn` | once a turn has its reply | `prompt`, `reply`, `turn.index`, `turn.messages` | no |\n| `beforeCompact` | before old messages are summarised away | `compacting`, `range.from`, `range.through` | no |\n| `sessionEnd` | when a run that ends, ends | `status`, `reply` | no |\n| `sessionDelete` | when the host deletes a session | \u2014 | no |\n\n- **Templates.** A string that is exactly `\"{{path}}\"` becomes the value itself, so an array or a\n  number goes through as one. `{{path}}` inside a longer string is interpolated as text. A path the\n  context has no value for skips the hook: a `session_id` sent as `\"app:\"` would file a turn under\n  the wrong session.\n- **Validation.** `validateHooks(row.hooks)` reports an unknown event, a placeholder the event\n  does not offer, `inject` on an event that runs too late, and duplicate ids. Run it when the row is\n  saved.\n- **Never rejects.** A failed call, a timeout, an abort and a skipped hook each come back as an\n  outcome with `ok: false`, and are passed to `onNotice`. A memory server that is down costs the\n  turn its recall, not the turn.\n- **At once, in order.** An event's hooks run in parallel, and their outcomes come back in\n  configuration order.\n- **Bounded.** A hook gets its `timeoutMs`. Otherwise it gets 3s on `sessionStart` and `beforeTurn`,\n  because the user is waiting on those, and the SDK's timeout everywhere else. The bound covers\n  waking a server that is down as well as the request itself.\n- **Read and add only.** A hook cannot veto a turn or rewrite it. What it returns reaches the model\n  only through `contextBlocks`. That function caps each block at its hook's `maxTokens` (1000 by\n  default) and the total at 2000. Its `injected` lists each hook that made it in, with its `tokens`\n  and its `text` exactly as it went into the block \u2014 trimmed, cut with `\u2026` if over a cap, without\n  the wrapper \u2014 for a host that shows the user what each hook added.\n\n`hiddenTools` is the other half. A hidden tool is left out of `tools()` and `catalog()`, and\n`call()` refuses it as one that does not exist, unless the caller passes `{ hidden: true }`. Hooks\npass it. `state()` still reports hidden tools, marked `hidden`, so a form can offer to unhide them.\nBoth fields are read at call time, so an edit applies without a reconnect.\n\n## Lifecycle\n\nEager and long-lived by default: `sync()` connects every enabled server and holds the connection,\nbecause for an agent loop spawning one child per run costs more than the run.\n\nA gateway has the opposite pressure \u2014 dozens of installed servers, most idle most of the time \u2014\nso the lifecycle is a policy rather than a fixed behaviour:\n\n```ts\nnew McpPool({\n  load,\n  lazy: true,             // sync() registers entries; the child waits for a use\n  idleTimeoutMs: 300_000, // close a server after five minutes without one\n});\n```\n\nA registered-but-unconnected server sits at `idle`, which is neither `disabled` (switched off) nor\n`error` (tried, failed, waiting out a backoff). `call()` and `client()` start it; **`tools()` and\n`catalog()` do not**, so a cold server offers nothing until something has used it. Listing a cold\nserver's tools without spawning it needs a cached last-known tool list, which is its own change.\n\n`idleTimeoutMs` resets on every use, and `McpServerConfig.idleTimeoutMs` overrides it per server \u2014\n`0` opts one out entirely. A reap is a **success** path, not a crash: the server goes back to\n`idle` with no error and no backoff, so the next call reconnects immediately rather than waiting\nout a penalty for something that did not go wrong. Both options absent is exactly today's\nbehaviour.\n\nA use that lands after the clock has already fired keeps the server: the reap runs on the\nreconcile queue, and it checks that the timer it was armed with is still the one the server is\nwaiting on. Cancelling is not enough on its own \u2014 `clearTimeout` on a timer that has already fired\ndoes nothing \u2014 so without that check a call arriving in the window between the fire and the queued\nclose had its client closed underneath it, and the model was handed a transport error from a server\nthat was in use.\n\n### Stopping and restarting one server\n\n`shutdown()` is every server and forgets them, and `sync()` only closes what the configs dropped.\nOne server on its own is `stop()` and `reconnect()`:\n\n```ts\nawait pool.stop(id);      // close the child, keep the row: `idle`, no error, no backoff\nawait pool.reconnect(id); // close it and dial again, changed or not\n```\n\n`stop()` is the reap path reached by a person instead of a clock, which is why it lands on `idle`\nrather than a status of its own: `idle` already means registered, no child, nothing wrong. Nothing\nstands between a stopped server and the next `call()` or `client()`, including the backoff a crash\nwould have armed \u2014 so \"restart this wedged server\" is a `stop()` and then a use, and an operator\nuninstalling a server can close its child before the row leaves disk rather than racing a live\nprocess holding files open. It stays stopped in the meantime: `reconcile` steps over an `idle`\nentry whether or not the pool is lazy, so the next write to the server table will not dial it.\n\n`reconnect()` is the unconditional one, `lazy` included. It used to drop the entry and let the\nreconcile rebuild it, and a lazy reconcile registers an entry and waits for a use \u2014 so on a lazy\npool it *stopped* the server it was asked to restart, and the caller found out on whichever later\ncall spawned a child. Which of the two things the method did depended on a constructor flag set\nsomewhere else entirely; now the two pools mean the same by it. A disabled row is still not\nstarted: it is off for a reason a reconnect does not overrule.\n\n### Not indexing at all\n\nThe drain that fills the index is the pool doing its job for an agent loop, and pure cost for a\ngateway that proxies `tools/list` through from the client that asked. `indexTools: false` skips it:\n\n```ts\nnew McpPool({ load, lazy: true, indexTools: false });\n```\n\nWhat that buys is a round trip per page off the first request that spawns a server \u2014 a lazy\ngateway pays the spawn on a user-facing request, and against a server that pages ten at a time the\nwalk is several more before the request it actually made is even sent. It also stops holding a\nsecond copy of every tool for nobody, and stops a server that answers `initialize` and then wedges\non `tools/list` from failing to connect at all: that one is still good for a `resources/read`.\n\nThe index is then empty for ever, so `tools()`, `catalog()` and `state().tools` are empty and\n`call()` refuses every name \u2014 without waking anything, since connecting a server could not index\nit either. `client()` is the surface that remains, and `probe()` is unaffected: a probe exists to\nreport what a config offers.\n\n## Past the agent surface\n\n`tools()` returns OpenAI definitions and `call()` returns a string, because a string is what goes\nback into a message array. A consumer that is proxying MCP rather than driving a model wants\nneither, and wants resources, prompts, subscriptions and logging that a string was never going to\ncarry. `client(id)` hands back the connected client:\n\n```ts\nconst { resources } = await (await pool.client(id)).listResources();\n```\n\n`listAllTools(client, options?)` is the other half a raw client needs: `tools/list` is paginated,\nthe page size is the **server's** choice rather than the caller's, and a tool left on page two is\nnot merely unlisted \u2014 it is absent from the index, so `call()` refuses it as one that does not\nexist. The pool and `probe()` both drain the cursor; a consumer driving the client itself wants\nthe same walk rather than one `listTools`. A `timeout` in `options` bounds that walk rather than\neach page of it, for the reason above; everything else in `options` is passed to every page.\n\n`resultText` is the flattening `call()` does, exported separately: MCP answers with a list of\ncontent blocks and a message array holds one string. A consumer driving the client itself and\nstill putting the answer in front of a model wants the same rule rather than its own. A block that\ncame with text arrives as that text, wherever that block keeps it, and what has none is *named*\nrather than dropped \u2014 so a model that asked for a screenshot is told it got one instead of being\nhanded an empty string and left to conclude the call failed:\n\n| Block | Flattened to |\n| --- | --- |\n| `text` | its `text` |\n| `resource`, text arm | the resource's own `text` \u2014 a file the server read is an answer, not a placeholder |\n| `resource`, blob arm | `[resource <uri> content]`, keeping the uri a follow-up call needs |\n| `resource_link` | `[resource_link <uri> \u2014 <name>: <description>]`, since the uri is what makes a link followable |\n| `image`, `audio`, anything else | `[<type> content]` |\n\nA result with no content at all but a `structuredContent` \u2014 what a server with an `outputSchema`\ntends to answer with \u2014 is flattened to that structure as JSON, rather than reaching the model as\n`call()`'s `\"(no output)\"`. Text blocks win where there are any: they are what the server wrote\nfor a reader.\n\nThe definitions `tools()` hands back are the pool's own objects rather than copies \u2014 the agent\nloop rebuilds its tool array every iteration, and the schema behind one cannot change without the\nconnection being torn down and remade \u2014 so they are **frozen**. An edit that would otherwise have\nsilently rewritten what every later run is offered fails at the edit instead. Shallow: `parameters`\nis the server's own schema, passed through untouched.\n\nEverything else the pool does applies unchanged \u2014 reconcile, the queue, crash detection with the\nstderr tail, backoff, retry-on-use. A server that is merely down is retried first, the same as\n`call()` does; a disabled one is refused, because off is not the same as out of scope. **It\nbypasses the scope check by construction:** that guard defends against a model calling a name it\nremembers, and a caller holding a server id is not a model.\n\n## Failure\n\nA stdio server is a child process, and child processes die. The pool watches for it: an\nunexpected close moves the server to `error`, drops its tools from the index so the model is not\noffered tools whose process is gone, and records what the child last wrote to **stderr** \u2014 which\nfor a server that failed to start is usually the only useful explanation (\"no module named\nmcp_server_git\" rather than \"MCP error -32000: Connection closed\").\n\nEvery refusal from `client()` and `call()` is an `McpPoolError` with a `code`, because the\nmessage alone cannot separate the two that matter most:\n\n```ts\ntry {\n  await pool.client(id);\n} catch (error) {\n  if (error instanceof McpPoolError) respond(status[error.code], error.detail);\n}\n```\n\n`unknown-server`, `disabled`, `backoff` (a failure recent enough that nothing was dialled \u2014 with\n`retryAt` for when one will be) and `connect-failed` (dialled just now, and could not \u2014 with the\nchild's stderr in `detail`). `call()` adds `unknown-tool` and `out-of-scope`, which deliberately\n**share their message**: a run must not learn that a server it was not scoped to exists. The\nmessages are unchanged from the plain `Error`s these replaced. `sync()` and `reconnect()` have one\nof their own, `no-configs` \u2014 see [the seam](#the-seam).\n\n`tool-error` is the odd one in the list: not a refusal from the pool at all, but the pool reporting\nthat the *server* ran the tool and the tool failed \u2014 MCP's `isError` result, whose text becomes the\nmessage. It was a plain `Error` for exactly that reason, and it carries a code anyway because it is\nthe one a caller most needs to tell from the others: retrying a `backoff` makes sense and retrying\na tool that rejected its arguments does not. The message is unchanged, so anything reading\n`.message` is unaffected.\n\nA failed server is then retried, which is the other half: `sync` leaves a *healthy* unchanged\nserver alone but treats a failed one as work to do, and `call` brings back a server that is\nmerely down rather than telling the model its tool does not exist. Both are held off by\n`crashBackoffMs` (5s), or a server that cannot start would be respawned on every write.\n\n## Timeouts\n\n`connectTimeoutMs` caps how long a server gets to answer `initialize` and `tools/list`. The SDK\nalready applies its own 60s, so this is not about an unbounded hang \u2014 it is about how long a boot\nis willing to stall. `sync` connects in parallel, but one wedged server still holds the whole\nreconcile open for the full timeout, so the number to pick is the one your startup can afford,\nnot the one a healthy server needs.\n\nUnset is the SDK's 60s, which is a ceiling rather than a budget.\n\nIt is one budget for the **whole connect**, not a fresh allowance per request: `initialize` and\nevery page of `tools/list` spend the same clock, and what is left when the handshake finishes is\nwhat the walk gets. Page size is the server's choice \u2014 a hundred-tool server answering ten at a\ntime is eleven requests \u2014 so a per-request bound would really have been `connectTimeoutMs \u00d7 (1 +\npages)`, which is not a number a startup budget can be picked from without knowing a server's page\ncount in advance. A connect that runs out fails as a timeout rather than keeping the pages it\nmanaged: a tool missing from the index is one `call()` refuses as a tool that does not exist, and\na short list is a wrong answer that looks right.\n\n`McpServerConfig.connectTimeoutMs` overrides it per server, the way `idleTimeoutMs` does, because\nconnect cost is a property of the server rather than of the pool:\n\n```ts\n{ id: \"git\",  command: \"node\", args: [\"./node_modules/.bin/git-mcp\"] } // up in milliseconds\n{ id: \"docs\", command: \"uvx\", args: [\"some-mcp-server@latest\"], connectTimeoutMs: 120_000 }\n```\n\n`uvx` on a cold cache resolves and downloads a package before it says anything. One pool-wide\nnumber has to be the maximum of those, which leaves the fast server with no useful bound \u2014 the\nwedged `node` child this option exists to catch still hangs for the two minutes the slow one\nlegitimately needs. `null` or absent is the pool's number, which is what every row that predates\nthe field says; unlike `idleTimeoutMs` there is no special `0`, which is simply a server given no\ntime at all.\n\nThe row is re-read on every reconcile, so a consumer whose configuration is hand-editable does not\nneed a restart to change it. An edited timeout does not bounce a running child \u2014 it is read at\nconnect time, so it applies to the next one.\n\n`callTimeoutMs` is the same idea for one `call()`, and for an agent loop it is the number most\nworth setting: unset, a tool call takes the SDK's 60s, which is most of a turn. It reads the same\nthree levels \u2014 `McpServerConfig.callTimeoutMs`, then the pool's, then the SDK's \u2014 for the same\nreason the connect one does: a filesystem read and a deep-research server that thinks for ninety\nseconds cannot share a number, and the number that accommodates both leaves the fast server\neffectively unbounded. Read at call time, so an edit applies to the next call without a reconnect.\n\n```ts\nnew McpPool({ load, callTimeoutMs: 30_000 });     // the pool's\n{ id: \"research\", url: \"...\", callTimeoutMs: 180_000 } // this server's\n```\n\nDeliberately *not* the SDK's `resetTimeoutOnProgress`: a long call that reports progress is still\ncut off at this number, because a bound a server can hold open indefinitely by talking is not a\nbound. A consumer that wants the other reading has `client()`.\n\n## Probing\n\nA config is easy to get subtly wrong, and finding out at 3am when the task runs is too late.\n`probe()` connects a config that may not be saved yet, lists its tools, and hangs up:\n\n```ts\nconst { ok, error, tools, instructions } = await mcp.probe(row); // { ok: false, error: \"no module named \u2026\" }\n```\n\n`instructions` is there for the same reason `tools` is: \"Test connection\" is where an operator\nfinds out what a row actually offers, and what its tools are *for* is the half a tool list does\nnot show. Empty where the server sent none, or where the dial never got that far.\n\nIt reports rather than throws, and `error` is the child's **stderr** where there is one \u2014 the same\ntail that makes a failed server diagnosable above, which is the whole difference between \"no\nmodule named mcp_server_git\" and \"MCP error -32000: Connection closed\".\n\nGoing through the pool is what binds the client identity, the `childEnv` policy and the timeout to\nwhatever this pool uses, so the probe dials the way the pool will. Every consumer that called the\nfree `probe()` wrote that wrapper itself, and one that bound them differently showed up only in a\nremote server's logs. The free function stays exported for a caller with no pool, and takes that\nidentity as one argument \u2014 `probe(row, \"my-gateway\")` for the name alone, or\n`probe(row, { name: \"my-gateway\", version: \"1.4.0\" })` for both. A `-probe` suffix is appended to\nwhichever name arrives, so a server's log tells a test connection apart from a real one.\n\n`probeTimeoutMs` overrides `connectTimeoutMs` for probes alone, defaulting to it. The two have\ndifferent audiences: a reconcile of thirty servers at boot can afford to be patient, and a person\nwho has just pressed \"Test connection\" cannot. A row's own `connectTimeoutMs` outranks both: a\nserver that needs two minutes to start needs them behind the button too, or the button reports a\nfailure for a server that works.\n\nThe free `probe()` reads that row too, having no pool to ask \u2014 `probe(row)` waits as long as the\nrow says. Its `timeoutMs` option outranks the row, since a number passed at the call site is a\ndecision about that one probe, and neither set leaves the SDK's 60s:\n\n```ts\nawait probe(row);                          // the row's connectTimeoutMs, else the SDK's 60s\nawait probe(row, \"my-gateway\", { timeoutMs: 5_000 }); // this probe, whatever the row says\n```\n\n## Logging\n\nThe pool logs \u2014 a server's tool count on connect, what it wrote on the way out, a name nothing\noffers \u2014 and by default it logs to `console`. A consumer wondering why MCP chatter is in its\nstdout wants `log`:\n\n```ts\nimport { McpPool, type PoolLog } from \"@cubicecho/agent-mcp-pool\";\n\nnew McpPool({ load, log: { info: logger.debug, error: logger.warn } });\n```\n\nBoth halves are optional, so `{}` is silence and `{ error: logger.warn }` keeps the failures and\ndrops the rest. `PoolLog` is exported so a consumer can declare one rather than infer it.\n\n## Notifications\n\nAnything a server sends that the SDK does not handle itself \u2014 `tools/list_changed`,\n`resources/list_changed`, `prompts/list_changed`, `resources/updated`, `logging/message` \u2014 is\ndropped unless someone is listening:\n\n```ts\nconst stop = pool.onNotification((id, notification) => {\n  if (notification.method === \"notifications/tools/list_changed\") reload(id);\n});\n```\n\nThe server id comes first because a listener hears from every server at once and the notification\ndoes not say where it came from. The handler is installed before each connect and reinstalled on\na respawn, so a `logging/message` sent during a server's own startup is not missed. An agent loop\ncan ignore all of this \u2014 the index is rebuilt on `sync()` \u2014 but a consumer relaying the protocol\nonward cannot.\n\n## The child's environment\n\nBy default a stdio child inherits **all** of `process.env`, which is how the two servers this\ncame from did it. That hands third-party code every secret this process was started with, so\n`childEnv` narrows it:\n\n```ts\nimport { McpPool, MINIMAL_CHILD_ENV } from \"@cubicecho/agent-mcp-pool\";\n\nnew McpPool({ load, childEnv: MINIMAL_CHILD_ENV });\n```\n\nThe permissive default is kept deliberately: narrowing breaks any server that quietly depends on\na variable the allowlist does not name, and the stderr tail above is what makes that diagnosable\nwhen it happens.\n\n## Naming\n\nTools are `<slug>__<tool name>`, capped at 64 characters for OpenAI's function-name limit, and\nresolved by whole-string lookup rather than by splitting on `__` \u2014 the split of a shortened name\nis a tool its server never had.\n\n`slug` is optional and defaults to `id`. A consumer whose ids are already namespace-shaped has\nnothing else to put in a slug column, and a second name beside such an id only gives an operator\na way to make the two disagree. `state()` reports the effective value, so a consumer that never\nset one still sees what its tools are called.\n\nA name that does not fit keeps its first 57 characters and spends the rest on `_` plus six hex\ndigits of a SHA-256 of the *whole* name. Truncating alone made two tools sharing a 64-character\nprefix collapse onto one key, so the second silently replaced the first and the model was offered\na name that dispatched to the wrong tool. Names that already fit are returned byte-for-byte, so\nnothing that was unambiguous before changes on the wire.\n\n`mcp-router` has a namespacing scheme that looks identical and is not: it splits names a *foreign*\nMCP client invented, longest-prefix-first, and applies the same scheme to resource URIs and prompt\nnames. The two cannot be shared \u2014 unify on this truncation and its resource URIs corrupt.\n\n## Where the merged behaviour came from\n\n- The reconcile queue (`running`, `queue`, `syncSoon`, `flush`) is `task_server`'s. Without it,\n  two syncs interleaving both spawn a child for the same edited server and the second orphans\n  the first \u2014 a live process with nothing holding a handle to close it. `kanban_server` still\n  has that race.\n- The per-run server scoping is `kanban_server`'s idea with `task_server`'s signature.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+  },
+  "time": {
+   "0.1.0": "2026-09-07T03:00:50.295Z",
+   "0.10.0": "2026-09-07T17:02:21.045Z",
+   "0.2.0": "2026-09-07T04:51:55.962Z",
+   "0.2.1": "2026-09-07T04:57:22.142Z",
+   "0.3.0": "2026-09-07T04:55:32.784Z",
+   "0.4.0": "2026-09-07T04:57:58.969Z",
+   "0.5.0": "2026-09-07T04:59:30.735Z",
+   "0.6.0": "2026-09-07T05:15:05.191Z",
+   "0.7.0": "2026-09-07T05:15:01.716Z",
+   "0.7.1": "2026-09-07T15:38:57.497Z",
+   "0.7.2": "2026-09-07T16:07:10.531Z",
+   "0.8.0": "2026-09-07T16:26:45.969Z",
+   "0.9.0": "2026-09-07T16:28:52.900Z",
+   "1.0.0": "2026-09-07T18:09:28.708Z",
+   "2.0.0": "2026-09-07T18:30:41.234Z",
+   "2.1.0": "2026-09-07T19:10:01.946Z",
+   "2.2.0": "2026-09-07T19:55:56.523Z",
+   "2.3.0": "2026-09-07T20:40:40.227Z",
+   "2.4.0": "2026-09-07T20:57:13.761Z",
+   "2.4.1": "2026-09-07T21:00:28.665Z",
+   "2.4.2": "2026-09-07T22:11:07.942Z",
+   "2.4.3": "2026-09-07T22:18:18.591Z",
+   "2.4.4": "2026-09-08T04:35:08.142Z",
+   "2.5.0": "2026-09-08T04:38:44.964Z",
+   "2.6.0": "2026-09-11T15:59:57.295Z",
+   "3.0.0": "2026-09-11T19:29:22.588Z",
+   "3.1.0": "2026-09-11T19:34:15.762Z",
+   "created": "2026-09-07T03:00:49.931Z",
+   "modified": "2026-09-11T19:34:16.229Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.1.0",
+    "_nodeVersion": "26.4.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.1.0_1788750050140_0.2419038679011578"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "vantreeseba"
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@semantic-release/changelog": "^7.0.0",
+     "@semantic-release/git": "^11.0.1",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "semantic-release": "^25.0.9",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-jzcoWJENzxztQqBIVou2d4IXIzzvRXktfu63Q6gUXldZNREy4ygSxgXMRnuByJGzlHRgOHA5+Yr4O1hqzZGdmQ==",
+     "shasum": "f6447013c63c95a5447f704519dd9f9dc3ac0c15",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDs9E4K3F/MxOGicyQIp7ma+3lU0EemX33tcFNEkakOFAIhAMgAqxjrVpyDysDr/d3SE+SJnp/4rM23Gb+44/kHSFZT"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.1.0.tgz",
+     "unpackedSize": 46056
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "734f74942528f9612211a289aecab049e1f40363",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.10.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.10.0_1788800540963_0.6972430805224699"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.10.0"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-WtWEPU/x/JZbVyNNpxgC4hpf7V+sIKLDCn87i5lJvoHuj0qfN9bb3IMtqnSiaicYaGtv3IjiA6dOduZztw1ljQ==",
+     "shasum": "b88e191f04951d6c5c5c7a1b16c36816a9424e2d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDydPJh0IY+D8yAeYdp8x4qaMe+VVnu9GRGSSU7AJgNaAIhAOYYY2j7hyk76KlT44CXc1h5/ZdUtzAg0iJUo3e1vH2v"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDcn/wG0bBo8RqzuwFx+L/piKnRH4YwnkwwV8nShVs6vQIgQK4GP8GG2fK/TmS4Ap8PK7nSypqLIXrnWNNzUKVh9ew="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.10.0.tgz",
+     "unpackedSize": 108516
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "426e0012abcac42d35abac96bd42f488fd698cc8",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.2.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.2.0_1788756715877_0.48104408966522794"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.2.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-y0ugx893CNqyDcJMM5E50Fx8MDfwzG9xkpw/WrDjlZL6h0NJXsbD9YbJWHEQDc9LLYhEKK8V3ie4GwbSMrGz1g==",
+     "shasum": "4b35a85410b25b2215cc35edcee5afbc3e90f92f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCXaiMvnu8Q+3C5ohjVb7GjKhPGHDjRw/wPztGUydy9EwIhAPtSgO4WEcuKBDm7xwwY94Ncqjsqe7xgnIKKDwDjkyyA"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCE7KlYFQuwmsrdwAff931m05gGkwJC3MRTSS7AqyrXUgIhAPKqsdVSXI/qdoEtg/hAwSsQxVupx455E01WK/1iu401"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.2.0.tgz",
+     "unpackedSize": 51458
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a69b711d084710c3b2576c35fe93631d76a1e506",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.2.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.2.1_1788757042050_0.8353083384116924"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.2.1"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-J+OJ5RftVm9pP9QPqjjm16mt1Be/a2OpZhdvTwuixfYMOoyMbZP24XX4dLcKnUiH+S6LQ+Jt3InypY/9V8Qhyw==",
+     "shasum": "9269a1a427c4f95431c9104e7de146ce0a314390",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCyCmZNu3/aTNuVwvWfXYEcOa0kG6N0hsba1Sr+OFIWcQIgLxbsMlSdbcy8/CVPae7IzytXZL6dvRr34LcUyojk86M="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEdG55nxKstisHIwFGvipNP1Bvn5haZZUMdKsexWfrewAiBbWS6gMpYmApfvKcmu9xk1svhVNkk8cGKPyCxeRbxuZA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.2.1.tgz",
+     "unpackedSize": 52490
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f352411f2a74fecf1ea7ebdc0bab21e48278e16d",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.3.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.3.0_1788756932699_0.16164525992098677"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.3.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-QWYd9jXLANIkmk/4UGPCa8g7dcqDnrMfEIvgm7IJjSsRsUxt3JRLITTBpy4NafPAT1z9vxikomP66Oi7pc827g==",
+     "shasum": "d73dcb02ef3e9ed3ba14c2684a64cb2c9f39130c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGVEUMA5w22HMYZW28S3cMFjIyr6bWeDrb4RzEJRQTYiAiEAgh6FnIQxqqGPe3rxuA9Q7CdjNX29GC2IdiHel67ggMM="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAlarApj+uteudMs1xFOooZeEAXFB5qhki1jDAmnlkR5AiEA+rAxgGUq8fh1f9krlDgl9pGsxhUYpKCblqYCp/ft8fM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.3.0.tgz",
+     "unpackedSize": 58098
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "45e9e39e32ffc9b93628de811aa20106a96fe54a",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.4.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.4.0_1788757078870_0.840433815459886"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.4.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-anv1DTbbnjIY0LPly7BQppdYp8VxNTlGxWUTOy6uARa/7CmI4hvuE9tQ6LZSHY9G+sQGQZwk05xc8Z61KqkDwA==",
+     "shasum": "8ea50d5e801eb4c89780d3264e38408d188da754",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD1cmmhym+PA0rO6Efv+cGr2DUr4Pb4MvbznrRcqlCaiQIhAP7YMvFfeOMQtAscBEp/w1EGVgC3pEapssV8AMUekgg8"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7HQSrPuQLdYzhu1rnPIrunL9FarnF70i81fHmbEPNFgIgF3ivwj3UtbObJSRen0j2NzD97cVLm2ZSidZ9hr6nkhg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.4.0.tgz",
+     "unpackedSize": 62363
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3375e22d32b36e0a6830f52d7f8dc9e2614195a2",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.5.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.5.0_1788757170651_0.9181285175128757"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.5.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-ReaMwbeUAm906iTnw9yXEUasCmFEtlbxEHlYZXgGrEQ0/gW+Pd9zo2JLKWxNAtCY/HUnVdnNpdXhuV8hZf/Byw==",
+     "shasum": "52168dd9e54114ac3f847eaf3d0fcebc0a201f2e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCjNs7iV1XaATXlHLdnoBCAqs06SYdRYwhZ8G5Dr5LnYAIgTR/xe+EJotdk8SGMIPw7dfhe1GzzkdgXVZibVcdDiyw="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEmq+6ZO4zRmRXekn7cZeCCALfXAvojPWocmGm0VhhENAiEAo5bM9p1Mnil1eAjntpQKKu5e4uz68tkXor3iFj/PY4g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.5.0.tgz",
+     "unpackedSize": 72347
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "67077b09835347c4d2e826b77cb5ff3fbbbe72c0",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.6.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.6.0_1788758105104_0.9831413260435211"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.6.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-+TJJ5gn1HhQAvA2TjyhlTtf3AzWqfVUEi+VwnJAmTCO9GumaBtERo6R2j7U96zyUl2xsprvgzWgDdh+rtjWA9Q==",
+     "shasum": "5c227ecbdca970cb9c3453d57c26d8d8bfb52007",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD+T5UElMX+UFvGY1p34wFZgkF9JF2qrsCUBYFHD9EuIwIgfAhyK0KYjjbyLRGX4k0sorGm4l1ebyYbKRs36BbGIMQ="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBECdTkKKFFYY2O+mvPeUQ6urmJhrdEpvmurksVccvr/AiAmrl8M2WcY53cgVQ5Ug6Pma0VBzBoWaA0/a2qdXr0efg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.6.0.tgz",
+     "unpackedSize": 74363
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "8af075e2bc1fa34d91478e72e0fc9c7f743925bf",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.7.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.7.0_1788758101577_0.28818148399443055"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.7.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-k24d9/0MDv88CVISLAwOzxv9TYWkUoEq/qoOpHRkMaaZtK5BSHlmSP3Ew0ef79IoEljWEEGkfhtreXQjWDuUlQ==",
+     "shasum": "31febd9f85be55e5e1bdb620cf37ca54862462f6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCDBhOH08UEZgiqyNOBNu5BAodll9H0ChXO51b7xYmepQIgKfMtF6e2OQb/G5EC3vSiOyua4pUwd1tCcwmaVg9FzCE="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxwsF+ziq1f8nMYVcsrARaWxKK2FBdC9YfGvXjubRiggIhAKxBC9BpbdKmKoPjvBNVZdyLjMf7IBVVA2lDzvT5R2Z2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.7.0.tgz",
+     "unpackedSize": 78926
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5d9fb38b692974d52fda44dda1b49f692e09e0ae",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.7.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.7.1_1788795537409_0.7777878779902081"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.7.1"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-dC5b7DzIWyuvGl0VdWLBa8wHDepkGfS400u2V2FR0ZYgbqfKwV13zGe3ZPJcxCwsskdmhtZktIo4Pbw0vhKwNg==",
+     "shasum": "a201fca75fdf0a25f3ff26bc6fe1aaaca1ecf342",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH9ei3dRiAYaGwKbLo+yUhHMyfkJmSgGhS3QzDPR/+eJAiEAjKMd+pubAqvZ6+21ILxJeXEYUCtk60fOT7YOzM78D3c="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCXuLbhdJMnci9Z+1th+4etez1JOGZnfD027JALTvRMrQIgWs780UvLcG6khQ6joo8sz3ARIadKxnPlZrufZOAXwiI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.7.1.tgz",
+     "unpackedSize": 79881
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "827219f69fbed0d27dd3581e32d1e5f4c0953675",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.7.1"
+   },
+   "0.7.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.7.2",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.7.2_1788797230448_0.3878983382727972"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.7.2"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-pt01ynvnZV3jY+Vrwj7GvONJmsai+NA8bGlNqyk2HMZLIiaTHFI8Uy+JpcznARbuNfnzM+8bZvvE0TYly+RCDA==",
+     "shasum": "643ca9a1883ea0e579ad6322f516f32a41955229",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBKPpKXsCuTqdU+8izoIxK7UDxT8TMb6symaZ675rSh8AiBJ60+Hfo4SUqXjk8kYLypqpE7nvj0w87U6EhPGBowjRg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEbdZYEpxFeF1jkQPK1o42Fwc47udD3TN0pEYJC5eiXnAiEAijMZfALlga3myd5OP7zvZIT8YrWbKYjpUTp0tfxV/kw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.7.2.tgz",
+     "unpackedSize": 74267
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1a062a1aa93c087ad7585bde0378c6942aba1318",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.7.2"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.8.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.8.0_1788798405886_0.5924947857537994"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.8.0"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-YpWwJc8y9NoXdRf485Ur0J9YjRB7ewlIucimmntaoaLQ6yHPAoi1CEcR0qE6W4y2RinxDDYZInV5MwO+WR23kg==",
+     "shasum": "98ae59d8a8d40d96bb1ba25c4ef03cff190c92cb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHw+0n9vdH9ILiGI5wp0heiXrCTqMfdUiNl+dHAvTLrwAiBc5CgHVuqtRn5nhkd8vH5JXLf8e3KsFaz9ky4zWJqF1Q=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDpovqakb7smUUdr455WNrwFQ5TQR3QqcBvU+HdVp2iIAIgC+xWo4XkBbYLGqYNHlTVv/DwHk9FG+Q1HtiSuUPOLes="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.8.0.tgz",
+     "unpackedSize": 78941
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3f0611e2e19b3b9161ed73154e6bd2481b1932ea",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@0.9.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_0.9.0_1788798532815_0.30263504663679064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@0.9.0"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-Y8sY7pvgsgfnb2O1kc1BV7VIJ0iGeUWMRjnzoyR2/8Fq2mn8eaE1zwQ+ad8rzIOoPqxT1PdX/Rn2GPVjcfeOYQ==",
+     "shasum": "ceda56aa4e73d5c4b4f0c832190bb058ccf871b6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD7XsBi8DKAYwei27s+8HoaZS0q/gngLF4gsj+gnoWEzAIhAImeqFmrRsZ5KvkZ3FqExxG5n9ISRweAxs4XEMh/bGn1"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCN4R6R5/gAgEQJzK+FrAtP2BRLNnstm/3SkHcrxpOgiQIhAKH+n0tyxU9H03zfmlj8G4qjL5Ts62zNFJGNwy/SUdp8"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-0.9.0.tgz",
+     "unpackedSize": 81111
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f910dfa3434264a5c3047a7f785bce42c6f35a2a",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30",
+     "openai": ">=6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@1.0.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_1.0.0_1788804568635_0.25056055552337164"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@1.0.0"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-XEW59z2Tl49t9hddrFWiXyH/j7xiThMxfzaMNvmukxZk3iG7T2sF0byJwoBP2vy1SfU5tEYzPc7LHb40fTTN0g==",
+     "shasum": "840f892f56d12c42c9aa2e88ab12beb19e98d67a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCucw8Tm1Yuz6w10MKTsPNTHrpQyQHdbrWMwReoLM3z2AIhAJqszv/HsngTEHHr1g6LoyhAe3bziUOMlpFHdd0WljQI"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFtO4IbE0Gs5wfsEBrZcCDDvQhKoQVsKbbOxP4px5DFbAiA0TZbEh5lROuf4cY03OCaZBzg+2WZovVaqJSw8xVHAfg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-1.0.0.tgz",
+     "unpackedSize": 128493
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "2174c6e486e90a62d8a054ae188eb96cb5489b76",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.0.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.0.0_1788805841137_0.7410288560469052"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.0.0"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-AdN/HYzzXYZu4NmDdAEv2/gU7xcIoeG1Sg680STyMg8uo90kz1Q41WuRGiOoIkw3rYT6bEqMn9bZG0aKl1Sk2w==",
+     "shasum": "57a6770c29d41f581f3123f7bbcbc1f1ecf2ad64",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE+TRZNFWjCxfjhSpiNP0UXbIZB5t9CWKXlwMwdaahvhAiBvg+diNFHxI6aLDXSgyg1VjMYz4ntUfla/rwVbxWH4Xw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCsjJd052Uf9dCicHTqic+4CVH2SWjhC7PQ/+U/SUjZagIhANdnCBqvHYYLhr1AQv1guYI8UayY5T74/0A1zDy8Vo5+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.0.0.tgz",
+     "unpackedSize": 129891
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "09e634dd74d6b1cf9537f708f17cd527a46a5acf",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.0.0"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.1.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.1.0_1788808201848_0.4144388755820154"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.1.0"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-Rcp6pOeh2TUWdHLMZYDhOeo9++MAR+3pq2iKh//juEXTC+XSYqrP4mAfSI4vAWxJEM/1EgK/3jrxgK6GX3lXuQ==",
+     "shasum": "6ebdf322edf4de322166bb5ec7ba59c275610205",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEB6/gVl2FUlU1A074oIsMOIbUR7ZypSsP0SeL7btnElAiAVjcrSgrvQus/dUXliTaFIfY6SYZDtOWCLnGZ7Rg5+mQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBLsYDWG2gmQbobANzNazKkbbJLPBOqJNyOSlSARb92KAiAmxkGjjA69DsZaaD52qgl0Id7KrjAW2wlZT3lT3JnDCw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.1.0.tgz",
+     "unpackedSize": 132861
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "fe66e35d1eabd98ee5eccee3ac106152e8f7240e",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.1.0"
+   },
+   "2.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.2.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.2.0_1788810956401_0.14048784210886023"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.2.0"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-gUxN1R6xrM0Jkq6R0/a8VIsmlYA1YY0e32J/Gswq2VZfZ1aCvgtw5FRfP4FehPQA5u/OI8Cp1fQ9PBkvDIj76g==",
+     "shasum": "381e1c5e145bd042c00d3c64e21f4ba748d40abc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTh0iZVCgntmXHH+a/k0vtwO6Pgci5ptt3P5tRpl7zkAIhAMB8aqwMC5gRjq1Vaic1lxKmKLhs0i8GR2XFIqmPAkdm"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBHxc2YYLwpxAWWZV8hVCgcEU/mlBuTS8+bvkVF1bkAVAiBM8CYnxxF9PvqIs7tmrnT5VeQMspCZyDoZaN5j4MAH2w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.2.0.tgz",
+     "unpackedSize": 139033
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "38b1ceaf67045a7bc3b1ed6fde05b5b1f8452d1f",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.2.0"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.3.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.3.0_1788813640141_0.9950456197443915"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.3.0"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-KyxVLjJdyeV4HAohqjvsFLSe5vJMKNHqjbWld/zi09H0EoquPvAJ+WiA+KYXNQCdFj1uEvrTA9kry1Vup1kViw==",
+     "shasum": "e8f34fb1c34728d152acea94ac824f8c7256082b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCsGZEphvv9hmdXbiH93sJIerkhr3jR8iawjIwgOLa1hwIgenK7BQIy2/XTIymZtUrWbtjqLfE0VhSZ/85cdIUb9IA="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB9bPFOW9HA/+WpC7VjRKmiL5bGh3L/dcqnkUeyh5UxiAiAddBnQRgYqfbt6gYfHOTCl7yL8NOO96qeYaXVAs98Apw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.3.0.tgz",
+     "unpackedSize": 144334
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4b8244fc922bf46189c5c7b8d7428cd23f371d47",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.3.0"
+   },
+   "2.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.4.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.4.0_1788814633676_0.633703304416495"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.4.0"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-pIbRSCUAe64YpC7EGbRCD7WXdJk8XxvBArsKIZJd9Hm4c5cvz/WEIFuEZiCypKkmMsSIjl1t40UmqlIcmWeB2A==",
+     "shasum": "1dc0b0d761ba11f8132935d4fc36f7ff48b11514",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFPdHDJmVGGCWBawImdM1DV0tEmkCgNGoeGv/A2JfB4RAiAhnFchyG+FcAylL22kvPBY1oZYYs4uXgsTXYClrzgHgw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZOG8NTy6zaAEoRZn+l3tTq1OCklPjJKODFUCyXO+gSQIhAJ2glc+X4UJh3+snpPP+gXrmHZL9Y/ZaDu8+gZusw2Cp"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.4.0.tgz",
+     "unpackedSize": 148174
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "911c788102c39ee682b4a6135ac6fa608c7aad40",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.0"
+   },
+   "2.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.4.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.4.1_1788814828559_0.848382583145866"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.4.1"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-HZPfItXILByTVuyI7LtRPcEWFsHc15o3w6oebF4idPY08k1unAoszAnhBTvk3ilR4sZYYkPo53cVjr/KY696sQ==",
+     "shasum": "8cfaeafcc8ca13c7c2c190e8270d6c5b6ef46a1f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDs4ZN87WI0QKzWxwmBI3+iCafzJo0Z61j5uBfaJn6+YQIhALx+kgUUG2cOTrpw872f8ct7aeg7CmkEMpNt6mgqqpWo"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAQNRkoICxQgw7O21OEKR1vpFXvpqYZ5JgSpeA2ruN2rAiEAzz1laGwm4GiIRitjXEzHpqREdiUWQZcSEybjMc8Ksns="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.4.1.tgz",
+     "unpackedSize": 153068
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "72708c7ebc7566e6037c9e216af7985b1fac7351",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.1"
+   },
+   "2.4.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.4.2",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.4.2_1788819067834_0.2124631381253388"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.4.2"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-jpGxvUT4or/XvdbpUV5Rru4SfMDcKzqWvDVzpLI1CqsQxdSGER2SsLXONwIpTAVISGLpJlWsLjvp5FrLlgZHog==",
+     "shasum": "a270062c2b6dce44e956fc0263e586c70b9061ff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAyvmS7Fd7hqqqGUv4GFbtF3dl8ez3KWuKAhVAyxkeJnAiBUCvHDL+inQFG0FHaSYuo1qUwLqQcXJGdeCVab62tqWA=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFoh5CY7/UPqkl89jOWyrs3shy8MPJPSO1d90sPx2adbAiBlLpsTmyKjCpsJg60+EBSR2kDHJ0o0PFBe5tENOjjRbQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.4.2.tgz",
+     "unpackedSize": 154358
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e66d213154b8c2018b74d2f6196a49c32f7a315b",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.2"
+   },
+   "2.4.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.4.3",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.4.3_1788819498499_0.49137200036015916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.4.3"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-a/IgflSJecPoRGAre9GxbuiKfDa/yGbQmoFSsafrF9cxubEL+RQ+qBW83KDo2MAFe/R83OHxPvfl0lPNCo5NvA==",
+     "shasum": "494a303ca43a6d91c9c9b4503f7b78daeae94433",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHqcHDnQx+gNg5CYHsuBRCnoUlNHTB8nv6l2++fl01KzAiEArKQhR2x3HUYIwT0VU2oCoa6Pe30mWK8eIX4t/uPNXTY="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDXnjlePypOT4ME174c8UkwBnEN3f4SR/Ix1WSwk9TZyAiEAmgeJnYVO2yrU2KmV7KCSw484TIQyNUnWe+aXyUdUTCo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.4.3.tgz",
+     "unpackedSize": 159831
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e6d29c11cd9f2ecfcc83a390be5c318a31cf91ef",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.3"
+   },
+   "2.4.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.4.4",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.4.4_1788842108036_0.9719455504099725"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.4.4"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-wfG2b8u6sJTzYmhhC6q8//iIRHZVXgRJc3SlArtgDn6oYF5bo5svluSCv945IHAkVq0W8ZzHu9sw2qsMNkI4iQ==",
+     "shasum": "eeb2b59e3da8ff8e7283de0c8d84c4af1e67004e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCaS7P3WLuQkKuYHq9p3c/oWGrJ2MhRblZRbNtFg9yWiAIhAJpgYurydtlasTxHi3YlnTDlNxiKbQGDzNmwt0OCJUIg"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICZAwhpMsg7foDX2PDM2ejoQ20zy/Qw2xKc+KjV+XMoHAiEAgBdChwZfD219L6IhoLgPJmrosTk8/S/VWUm0tWgy2sE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.4.4.tgz",
+     "unpackedSize": 163858
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "26c052f8f7b09bce3f07c40dfc18eddbec4f72d4",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.4"
+   },
+   "2.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.5.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.5.0_1788842324876_0.3777855926353637"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.5.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-ZWZ4Si+S69treFefiSBkcJFh7+lnTXFQL1cGCQlQ6WIwbO1Viz5GEu7AVxjJgA1oBeOHqw5K+1D495fBvfp6dg==",
+     "shasum": "8a93d0b6bdfa92daef68753b723e6ea9e1864b87",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDz8/8WJUQPJgoVPwjAVZ9t+1OtMzS8hvvWKesXiGAomAIhAKJl7XUn6saWu3GGQOFkKsws5ZmayfYZlTVPSv0/fzdi"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHzDOS92AapsO1HJvZNmmspjlX2EgKhMaFXQmsP3sePPAiEAky1F+kLttvLSvSptBHFSAFOeZmkfV5pad9SykjXgAE0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.5.0.tgz",
+     "unpackedSize": 168345
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b57a7b8ac349446f5357026331eb8f14789d3be3",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.5.0"
+   },
+   "2.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@2.6.0",
+    "_nodeVersion": "26.8.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_2.6.0_1789142397212_0.31227391979569985"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@2.6.0"
+     },
+     "fileCount": 32,
+     "integrity": "sha512-ai3nobFUc18PRQ9/PXQhYBvqmILYRf/ZMaMYu/NG9mrAmYozLAIyuvaxcbidcdeABZh8yLA788g7Yu3lkv+Jrw==",
+     "shasum": "0c2fa688007b35d95c59476e46a1169b00260901",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDw4hDVmXxGqwsyHX4geIC94EOfFmoR7K0KG7wNzJKv/wIgQAT+7wNgTBrTM8q8wEPwmEJTCvjeqNHbXo50KBLiXcA="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCujWvy4sDH5cb0QzA1/NJYFTtex2Tz6xsnLuqpe39yDQIgc/PhZFYSE4KCOvYZDQU2eUkNKcpPJuLop+QlU7gaZ+w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-2.6.0.tgz",
+     "unpackedSize": 205885
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "95b0613abbac51ee38408007517ac476f33f6838",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.6.0"
+   },
+   "3.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@3.0.0",
+    "_nodeVersion": "26.8.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_3.0.0_1789154962487_0.0007074117306067329"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@3.0.0"
+     },
+     "fileCount": 32,
+     "integrity": "sha512-GSDE0H0LPX6+n83XQU1sgLcGhy/0O/H/5d929GAAdBmKxWc+pubb7Tjow3TKGo+jtZVV2bvMsDYUVDhmqwbmGA==",
+     "shasum": "c6425d97ea9eda4e838610c1293e77c48f4882c1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHtrTnlujA8VyZgl9QrZMawl4tzeJ2xISROIM6P3xBgIAiBczfX0Ud7N4RWh3q8UC8VHLuORa8LDGPxMnN4f77ubVg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFfaJbWLD4j58ilWBAKnbidd+c+HEVT6xhvVQFEtpPf1AiBrpVbfkDYwwU6aloqvL9gUkuIcfQxae/Ko1T2MzTzDlw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-3.0.0.tgz",
+     "unpackedSize": 223459
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e5fdeb0bf39395f8a04f1593ab43f27f81f48083",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "3.0.0"
+   },
+   "3.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/agent-mcp-pool@3.1.0",
+    "_nodeVersion": "26.8.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agent-mcp-pool_3.1.0_1789155255670_0.598848386103239"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:017d8004-5dbd-4989-8679-cb57661179f6"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "author": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/agent-mcp-pool/issues"
+    },
+    "description": "A pool of long-lived Model Context Protocol clients, exposing every connected server's tools to an OpenAI-compatible agent loop as `<slug>__<tool>`.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.11",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "^4.1.11",
+     "openai": "^7.8.0",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fagent-mcp-pool@3.1.0"
+     },
+     "fileCount": 32,
+     "integrity": "sha512-VQyhjF15fCy7TXfnoo6fz8QnY6v3U+rOPxLivCbZfGijwCg6mbC041Q7hVKf3uLX8odpAm63ElgZtMZh9UdZsA==",
+     "shasum": "47e91daea14483c0749e5a4e7c03416df5b71c3c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDWEbU6hpqVJW8ilGVj0mZ3zNwkq4J9uZ5yD8ZpxlC+DwIhAPI/SRiF88e+C791+8ZHNP+cvOKCie/n4UTQeajSH/rl"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDwrFJaGm9KjWTY8I7Wg86jmyRV1fHXlLXK4wLBp2QOPQIhAJfs82ZC+R7KIC8b+aiUhNXSM2GsUkggZ4m7m/4GP0DK"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/agent-mcp-pool/-/agent-mcp-pool-3.1.0.tgz",
+     "unpackedSize": 223977
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4d24bbb0aff0bd38b3a1c97dee88f8fc466416b7",
+    "homepage": "https://github.com/cubicecho/agent-mcp-pool#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "openai",
+     "agent",
+     "tool-calling",
+     "stdio",
+     "streamable-http",
+     "connection-pool",
+     "typescript"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/agent-mcp-pool",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.30"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/agent-mcp-pool.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/llms-txt.mjs",
+     "coverage": "vitest run --coverage",
+     "format": "biome check --write .",
+     "lint": "biome check .",
+     "llms": "node scripts/llms-txt.mjs",
+     "llms:check": "node scripts/llms-txt.mjs --check",
+     "prepare": "node scripts/prepare.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "3.1.0"
+   }
+  }
+ },
+ "name": "@cubicecho/agent-mcp-pool",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@cubicecho%2Fagent-mcp-pool"
+}

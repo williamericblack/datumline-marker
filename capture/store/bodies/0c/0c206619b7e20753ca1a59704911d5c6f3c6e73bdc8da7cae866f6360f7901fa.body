@@ -1,0 +1,978 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.8.25",
+  "maintainers": [
+   {
+    "email": "[redacted-email:9c4627e233cc]",
+    "name": "arcote.tech"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.8.10",
+   "0.8.11",
+   "0.8.12",
+   "0.8.13",
+   "0.8.14",
+   "0.8.15",
+   "0.8.16",
+   "0.8.17",
+   "0.8.18",
+   "0.8.19",
+   "0.8.20",
+   "0.8.21",
+   "0.8.22",
+   "0.8.23",
+   "0.8.24",
+   "0.8.25",
+   "0.8.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@arcote.tech/arc-mcp",
+  "_rev": "17-11fb89f03b03edb1b92667783169ccea",
+  "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+  "dist-tags": {
+   "latest": "0.8.25"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:9c4627e233cc]",
+    "name": "arcote.tech"
+   }
+  ],
+  "name": "@arcote.tech/arc-mcp",
+  "readme": "# @arcote.tech/arc-mcp\n\nSerwer **Model Context Protocol** dla Arc \u2014 wystawia narz\u0119dzia Arc (`ArcTool`)\nklientom MCP, takim jak Claude Desktop, przez transport streamable HTTP.\n\nTe same toole obs\u0142uguj\u0105 czat AI w aplikacji i kana\u0142 MCP. Jedno \u017ar\u00f3d\u0142o prawdy,\nzero duplikacji: `ArcTool.toJsonSchema()` daje kszta\u0142t wymagany przez\n`tools/list`, a `executeWithContext()` jest wprost implementacj\u0105 `tools/call`.\n\n## U\u017cycie\n\n```typescript\nimport { mcpServer } from \"@arcote.tech/arc-mcp\";\n\nexport const subiektMcp = mcpServer(\"subiektMcp\")\n  .path(\"/mcp\")\n  .serverInfo({ name: \"Berotex Subiekt\", version: \"1.0.0\" })\n  .instructions(\"Dane magazynowe i sprzeda\u017cowe z Subiekta GT.\")\n  .protectBy(workspaceToken, () => true)\n  .scopeFrom((p) => p.workspaceId)\n  .useTools(subiektTools)\n  .build();\n```\n\n`build()` zwraca zwyk\u0142y `route`, wi\u0119c rejestrujesz go w `context([...])` jak\nka\u017cdy inny element.\n\nRealny URL to **`/route/mcp`** \u2014 prefiks `/route` dok\u0142ada host Arc i nie da si\u0119\ngo pomin\u0105\u0107.\n\n## Obs\u0142ugiwane metody\n\n| Metoda | Zachowanie |\n|---|---|\n| `initialize` | Negocjacja wersji (`2025-06-18`, `2025-03-26`, `2024-11-05`), `capabilities.tools`, `serverInfo`, opcjonalne `instructions` |\n| `notifications/initialized` | Notyfikacja \u2014 odpowied\u017a `202` bez cia\u0142a |\n| `tools/list` | Deskryptory z polem `inputSchema` |\n| `tools/call` | Wykonanie narz\u0119dzia \u2192 `{ content: [{ type: \"text\", text }] }` |\n| `ping` | Pusty wynik |\n\nBatch JSON-RPC (tablica wiadomo\u015bci) jest obs\u0142ugiwany, mimo \u017ce spec `2025-06-18`\ngo wycofa\u0142 \u2014 starsi klienci go u\u017cywaj\u0105, a koszt obs\u0142ugi jest zerowy.\n\n## Decyzje projektowe\n\n**Serwer jest bezstanowy.** Nie wydaje `Mcp-Session-Id`, a `GET` i `DELETE`\nzwracaj\u0105 `405` (spec wprost na to pozwala). Narz\u0119dzia Arc odpowiadaj\u0105\nsynchronicznie w ramach POST-a, wi\u0119c kana\u0142 SSE server\u2192client nie mia\u0142by czego\nnie\u015b\u0107, a stan sesji w pami\u0119ci procesu psu\u0142by si\u0119 przy wielu instancjach\ni przy federacji modu\u0142\u00f3w.\n\n**Toole interaktywne s\u0105 pomijane.** Tool bez `.handle()`, kt\u00f3ry odpowiada przez\n`respond()` z interfejsu, nie ma odpowiednika w MCP \u2014 protok\u00f3\u0142 nie potrafi\npoprosi\u0107 klienta o interakcj\u0119 u\u017cytkownika. Takie toole nie pojawi\u0105 si\u0119\nw `tools/list`; sprawdzisz je przez getter `.skippedTools`. Je\u015bli \u017caden tool nie\nma handlera, `build()` rzuca wyj\u0105tkiem, zamiast wystawi\u0107 pusty serwer.\n\n**B\u0142\u0105d narz\u0119dzia to poprawna odpowied\u017a.** Wyj\u0105tek z handlera wraca jako\n`result` z `isError: true`, nie jako b\u0142\u0105d JSON-RPC \u2014 model ma go zobaczy\u0107\ni zareagowa\u0107, a b\u0142\u0105d transportowy zerwa\u0142by mu kontekst. B\u0142\u0119dami JSON-RPC s\u0105\ntylko naruszenia protoko\u0142u (nieznana metoda, brak nazwy narz\u0119dzia, z\u0142y JSON).\n\n**Zdolno\u015bci `resources` i `prompts` nie s\u0105 deklarowane.** Arc nie ma czym ich\nwype\u0142ni\u0107, a pusta zdolno\u015b\u0107 tylko myli klient\u00f3w.\n\n## Autoryzacja\n\nDomy\u015blnie route wymaga tokena \u2014 bez `.protectBy()` ani `.public()` host\nprzepu\u015bci tylko \u017c\u0105dania z dowolnym wa\u017cnym tokenem Arc. Token czytany jest\nz nag\u0142\u00f3wka `Authorization: Bearer <token>`, czyli dok\u0142adnie tak, jak wysy\u0142aj\u0105\ngo klienci MCP.\n\n`.scopeFrom(fn)` mapuje parametry tokena na warto\u015b\u0107 `identifyBy` widoczn\u0105\nw handlerach jako `ctx.identifyBy` \u2014 odpowiednik `.billTo(...)` z `ArcChat`.\n\n## Weryfikacja\n\n```bash\ncurl -X POST localhost:5005/route/mcp \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer <token>' \\\n  -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'\n```\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.8.10": "2026-07-26T06:49:27.991Z",
+   "0.8.11": "2026-07-26T14:12:36.575Z",
+   "0.8.12": "2026-07-26T16:04:33.922Z",
+   "0.8.13": "2026-07-27T02:42:58.788Z",
+   "0.8.14": "2026-07-27T03:45:49.916Z",
+   "0.8.15": "2026-07-27T04:50:19.660Z",
+   "0.8.16": "2026-07-27T05:24:23.785Z",
+   "0.8.17": "2026-07-27T06:31:49.741Z",
+   "0.8.18": "2026-07-30T14:37:35.544Z",
+   "0.8.19": "2026-08-03T10:14:50.488Z",
+   "0.8.20": "2026-08-05T12:14:43.439Z",
+   "0.8.21": "2026-08-06T09:05:45.518Z",
+   "0.8.22": "2026-08-06T10:32:19.192Z",
+   "0.8.23": "2026-08-06T13:56:07.081Z",
+   "0.8.24": "2026-08-09T14:13:21.606Z",
+   "0.8.25": "2026-08-11T23:55:20.803Z",
+   "0.8.9": "2026-07-23T07:16:16.077Z",
+   "created": "2026-07-23T07:16:15.761Z",
+   "modified": "2026-08-11T23:55:20.976Z"
+  },
+  "versions": {
+   "0.8.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.10",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.10_1785048567856_0.37921362584169716"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-XDhEaIal3Gawn/wYWlodWCBPQdN3kO9sRMfGA+kCWug2lXntYPC0t3eTPr78qjCOsz7nDXuYCSRYToJooSGquw==",
+     "shasum": "8a5e2d8b5d59340299d411c0a5c92255119ab450",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC3uTbCGW8515xiKP0A+b1kjUpJDKlwWpLmeyIcaniK/AIgIiXayVex/FEhXDnUWKlvRRDCIAxQWKoVJ31He1eTH/k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.10.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "ac47217cc52077f51e41118375e5a86bf42d0407",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.10",
+     "@arcote.tech/arc-ai": "^0.8.10",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.10"
+   },
+   "0.8.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.11",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.11_1785075156417_0.4182094519966024"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-N9T7219XkTY720urHaHuk/lLWG9gLuoTkyoINfQrTONq7M4XbeLqK+5+JU8O5sYd5hSyw2kf0GT+X8EGELJupA==",
+     "shasum": "5b13e7a20778c7422cce1e3df69dc1c3df951aeb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDC02SACvJxqRsyOAPQAi487mF81XxXslnHnzYPCIw9lAiBlEEzgJsZgwaJeONWdKSVicTSWQRZJwFyHbTv2NXxeLA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.11.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "43ab42b35a6d523ef08147485522cb505a2d38e5",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.11",
+     "@arcote.tech/arc-ai": "^0.8.11",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.11"
+   },
+   "0.8.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.12",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.12_1785081873758_0.4192807957253326"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-Ko95k/Gv2O3i7uez0yZ+VysuC9CNZoGuHBQ9jx3ULZj9vdmvb2uk4i81cKhG3KTKvPpeR+9087obe+8/IPSiUA==",
+     "shasum": "5c22c5c22034a58b7a4738b46397247397b7c78e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDv7n66DqDHu1UZV5tB+idgaUwZsFQe2aTmWSl6boukOgIhAPQi2AL43GPnOwaCfblfgRdbI1rtw8VxCufR1l/eEqKO"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.12.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "ed27d12c8d3a97e6191e3f71524303c0952e5d1e",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.12",
+     "@arcote.tech/arc-ai": "^0.8.12",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.12"
+   },
+   "0.8.13": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.13",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.13_1785120178639_0.37155153835576327"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-ZNsK+rOyIPhqrV1IZB9QPn/CKlJFAvXzFiS8e8aoj7ZnfwJEd3GHBiR22FCVefZVnQykitQicqtUa2jo85GEXg==",
+     "shasum": "d2d2d4717bf9969b6ee80de23576368bad72059e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGHBuoKup0J1cqCcmX2carkG1R5+qBHwE3UdaVp2Q8MmAiEAsL1bjYqYJriQ/O2HGLFW1PHZK6dUI3PEqi6uL1bcl2o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.13.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "0597250f824d8581f40ffd5bca1a183266525af6",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.13",
+     "@arcote.tech/arc-ai": "^0.8.13",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.13"
+   },
+   "0.8.14": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.14",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.14_1785123949780_0.4025426666000025"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-facHA61Pa966rJIFvMtBlSpZfJ827hMeLPOU2f1RfdevybpKKislaiU/bXOHXDWdkTHvW5ev+XayyFiAr6zGpQ==",
+     "shasum": "bc4b2688d87e6df168997b3881afcc193fc822f5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA7eUvMslvHswok+AE6rdEZ1adBkapesuksAoXGYK0tWAiBo9YOHKrdqdOD6WTryfA/Dy52M6I41iMUu2JQxCl7E2Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.14.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "706b021d11e158357328811af026db894e582af5",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.14",
+     "@arcote.tech/arc-ai": "^0.8.14",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.14"
+   },
+   "0.8.15": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.15",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.15_1785127819512_0.5396706197519359"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-WFMuxsu3NHFhOfsRcn/Ldrf9wtR/2Nq+9I4cFnvTOVghG2ZFLDorrFVnwXd/J0eBXwb0nl+jFVwL51V2lPQHOg==",
+     "shasum": "a37549d27b55ca7db2f2e6987a7878465ab3c097",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDYMn7aYinG9f6TT3u+oZaJF3S68AB+Uc41b2U0ZaXlKwIhAPqAUtuncOhV3D8xONUtO2tl8N0UfVDD+Tw3BjBu9GKz"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.15.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "1b402b25492359e218435bceb68727b1a5b3f102",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.15",
+     "@arcote.tech/arc-ai": "^0.8.15",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.15"
+   },
+   "0.8.16": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.16",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.16_1785129863659_0.7696308307370598"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-cdrI4zblOLkckxtZDBIVDrj8Xg0hi9tHuyfFJnUUfPifMFNfng2ewSeHK6cqDDnY3rKkTNtXtM2AI2TDO3t0JQ==",
+     "shasum": "7610101a72d93942dc0c8eb93e466042275df4fa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHMK6nyMArwS26u7nAdomsDJThUqOkzgbbdiOlX9sOZRAiAyawJCaH2hTmYox1c5d+AnykIQepqu2SaUKG7mJDvmQg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.16.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "8c4de59332129097ee98001bdf3e772afc04ebc6",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.16",
+     "@arcote.tech/arc-ai": "^0.8.16",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.16"
+   },
+   "0.8.17": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.17",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.17_1785133909600_0.8462835648896578"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-9EMDBVvTI8UoRmBaw17dQhDUEETbM/0dyf3u/UYxpQ9EaGolyXVx/D2hpXtCBVbhhY1rvbdHUSjU+QLwZ3gy0w==",
+     "shasum": "ae143a618e023e7496befa9dd13c17c92308a6c3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHY0bZPF1oF/oF7QL2E/kw6DJzpTMKd9YnXu+xWhftQvAiAlj2vh41i1U6FJ///kI8qoh8gXlc7GRQM4gz7uyHc4TQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.17.tgz",
+     "unpackedSize": 32988
+    },
+    "gitHead": "39a3df8e7ae9f42cdfbb251a0ef9064d98a65fc8",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.17",
+     "@arcote.tech/arc-ai": "^0.8.17",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.17"
+   },
+   "0.8.18": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.18",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.18_1785422255399_0.00874557737586934"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-Y51GBEQiGhHeh/P/lkGYKTzVplr2frE88YeeZAPzVgMtBjj8XazQepeUO4znJqXCyNN1263cQdkzMW0z5KZ0Rg==",
+     "shasum": "955533e94e20b603b7142698eae9fad10ae9a389",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDqIkpugM66Hlf1JdeqhNeXWkBgbyXbNveMbRe55yDmrgIgNnBQAIdXTHwBUjtdncGhM1n4D45mZVuQ9IMPXLcCSQU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.18.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "ec004bef2d3297cb14d57f404f31456a820a49e9",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.18",
+     "@arcote.tech/arc-ai": "^0.8.18",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.18"
+   },
+   "0.8.19": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.19",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.19_1785752090312_0.008320172407690896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-PUFCH5vbELBiRpp8t5hHxyToXytgMzxHyqj97tmp6JhivjOA7EYPS5eSoHbIwGRU3OxffVXuqJQn1V46Ola0gg==",
+     "shasum": "da8320035e0ad5c76d2a80a0b1dd771f75376739",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDmmKaVNek/H2tUIzS3jo2xus3IE01MsfBOmUR8YEqLGwIhAJ7iMOakiekg3kQbZI2kXU0vJj1baqt/+etR26h/SDGl"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.19.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "0b81129534c651d8d4d16fcf5874bb3cc66b801b",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.19",
+     "@arcote.tech/arc-ai": "^0.8.19",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.19"
+   },
+   "0.8.20": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.20",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.20_1785932083298_0.8260638346849596"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-WUxK30upOdnBoRMgtiDk6XI+HsMvXidu7bjMBDLL8gXx3iuVo4JMDPLz6zGyivPAGBRNXmy5S05+DLshdmJvLg==",
+     "shasum": "716ce11422cb770e124ecea7538b6b5827534b03",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICx2cG/JD68BIMRQ3Ppp9o8ZN52bCGs5nOE92MjmnyoYAiEAhDJUplgTBZ3W2/0PlWYR3y7G1AJEKNKkpha87YlwUlA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.20.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "b3b6cb072355d6479b010b5ebfcae69144f13716",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.20",
+     "@arcote.tech/arc-ai": "^0.8.20",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.20"
+   },
+   "0.8.21": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.21",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.21_1786007145398_0.7466036613192941"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-DYdSaK0YMJ9mnCil7I6nDIupUcO5axfIHxDGFl/49aesEzbjC382jjItXKWWtwUNfUWb6EHmG77sjHesG+LJ1g==",
+     "shasum": "52cc5cac1ea8925f297ae60e0967689db9c6cc22",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDqYzBGFLuWyIaXZ9gC35nj39p1dOP/knefa5j9zcyhYAIgVPpHdD0FnATmLlKO8fQKV2EOnmH0hx4Pfn6L0x8Z8ps="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.21.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "06a4001d8a3c2d63e9c939f68783fd397a810e75",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.21",
+     "@arcote.tech/arc-ai": "^0.8.21",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.21"
+   },
+   "0.8.22": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.22",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.22_1786012339054_0.4510195714624621"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-m16x/q7jjNpMT3+PtSoO0NdGOphgWwvK2F9CPbDgbgfn0y+EqxHQSYJTfftTnbPm2S1wF0OLdx630i8XBUjlbQ==",
+     "shasum": "03e5da8f39193876d3ae6b672adc971d2bcbfa8e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHysBMaPKmwciRszd4tqQIDZziDLubx1nR/cRdS9UMuWAiEA+b35zh+upiZxMg8Nk64giKX1KaJ08UvnVZL0i7hKw/Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.22.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "d0923078da5910f11e5321b34a457bc2e5566896",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.22",
+     "@arcote.tech/arc-ai": "^0.8.22",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.22"
+   },
+   "0.8.23": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.23",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.23_1786024566944_0.38486754410250135"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-cyewLi13Iy+GJq4Rj+xESuxkKZctL+Nz/IxfCL05aWjpFzgh4jCWl9PzMzuPgc7O2Fhh5IJBbali4vaE2mOf8w==",
+     "shasum": "20a794212d1c627d2ce8da139c619021cb790b79",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDr2APqo+nJsXeeiW7MFcVi4ITHljz7qEw+SMQXMNidqAiEAv9wbl+2rJ+thFrTV0KzFRKf3LQEACcnlmRSb1bYGdfo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.23.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "09c44e44996bd7669789f8fff635629a1e57ba57",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.23",
+     "@arcote.tech/arc-ai": "^0.8.23",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.23"
+   },
+   "0.8.24": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.24",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.24_1786284801480_0.34505088970341635"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-9KUOJiUYpltJ6cxHDHTXJcxCJTa9ISBB1moCMZEu/GroqYisIVTZfBQHQ2UlTJiULtGxfDcb4hycfz0TbBltIA==",
+     "shasum": "5cf12fb8177bd6e8c097d15daa635663942c2284",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE8b6MPqTVwyctysLeYKQJ9NMIETkLvRMsYjVAT8KuLgAiAgLFaNq8k3EIE2dhc6az6Q2sfi2C6sOi0OCNG4tdIn6g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.24.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "4dec85ae6479b03b568726efc1d6139c7b08d37c",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.24",
+     "@arcote.tech/arc-ai": "^0.8.24",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.24"
+   },
+   "0.8.25": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.25",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.25_1786492520664_0.7490448733078201"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-ruL1YHzbEKFDmsCEyYfCjeLJB0Lqo6kLfvyKKBbQSoV8GlUul2PRfBp0ZDeQGXAwQxrEMAjW2+VMXQwVHBdAkw==",
+     "shasum": "174e48a5d32435faac3f6cbe73344725973c464e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDcFVUufZWQcuhJOOY7m5xE5RVhVQOgPB7od0xdztySJwIgTyXVYTEIK4wKBxEt02GIzOk2tZY+4fHq7pfoYmxScFY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.25.tgz",
+     "unpackedSize": 57142
+    },
+    "gitHead": "7374320e23fa90785bbd6f897d933ce8e12fe7cd",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.25",
+     "@arcote.tech/arc-ai": "^0.8.25",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.25"
+   },
+   "0.8.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@arcote.tech/arc-mcp@0.8.9",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/arc-mcp_0.8.9_1784790975933_0.23120721275011769"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9c4627e233cc]",
+     "name": "arcote.tech"
+    },
+    "_npmVersion": "10.9.3",
+    "description": "Model Context Protocol server for Arc framework \u2014 exposes Arc tools over streamable HTTP",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-X6blPF2A44DABZ09micV74ZPUHXwD/lpFs6ZqWYSXqpDabj68yZtw44JlRfI4x3/4IQFnyN5VQz9pCP66I0eHA==",
+     "shasum": "cfa52e1b6ab09015f52ae69eab46d4d1d3010f84",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC+EwBPBHFfLEmO9fN+VidlBqefNIvpGHYMbCn7dtZs9AiEAosNsRC1RYBR2VMR722BI2QpsoJC0r7jv+ZrLHKBtLEs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arcote.tech/arc-mcp/-/arc-mcp-0.8.9.tgz",
+     "unpackedSize": 32985
+    },
+    "gitHead": "fe008cd5ddbc453320634e50b18c3836e82ace8b",
+    "main": "./src/index.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9c4627e233cc]",
+      "name": "arcote.tech"
+     }
+    ],
+    "name": "@arcote.tech/arc-mcp",
+    "peerDependencies": {
+     "@arcote.tech/arc": "^0.8.9",
+     "@arcote.tech/arc-ai": "^0.8.9",
+     "typescript": "^5.0.0"
+    },
+    "private": false,
+    "scripts": {
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./src/index.ts",
+    "version": "0.8.9"
+   }
+  }
+ },
+ "name": "@arcote.tech/arc-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@arcote.tech%2Farc-mcp"
+}

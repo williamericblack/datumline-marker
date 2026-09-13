@@ -1,0 +1,712 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@dockndevai/mcp-kubernetes",
+  "_rev": "7-3412bee34386230d44fd76528e8de568",
+  "bugs": {
+   "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+  },
+  "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+  "dist-tags": {
+   "latest": "0.2.2"
+  },
+  "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "kubernetes",
+   "k8s",
+   "devops",
+   "llm",
+   "ai"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "name": "@dockndevai/mcp-kubernetes",
+  "readme": "# mcp-kubernetes\n\n[![CI](https://github.com/dockndevai/mcp-kubernetes/actions/workflows/ci.yml/badge.svg)](https://github.com/dockndevai/mcp-kubernetes/actions/workflows/ci.yml)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)\n[![npm](https://img.shields.io/npm/v/@dockndevai/mcp-kubernetes)](https://www.npmjs.com/package/@dockndevai/mcp-kubernetes)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for **Kubernetes**. It lets an MCP-capable client (Claude Desktop, Claude Code, etc.) inspect and operate Kubernetes clusters across multiple contexts \u2014 with behaviour controlled entirely by flags.\n\nThe design goal is **safe by default**: it starts read-only, can be scoped to an allowlist of namespaces and contexts, protects system namespaces from mutation, and gates the dangerous operations (delete, apply, exec) behind explicit opt-ins.\n\n## Features\n\n- **Multi-cluster** \u2014 every tool accepts an optional `context`; scope which contexts are usable with an allowlist.\n- **Access modes** \u2014 `read-only` \u2192 `read-write` \u2192 `admin`, layered so a mode never exposes tools above its level.\n- **Security flags** \u2014 namespace allowlist, protected namespaces, context allowlist, plus independent opt-ins for delete / apply / exec, dry-run, and JSON audit logging (see below).\n- **Standard auth** \u2014 uses your kube-config (or in-cluster service account). No credentials are stored by the server.\n\n## Security model\n\n| Concern | Flag | Default | Effect |\n| --- | --- | --- | --- |\n| What can the server do at all? | `K8S_MODE` | `read-only` | `read-only` exposes only reads; `read-write` adds mutations; `admin` adds destructive tools. Tools above the mode are **never registered**. |\n| Which namespaces are in scope? | `K8S_NAMESPACE_ALLOWLIST` | *(all)* | When set, any operation on a namespace outside the list is refused. |\n| Which namespaces are read-only forever? | `K8S_PROTECTED_NAMESPACES` | `kube-system,kube-public,kube-node-lease` | Can be read but never mutated or deleted, regardless of mode. |\n| Which clusters are reachable? | `K8S_CONTEXT_ALLOWLIST` | *(all)* | When set, only these kube-config contexts may be targeted. |\n| Can it delete? | `K8S_ALLOW_DELETE` | `false` | `delete_resource` needs this **and** admin mode. |\n| Can it apply manifests? | `K8S_ALLOW_APPLY` | `false` | `apply_manifest` needs this **and** read-write mode. |\n| Can it exec into pods? | `K8S_ALLOW_EXEC` | `false` | `exec_in_pod` needs this **and** admin mode; the tool isn't even registered otherwise. |\n| Preview without touching the cluster | `K8S_DRY_RUN` | `false` | Write/admin tools validate + log intent, then return without calling the API. |\n| Audit trail | `K8S_AUDIT_LOG` | `true` | Emits a JSON line to stderr per guarded operation (`ALLOW` / `DENY` / `DRY_RUN`). |\n| Interactive confirmation | *(automatic)* | \u2014 | Destructive & high-impact actions prompt the human to approve via MCP elicitation before running; clients without elicitation fall back to the `*_ALLOW_*` gate. |\n\nThe layers are independent \u2014 e.g. `admin` mode with all three opt-ins `false` can restart and scale deployments but can neither delete resources nor exec into pods.\n\n## Tools\n\n**Read** (`read-only`+): `list_contexts`, `list_namespaces`, `list_pods`, `get_pod`, `get_pod_logs`, `list_deployments`, `list_services`, `list_nodes`, `list_events`, `get_resource`\n\n**Write** (`read-write`+): `scale_deployment`, `restart_deployment`, `set_deployment_image`, `create_namespace`, `apply_manifest` (needs `K8S_ALLOW_APPLY`)\n\n**Admin** (`admin`): `delete_resource` (needs `K8S_ALLOW_DELETE`), `exec_in_pod` (needs `K8S_ALLOW_EXEC`)\n\n## Quickstart \u2014 add to your agent\n\nPublished on npm as [`@dockndevai/mcp-kubernetes`](https://www.npmjs.com/package/@dockndevai/mcp-kubernetes). No clone or build needed \u2014 your MCP client runs it on demand with `npx`. **Start in `read-only` mode**; see [`.env.example`](.env.example) for every variable and [docs/CLIENTS.md](docs/CLIENTS.md) for the full per-client guide.\n\n**Claude Code** (CLI)\n\n```bash\nclaude mcp add kubernetes -e KUBECONFIG_PATH=\"/Users/you/.kube/config\" -e K8S_MODE=\"read-only\" -- npx -y @dockndevai/mcp-kubernetes\n```\n\n**Claude Desktop \u00b7 Cursor \u00b7 Windsurf** \u2014 same block in `claude_desktop_config.json`, `.cursor/mcp.json`, or `~/.codeium/windsurf/mcp_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"kubernetes\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-kubernetes\"\n      ],\n      \"env\": {\n        \"KUBECONFIG_PATH\": \"/Users/you/.kube/config\",\n        \"K8S_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n**OpenAI Codex CLI** \u2014 in `~/.codex/config.toml`:\n\n```toml\n[mcp_servers.kubernetes]\ncommand = \"npx\"\nargs = [\"-y\", \"@dockndevai/mcp-kubernetes\"]\nenv = { KUBECONFIG_PATH = \"/Users/you/.kube/config\", K8S_MODE = \"read-only\" }\n```\n\n**VS Code (GitHub Copilot, Agent mode)** \u2014 in `.vscode/mcp.json`:\n\n```json\n{\n  \"servers\": {\n    \"kubernetes\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-kubernetes\"\n      ],\n      \"env\": {\n        \"KUBECONFIG_PATH\": \"/Users/you/.kube/config\",\n        \"K8S_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n## Run from source (development)\n\nPrefer the published package above. To run from a clone:\n\n```bash\nnpm install\nnpm run build\nnode dist/index.js   # with the environment variables set\n```\n\n## Develop\n\n```bash\nnpm run dev        # watch mode\nnpm test           # unit tests for the security policy\nnpm run typecheck\n```\n\n## Publishing\n\nThis server ships a [`server.json`](server.json) for the official MCP registry and an [`mcpName`](package.json) for npm ownership validation. See **[PUBLISHING.md](PUBLISHING.md)** for publishing to npm and listing on the MCP registry, Smithery, Glama, Cursor, and PulseMCP.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-23T07:49:23.575Z",
+   "0.1.1": "2026-08-28T02:48:53.103Z",
+   "0.1.2": "2026-08-30T06:18:32.020Z",
+   "0.1.3": "2026-09-09T15:55:01.115Z",
+   "0.2.0": "2026-09-09T19:24:45.713Z",
+   "0.2.1": "2026-09-09T19:43:33.161Z",
+   "0.2.2": "2026-09-12T17:56:36.697Z",
+   "created": "2026-08-23T07:49:23.270Z",
+   "modified": "2026-09-12T17:56:37.066Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.1.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.1.0_1787471363410_0.28906633858593067"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.1.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-mXFvUE8q80MAzJ9A5bh5Mr82m3nPzsoD8iHJA+Sx1eI/nQy8fYJaN33nNM7Q8EJPjs+hojI7LHY/6XelOEPcmw==",
+     "shasum": "337df0c91d051de4486f474a769c8d8ef2bd6dea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTvaw28ElfCEV4mzQIBtS7N9ROuhY2YrFQdnebv3xa3AIhAOfxbhPHXxoMeJ/a+ZWPRF55MlKSL3Nom9Og5PBEt7vl"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.1.0.tgz",
+     "unpackedSize": 85630
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "335806f2850c48df3cb8eb46bc477b9e7020de0c",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.1.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.1.1_1787885332971_0.46494091539427185"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.1.1"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-8Y6CzsVRn66J/Zjx9yvterJk91qAGdx+q2cgfuLhvGKiVUQ8mrxm5gX28XVUj2OGM5b2BlO5eeXIY3twTccNhQ==",
+     "shasum": "0155e459978794807d3e65260f5aee103e442dbf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF1tBHoVCJauMzCxV6Uacxtdr5+YzF7iti7ktYoYsJ42AiEAwIx7OzVCXxUhQE+CPSrYZI+iMIboyVEn2sSEN30+qrM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.1.1.tgz",
+     "unpackedSize": 90204
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "f16ea63d309a4d2c95becf3b7e75bb587dbfa31a",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.1.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.1.2_1788070711891_0.18326596187695277"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.1.2"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-W9XefCs55vufwtNN8zOkxmfhrO8RhWGljOefRrIQ1cL3he6yBaXvNyUmVD48eGzB16gIWJaP/So+eo6uTQ1IrA==",
+     "shasum": "5db580f1bf011f1385f1932bd1364905a51e3065",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCOkdVYSVyfTtOclQZVj70eW9yf0p+IjfOcWhIgufTIkQIhAJNPTghWIB3/HMlwBl2vemRP1GuCGq05r6qcmKKBpKRL"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.1.2.tgz",
+     "unpackedSize": 90204
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "4e0df4aa59328676fc75b9074d9ce0d6814341bd",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.1.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.1.3_1788969300975_0.7929749782478617"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^2.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.4.1",
+     "tsx": "^4.19.2",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.1.3"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-YbDIoicpFXp1VyNDtj5/ICpQ1x6vo//WUC3pIrDBIV0h0D+uYKn5yMy5FC6DgIdf4/slDUU3yCWUtDcPcxPh3Q==",
+     "shasum": "7bf570bf8d45d22b0eaa82647a1be74324b49f17",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDTEXwCRvZTOrDiGCe13gKoWcrWRc4P5jUaJLefJTDILQIgUlZ0Wo0vssLTyBmXA8i1yHu2d8itqQSOlHPktJnh9Ww="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.1.3.tgz",
+     "unpackedSize": 90232
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "00527760d0b5f84c3bc84e931e5886c7e6d73504",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.2.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.2.0_1788981885554_0.11654671176508757"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^2.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.4.1",
+     "tsx": "^4.19.2",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.2.0"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-8QO8UMfgiTgUqBgrPu4ocnjeldoZTTkjNosExWv2xgNBc5WNtVWtVI28HRu+ZqDyk4lurJg28EjqgEyV1cg6xg==",
+     "shasum": "b73630afba16bdcf0c2324d6d928b49cfe29bc97",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEgWQkgrTz7YxWZ7EJi/+XAgkNSwnJwFBM7/RsI9Z7zcAiEAh/1NoiRENk9U32nGmFClzxOGMDhSUmNeDUmqwdFjllo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.2.0.tgz",
+     "unpackedSize": 97774
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "fd9a7f017f0acf35c0d95ea33e4098e8f532462a",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.2.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.2.1_1788983013009_0.12988810849732957"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^2.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.4.1",
+     "tsx": "^4.19.2",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.2.1"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-l70+7eqgCycwA1ItvZQjY0rv9iadVlzQ1+btK7Mmp8UyEerIaghM8uWm0IX42R1aTfRL8blr6LCRkxIUaWxgVA==",
+     "shasum": "39bcd80871fffdeecd6d2e57ed049cb2d16b0b4e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQClznAszLnImbHEylOmbC4r7HHVxoRX2MVGDS4+vaUFzgIgNjNTrnkQD5D3PChrP76UC2oI+4BtXDS7kXm4TM9IMAM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.2.1.tgz",
+     "unpackedSize": 98717
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "23b84e731007d7bbc597c14e180afa62ace2614f",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-kubernetes@0.2.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-kubernetes_0.2.2_1789235796556_0.6785976360931678"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-kubernetes": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-kubernetes/issues"
+    },
+    "dependencies": {
+     "@kubernetes/client-node": "^2.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Kubernetes \u2014 multi-cluster access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.5.0",
+     "tsx": "^4.23.13",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-kubernetes@0.2.2"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-QT5VIXrcVNajYxaUaGijqXYTVwjxEebDDozU8acjBvxmiEQS7Z1LgXeJWIuBcmeSqExNrE+hUDg02dd8zrES8w==",
+     "shasum": "d442b99ea53a6c89e4491c0d97292e0da7c960eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCa6dnXIrDCRkqJcI5DTjRQw+61MaY5c6SIOyOXokqWFgIgcMT80PDtzSxMw7G4sKESGHabUT8agmzNQ5PHfqJxNtg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-kubernetes/-/mcp-kubernetes-0.2.2.tgz",
+     "unpackedSize": 98718
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "6323354eadac1fe5816eac19c3c7092758488ba8",
+    "homepage": "https://github.com/dockndevai/mcp-kubernetes#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "kubernetes",
+     "k8s",
+     "devops",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-kubernetes",
+    "name": "@dockndevai/mcp-kubernetes",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-kubernetes.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   }
+  }
+ },
+ "name": "@dockndevai/mcp-kubernetes",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@dockndevai%2Fmcp-kubernetes"
+}

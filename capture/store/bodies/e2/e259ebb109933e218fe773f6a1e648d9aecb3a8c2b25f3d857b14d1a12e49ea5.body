@@ -1,0 +1,275 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.1.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:8389c0a81e60]",
+    "name": "alexma03"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.1.1",
+   "1.1.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@alexma03/utcp-mcp",
+  "_rev": "2-cf41d025768d6d9d4881f11c5d617540",
+  "author": {
+   "name": "Alexma03"
+  },
+  "bugs": {
+   "url": "https://github.com/Alexma03/alexma03-utcp/issues"
+  },
+  "description": "Model Context Protocol integration for UTCP",
+  "dist-tags": {
+   "latest": "1.1.2"
+  },
+  "homepage": "https://github.com/Alexma03/alexma03-utcp#readme",
+  "keywords": [
+   "utcp",
+   "universal-tool-calling-protocol",
+   "tools",
+   "api",
+   "typescript",
+   "tool calling",
+   "mcp",
+   "agent",
+   "ai",
+   "llm",
+   "modelcontextprotocol"
+  ],
+  "license": "MPL-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:8389c0a81e60]",
+    "name": "alexma03"
+   }
+  ],
+  "name": "@alexma03/utcp-mcp",
+  "readme": "# @alexma03/utcp-mcp: Model Context Protocol (MCP) Communication Protocol Plugin for UTCP\n\nThe `@alexma03/utcp-mcp` package enables the `UtcpClient` to interact with tools defined and served via the Model Context Protocol (MCP). This plugin provides interoperability with existing MCP servers, supporting both `stdio` (local process) and `http` (streamable HTTP) transports, with enhanced session management and resilience.\n\n## Features\n\n*   **Automatic Plugin Registration**: Registers automatically when imported\u2014no manual setup required.\n*   **FastMCP 2.0+ Compatibility**: Automatically resolves JSON Schema `$defs` references, ensuring compatibility with modern MCP servers built on FastMCP 2.0+.\n*   **MCP `CallTemplate`**: Defines the configuration for connecting to one or more MCP servers (`McpCallTemplate`), including:\n    *   Transport type (`stdio` or `http`)\n    *   Optional OAuth2 authentication for HTTP-based servers\n    *   `register_resources_as_tools`: Flag to expose MCP server resources as callable tools\n    *   Environment variables support for stdio servers\n*   **`McpCommunicationProtocol`**: Implements the `CommunicationProtocol` interface for MCP interactions:\n    *   **Persistent Session Management**: Establishes and reuses client sessions with MCP servers (via subprocess for stdio, or HTTP client for remote), drastically improving performance and reducing overhead for repeated tool calls.\n    *   **Automatic Session Recovery**: Intelligently detects and recovers from transient connection issues (e.g., network errors, broken pipes, crashed subprocesses) by automatically re-establishing sessions and retrying operations.\n    *   **Tool Discovery**: Connects to configured MCP servers and retrieves their list of tools using the MCP SDK's `listTools()` command, mapping them to UTCP `Tool` definitions.\n    *   **Tool Execution**: Invokes tools on MCP servers using the MCP SDK's `callTool()`, translating arguments and processing raw MCP results into a unified format.\n    *   **Transport Support**: Seamlessly handles both `stdio` (spawning a local process) and `http` (connecting to a remote streamable HTTP MCP server) via the `@modelcontextprotocol/sdk` client.\n    *   **Authentication Support**: Supports `OAuth2Auth` for HTTP-based MCP servers, including token caching and automatic refresh.\n    *   **Result Processing**: Intelligently adapts raw MCP tool results (which can contain `structured_output`, `text` content, or `json` content) into a more usable format for the UTCP client.\n\n## Installation\n\n```bash\nbun add @alexma03/utcp-mcp @alexma03/utcp-sdk\n\n# Or using npm\nnpm install @alexma03/utcp-mcp @alexma03/utcp-sdk\n```\n\nNote: `@alexma03/utcp-sdk` is a peer dependency. The MCP SDK dependencies (`@modelcontextprotocol/sdk` and `axios`) are included automatically.\n\n## Usage\n\nThe MCP plugin registers automatically when you import it\u2014no manual registration needed. Simply import from `@alexma03/utcp-mcp` to enable MCP support.\n\n```typescript\n// From your application's entry point\n\nimport { UtcpClient } from '@alexma03/utcp-sdk';\nimport { McpCallTemplateSerializer } from '@alexma03/utcp-mcp';\nimport * as path from 'path';\n\nasync function main() {\n  // Path to your mock MCP server script (e.g., from tests/mock_mcp_server.ts)\n  const mockMcpStdioServerPath = path.resolve(__dirname, '../../packages/mcp/tests/mock_mcp_server.ts');\n  const mockMcpHttpServerPath = path.resolve(__dirname, '../../packages/mcp/tests/mock_http_mcp_server.ts');\n\n  // Define a CallTemplate to connect to MCP servers\n  const serializer = new McpCallTemplateSerializer();\n  const mcpCallTemplate = serializer.validateDict({\n    name: 'my_mcp_servers', // A single manual can manage multiple MCP servers\n    call_template_type: 'mcp',\n    config: {\n      mcpServers: {\n        'local-stdio-server': { // Name for your stdio server\n          transport: 'stdio',\n          command: 'bun', // Command to run the server script\n          args: ['run', mockMcpStdioServerPath], // Arguments to the command\n          cwd: path.dirname(mockMcpStdioServerPath), // Optional: working directory for the subprocess\n          env: { // Optional: environment variables for the subprocess\n            MY_ENV_VAR: 'value',\n            API_KEY: '${MY_API_KEY}' // Can use variable substitution\n          }\n        },\n        'remote-http-server': { // Name for your HTTP server\n          transport: 'http',\n          url: 'http://localhost:9999/mcp', // URL of your MCP HTTP server\n          headers: { // Optional: custom HTTP headers\n            'X-Custom-Header': 'value'\n          },\n          timeout: 30, // Optional: HTTP request timeout in seconds (default: 30)\n          sse_read_timeout: 300, // Optional: SSE read timeout in seconds (default: 300)\n          terminate_on_close: true // Optional: terminate connection on close (default: true)\n        },\n        // Example with OAuth2 (uncomment and configure if needed)\n        // 'secure-http-server': {\n        //   transport: 'http',\n        //   url: 'https://secure.mcp.example.com/mcp',\n        // },\n      },\n    },\n    // Top-level auth applies to HTTP transports if specified.\n    // auth: { auth_type: 'oauth2', token_url: '...', client_id: '${SECURE_MCP_CLIENT_ID}', client_secret: '${SECURE_MCP_CLIENT_SECRET}' },\n    \n    // Optional: Register MCP resources as callable tools (default: false)\n    register_resources_as_tools: false\n  });\n\n  const client = await UtcpClient.create(process.cwd(), {\n    manual_call_templates: [mcpCallTemplate], // Register the MCP manual at client startup\n    variables: {\n      my__mcp__servers_MY_API_KEY: 'your-api-key-value', // Namespaced variable\n      // my__mcp__servers_SECURE_MCP_CLIENT_ID: 'your-client-id',\n      // my__mcp__servers_SECURE_MCP_CLIENT_SECRET: 'your-client-secret'\n    }\n  });\n\n  console.log('MCP Plugin active. Discovering tools...');\n\n  // Example: Search for tools on the MCP server\n  const stdioTools = await client.searchTools('stdio'); // Will find tools prefixed with 'local-stdio-server'\n  console.log('Found MCP (stdio) tools:', stdioTools.map(t => t.name));\n\n  const httpTools = await client.searchTools('http'); // Will find tools prefixed with 'remote-http-server'\n  console.log('Found MCP (http) tools:', httpTools.map(t => t.name));\n\n  // Example: Call a 'echo' tool on the stdio server (expecting structured JSON)\n  try {\n    const echoResult = await client.callTool('my_mcp_servers.local-stdio-server.echo', { message: 'Hello from stdio!' });\n    console.log('MCP stdio echo tool result:', echoResult);\n  } catch (error) {\n    console.error('Error calling MCP stdio echo tool:', error);\n  }\n\n  // Example: Call an 'add' tool on the http server (expecting a primitive number)\n  try {\n    const addResult = await client.callTool('my_mcp_servers.remote-http-server.add', { a: 10, b: 20 });\n    console.log('MCP http add tool result:', addResult);\n  } catch (error) {\n    console.error('Error calling MCP http add tool:', error);\n  }\n\n  await client.close(); // Important: Cleans up all active MCP client sessions and subprocesses\n}\n\nmain().catch(console.error);\n```\n\n## Advanced Configuration\n\n### Environment Variables for Stdio Servers\n\nYou can pass environment variables to stdio-based MCP servers using the `env` field. These support UTCP variable substitution:\n\n```typescript\n{\n  transport: 'stdio',\n  command: 'node',\n  args: ['server.js'],\n  env: {\n    API_KEY: '${MY_API_KEY}',  // Will resolve from namespaced variable\n    LOG_LEVEL: 'debug',\n    NODE_ENV: 'production'\n  }\n}\n\n// When creating the client, use namespaced variables:\nconst client = await UtcpClient.create(process.cwd(), {\n  manual_call_templates: [mcpTemplate],\n  variables: {\n    my__manual__name_MY_API_KEY: 'your-api-key'  // Note: manual_name -> my__manual__name_\n  }\n});\n```\n\n### HTTP Server Configuration\n\nHTTP-based MCP servers support additional configuration options:\n\n```typescript\n{\n  transport: 'http',\n  url: 'https://mcp-server.example.com/mcp',\n  headers: {\n    'X-Custom-Header': 'value',\n    'User-Agent': 'MyApp/1.0'\n  },\n  timeout: 60,              // Request timeout in seconds\n  sse_read_timeout: 600,    // SSE read timeout in seconds\n  terminate_on_close: true  // Terminate connection when client closes\n}\n```\n\n### OAuth2 Authentication\n\nFor HTTP servers requiring authentication, use the top-level `auth` field:\n\n```typescript\nconst serializer = new McpCallTemplateSerializer();\nconst secureTemplate = serializer.validateDict({\n  name: 'secure_mcp_servers',\n  call_template_type: 'mcp',\n  config: { /* ... */ },\n  auth: {\n    auth_type: 'oauth2',\n    token_url: 'https://auth.example.com/oauth/token',\n    client_id: '${MCP_CLIENT_ID}',\n    client_secret: '${MCP_CLIENT_SECRET}',\n    scope: 'mcp.tools.read mcp.tools.execute'\n  }\n});\n\n// Configure client with namespaced variables\nconst client = await UtcpClient.create(process.cwd(), {\n  manual_call_templates: [secureTemplate],\n  variables: {\n    secure__mcp__servers_MCP_CLIENT_ID: 'your-client-id',\n    secure__mcp__servers_MCP_CLIENT_SECRET: 'your-client-secret'\n  }\n});\n```\n\nThe plugin automatically handles token caching and refresh.\n\n### Resource Registration\n\nMCP servers can expose resources (files, data sources, etc.) alongside tools. To register these resources as callable tools, set `register_resources_as_tools` to `true`:\n\n```typescript\n{\n  name: 'my_mcp_servers',\n  call_template_type: 'mcp',\n  config: { /* ... */ },\n  register_resources_as_tools: true  // Exposes server resources as tools\n}\n```\n\n## FastMCP Compatibility\n\nStarting with version 1.0.17, this plugin automatically handles JSON Schema `$defs` references used by FastMCP 2.0+ servers. This resolves the issue where tool discovery would fail with:\n\n```\nMissingRefError: can't resolve reference #/$defs/...\n```\n\n**How it works:**\n- When tools are discovered from MCP servers, their input and output schemas are automatically dereferenced\n- `$defs` references are resolved and inlined into the schema\n- This process is transparent and requires no configuration changes\n- If dereferencing fails for any reason, the original schema is used as a fallback\n\nThis ensures seamless integration with:\n- `basic-memory` and other FastMCP-based servers\n- Any MCP server using modern JSON Schema draft-2020-12 features\n- Legacy MCP servers (which continue to work as before)\n\n## Tool Naming Convention\n\nTools discovered from MCP servers follow the naming pattern:\n\n```\n{manual_name}.{server_name}.{tool_name}\n```\n\nFor example:\n- Manual name: `my_mcp_servers`\n- Server name: `local-stdio-server`\n- Tool name: `echo`\n- **Full tool name**: `my_mcp_servers.local-stdio-server.echo`\n\n## Session Management\n\nThe MCP plugin maintains persistent sessions with each configured server:\n\n- **Session Reuse**: Connections are established once and reused for multiple tool calls, significantly improving performance.\n- **Automatic Recovery**: If a session fails (network error, subprocess crash, etc.), the plugin automatically:\n  1. Detects the failure\n  2. Cleans up the broken session\n  3. Establishes a new session\n  4. Retries the operation once\n\nThis resilience mechanism handles common transient issues without requiring manual intervention.\n\n## Error Handling\n\nThe plugin provides comprehensive error handling:\n\n- Connection failures are logged and retried once\n- Invalid tool names produce descriptive error messages\n- OAuth2 token fetch failures include detailed error context\n- MCP server errors are properly propagated to the caller\n\n## API Reference\n\n### McpCallTemplate\n\n```typescript\ninterface McpCallTemplate {\n  name?: string;\n  call_template_type: 'mcp';\n  config: McpConfig;\n  auth?: OAuth2Auth;\n  register_resources_as_tools?: boolean;\n}\n```\n\n### McpStdioServer\n\n```typescript\ninterface McpStdioServer {\n  transport: 'stdio';\n  command: string;\n  args?: string[];\n  cwd?: string;\n  env?: Record<string, string>;\n}\n```\n\n### McpHttpServer\n\n```typescript\ninterface McpHttpServer {\n  transport: 'http';\n  url: string;\n  headers?: Record<string, string>;\n  timeout?: number;              // Default: 30 seconds\n  sse_read_timeout?: number;     // Default: 300 seconds\n  terminate_on_close?: boolean;  // Default: true\n}\n```\n\n## Best Practices\n\n1. **Close clients properly**: Always call `await client.close()` to clean up MCP sessions and subprocesses.\n2. **Use variable substitution**: Store sensitive credentials in environment variables and reference them with `${VAR_NAME}`.\n3. **Configure timeouts**: Adjust `timeout` and `sse_read_timeout` based on your server's response characteristics.\n4. **Server naming**: Use descriptive server names as they become part of the tool naming hierarchy.\n5. **Error handling**: Wrap tool calls in try-catch blocks for robust error handling.\n\n## License\n\nThis package is part of the UTCP project. See the main repository for license information.",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp",
+   "type": "git",
+   "url": "git+https://github.com/Alexma03/alexma03-utcp.git"
+  },
+  "time": {
+   "1.1.1": "2026-03-16T08:40:51.174Z",
+   "1.1.2": "2026-03-17T08:14:12.339Z",
+   "created": "2026-03-16T08:40:50.825Z",
+   "modified": "2026-03-17T08:14:12.796Z"
+  },
+  "versions": {
+   "1.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@alexma03/utcp-mcp@1.1.1",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/utcp-mcp_1.1.1_1773650450983_0.5274786987079629"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8389c0a81e60]",
+     "name": "alexma03"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "name": "Alexma03"
+    },
+    "bugs": {
+     "url": "https://github.com/Alexma03/alexma03-utcp/issues"
+    },
+    "dependencies": {
+     "@apidevtools/json-schema-ref-parser": "^15.1.2",
+     "@modelcontextprotocol/sdk": "^1.17.4",
+     "axios": "^1.11.0"
+    },
+    "description": "Model Context Protocol integration for UTCP",
+    "devDependencies": {
+     "@alexma03/utcp-sdk": "workspace:*",
+     "@types/bun": "latest",
+     "@types/json-schema": "^7.0.15",
+     "bun-types": "latest",
+     "typescript": "^5.9.2",
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-Yytig89d8JeJ+ZFetVlItlJy7hwwGJIreMFIZfLRpW4+E8w6O+2Od4GTSVh8Wc1VNcZJykLRfai3N1KHOprD0Q==",
+     "shasum": "25124d62eed702a09374581d91d4a28849d4359d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCIa76zb74Y4CcMNmXDusIE1Xe6iVlzjkOLYbnMqj7oKgIgbdEYeeSGScmt2zA3pYTx/sQv90s3rotMBIs49+Qbn6Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@alexma03/utcp-mcp/-/utcp-mcp-1.1.1.tgz",
+     "unpackedSize": 856422
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "97f8055784030184a8917378a6de581d7ae7f22d",
+    "homepage": "https://github.com/Alexma03/alexma03-utcp#readme",
+    "keywords": [
+     "utcp",
+     "universal-tool-calling-protocol",
+     "tools",
+     "api",
+     "typescript",
+     "tool calling",
+     "mcp",
+     "agent",
+     "ai",
+     "llm",
+     "modelcontextprotocol"
+    ],
+    "license": "MPL-2.0",
+    "main": "dist/index.cjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8389c0a81e60]",
+      "name": "alexma03"
+     }
+    ],
+    "module": "dist/index.js",
+    "name": "@alexma03/utcp-mcp",
+    "peerDependencies": {
+     "@alexma03/utcp-sdk": "^1.1.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/Alexma03/alexma03-utcp.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.1.1"
+   },
+   "1.1.2": {
+    "_from": "file:alexma03-utcp-mcp-1.1.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@alexma03/utcp-mcp@1.1.2",
+    "_integrity": "sha512-l83vfGu7XZtLemYuQFjOPiU/C2EU2uvHK7uyDSakA+WXFvaHClrqKoXGcSQ/kQuS4SmaEf2KzEvOGlvKP/muFw==",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/utcp-mcp_1.1.2_1773735252184_0.11927715080943546"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8389c0a81e60]",
+     "name": "alexma03"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/private/var/folders/mw/dp007xzd5sz9vkhkjfz0fdh40000gn/T/50c8fc1f7c3983a2b68b74e2ac6100f4/alexma03-utcp-mcp-1.1.2.tgz",
+    "author": {
+     "name": "Alexma03"
+    },
+    "bugs": {
+     "url": "https://github.com/Alexma03/alexma03-utcp/issues"
+    },
+    "dependencies": {
+     "@apidevtools/json-schema-ref-parser": "^15.1.2",
+     "@modelcontextprotocol/sdk": "^1.17.4",
+     "axios": "^1.11.0"
+    },
+    "description": "Model Context Protocol integration for UTCP",
+    "devDependencies": {
+     "@alexma03/utcp-sdk": "^1.1.1",
+     "@types/jest": "29.5.12",
+     "@types/json-schema": "^7.0.15",
+     "@types/node": "20.0.0",
+     "jest": "29.7.0",
+     "ts-jest": "29.1.2",
+     "typescript": "^5.9.2",
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-l83vfGu7XZtLemYuQFjOPiU/C2EU2uvHK7uyDSakA+WXFvaHClrqKoXGcSQ/kQuS4SmaEf2KzEvOGlvKP/muFw==",
+     "shasum": "1c99b33b5c76c3635f09d9f1f7cd21bceae95130",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE+BUSIIpMOH7GrMEdm41Lm5gcHl9hRJUyEw3dzIBRzHAiBW8wxcQnixk3Edw4EEP2k/6Fib0X6ShH7LrA+GMle2lQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@alexma03/utcp-mcp/-/utcp-mcp-1.1.2.tgz",
+     "unpackedSize": 856636
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/Alexma03/alexma03-utcp#readme",
+    "keywords": [
+     "utcp",
+     "universal-tool-calling-protocol",
+     "tools",
+     "api",
+     "typescript",
+     "tool calling",
+     "mcp",
+     "agent",
+     "ai",
+     "llm",
+     "modelcontextprotocol"
+    ],
+    "license": "MPL-2.0",
+    "main": "dist/index.cjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8389c0a81e60]",
+      "name": "alexma03"
+     }
+    ],
+    "module": "dist/index.js",
+    "name": "@alexma03/utcp-mcp",
+    "peerDependencies": {
+     "@alexma03/utcp-sdk": "^1.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/Alexma03/alexma03-utcp.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "test": "NODE_OPTIONS=--experimental-vm-modules jest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.1.2"
+   }
+  }
+ },
+ "name": "@alexma03/utcp-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@alexma03%2Futcp-mcp"
+}

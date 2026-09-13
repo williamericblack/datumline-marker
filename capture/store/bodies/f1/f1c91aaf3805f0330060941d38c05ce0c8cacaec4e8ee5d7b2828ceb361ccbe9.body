@@ -1,0 +1,727 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.7.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:f34981aa142e]",
+    "name": "ayeshlk"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.5.0",
+   "0.5.1",
+   "0.5.2",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0",
+   "0.7.1",
+   "0.7.2",
+   "0.7.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@archsmith/mcp-server",
+  "_rev": "9-ac2f09bfe671c21ba98f10855133db29",
+  "bugs": {
+   "url": "https://github.com/ayeshLK/archsmith/issues"
+  },
+  "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+  "dist-tags": {
+   "latest": "0.7.3"
+  },
+  "homepage": "https://github.com/ayeshLK/archsmith#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "diagram",
+   "architecture",
+   "svg",
+   "agent-tools"
+  ],
+  "maintainers": [
+   {
+    "email": "[redacted-email:f34981aa142e]",
+    "name": "ayeshlk"
+   }
+  ],
+  "name": "@archsmith/mcp-server",
+  "readme": "# @archsmith/mcp-server\n\nThe `archsmith-mcp` MCP server for [ArchSmith](https://github.com/ayeshLK/archsmith) \u2014 exposes `render`/`validate`/registry lookups to any MCP-capable agent, over stdio.\n\nA sibling of `@archsmith/cli`, not a wrapper around it: both call `render()`/`validate()` from `@archsmith/renderer` directly. See the [root README](https://github.com/ayeshLK/archsmith#readme) for the full picture.\n\n## Connecting it to an MCP host\n\nPoint the host at the built entrypoint, e.g. in Claude Desktop's `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"archsmith\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@archsmith/mcp-server\"]\n    }\n  }\n}\n```\n\n## Tools\n\n`get_schema`, `render`, `validate`, `list_registries`, `get_registry` \u2014 mirror the CLI's own commands (same validate-before-render behavior, same `family` filter on `get_registry`). `render` defaults to `embedFonts: false` so the normal agent workflow stays compact; pass `embedFonts: true` deliberately when the exported SVG must include the bundled Arimo font and render identically without installed fonts. The embedded font is subset to just the glyphs that diagram's own text needs (see issue #55) rather than the whole font, so its size scales with the diagram instead of a fixed cost \u2014 still worth opting into deliberately, but no longer a blind tax regardless of content. The renderer library and CLI still embed fonts by default.\n\nA render under 25,000 bytes of SVG (`INLINE_THRESHOLD_BYTES` in `renderStore.ts`) is returned as a single text content block, as above. A larger one \u2014 a big diagram, or `embedFonts: true` pushing an already-sizeable one over the line \u2014 is returned as a [`resource_link`](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#resource-links) instead: a small `{ type: \"resource_link\", uri: \"archsmith://render/<id>\", size, ... }` descriptor, fetchable via `resources/read` on that `uri`. This means the tool result itself never grows unbounded \u2014 unlike subsetting, which shrinks a fixed cost but still scales with diagram content, this has no ceiling on render size. A real Claude Code session tested against an equivalent-sized payload spent 3,279 tokens on the `resource_link` response versus 23,916 tokens inlining the same content directly \u2014 the model doesn't have to read bytes it doesn't need. `archsmith://render/<id>` entries live in a small in-memory cache bounded to the most recent 20 renders (`MAX_ENTRIES`); reading an evicted or unknown id returns a standard JSON-RPC `-32002` (\"Resource not found\") error, not a tool error.\n\n### Render response sizes\n\nMeasured against the current fixtures as UTF-8 bytes, including a serialized JSON-RPC `{ jsonrpc, id, result }` response envelope. \"SVG\" is the underlying render size regardless of shape; \"MCP response\" is what's actually returned \u2014 either that SVG inlined, or (marked *link*) a small `resource_link` descriptor pointing at it:\n\n| Fixture | Fonts | SVG | MCP response |\n|---|---:|---:|---:|\n| `minimal-valid` | omitted (default) | 9,014 B | 9,989 B |\n| `minimal-valid` | embedded (subset) | 22,313 B | 23,289 B |\n| `simple-3-tier-web-app` | omitted (default) | 12,555 B | 13,857 B |\n| `simple-3-tier-web-app` | embedded (subset) | 26,130 B | 27,433 B |\n| `ticket-booking` | omitted (default) | 23,441 B | 25,639 B |\n| `ticket-booking` | embedded (subset) | 38,328 B | 355 B (*link*) |\n\nBefore subsetting, embedding cost a fixed ~40 KB regardless of fixture (two complete font weights) \u2014 enough to exceed common MCP client result limits even on a modest, everyday diagram like `simple-3-tier-web-app`, not just a maximal one (issue #55). Subsetting to each diagram's own text cuts that by roughly 40-55%, scaling with content instead of being a flat tax \u2014 but `ticket-booking` embedded is still 38,328 B, over the 25,000 B inline threshold, which is exactly the case the `resource_link` fallback above exists for: the tool response stays a small, constant-size descriptor no matter how large the underlying SVG is.\n\nBefore the response-shape fix in #50, the server also returned both SVG text and a duplicate base64 image block and embedded fonts by default; that made the `ticket-booking` response 149,897 B. The server now avoids duplicate payloads and keeps font embedding as an explicit, size-proportional portability tradeoff instead of hard-coding a particular client's result-size limit.\n\nReal-host smoke test: Claude Code 2.1.153 with Claude Haiku 4.5 successfully rendered the full `ticket-booking` fixture through the stdio MCP server with `embedFonts` omitted. It received the SVG without an embedded `@font-face`.\n\n`get_schema` returns the diagram IR JSON Schema \u2014 the same document as the `archsmith://schema` resource below, but as a tool the connected model can call on its own initiative before authoring an IR, rather than depending on the host client to surface a resource. `validate` and `render` name it (and `get_registry`) in their own descriptions, and again in their response content whenever the IR turns out to be invalid.\n\n## Resources\n\n`archsmith://schema` and one `archsmith://registries/<name>` per governed registry \u2014 lets an agent authoring an IR read the live, current schema/registries directly instead of working from a stale copy baked into a prompt.\n\n`archsmith://render/<id>` is a third, dynamic kind: `render` registers one whenever a render is too large to inline (see above). Deliberately not listed via `resources/list` \u2014 per the [spec](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#resource-links), a resource link returned by a tool isn't guaranteed to appear there \u2014 it's only reachable via the `resource_link` `render` itself returned, and it's evicted from the bounded in-memory store once 20 more renders have happened, so it doesn't survive a server restart or accumulate unbounded memory in a long session.\n\n## License\n\nApache-2.0\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/ayeshLK/archsmith.git"
+  },
+  "time": {
+   "0.5.0": "2026-08-07T19:12:02.262Z",
+   "0.5.1": "2026-08-08T13:48:15.874Z",
+   "0.5.2": "2026-08-08T21:27:31.813Z",
+   "0.6.0": "2026-08-10T10:33:11.064Z",
+   "0.6.1": "2026-08-11T17:58:28.448Z",
+   "0.7.0": "2026-08-12T11:40:34.796Z",
+   "0.7.1": "2026-08-14T08:33:32.040Z",
+   "0.7.2": "2026-08-14T09:22:33.849Z",
+   "0.7.3": "2026-08-19T14:00:07.478Z",
+   "created": "2026-08-07T19:12:01.961Z",
+   "modified": "2026-08-19T14:00:07.741Z"
+  },
+  "versions": {
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.5.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1786129922110_0.3123111194722108"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.5.0",
+     "@archsmith/schema": "^0.5.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-5y6lqdZEb5C8t9zAzKN/qCj8VagPc/XrcKRlWHVIRd7hAsyKAtFMbtja3uGJ9MIgtfrDFPqaRH2PbEFYK9Owow==",
+     "shasum": "e6fe4cb9adec802eb0a59888da85dd1badba0299",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCEgfSruU7y8LuM6wc6AowSsOzmZSNaYEQ5zwioyzkVuQIhAP+0dBL6ZKIjoCptX6VXBxyikyBG7S+fIYNoX3qPn/yj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 13247
+    },
+    "gitHead": "ee929a4273efe61783ef3e1c19ec4fd40ae317e1",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.5.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.1_1786196895729_0.9689061669023338"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.5.1",
+     "@archsmith/schema": "^0.5.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-MBcAvssQNaJ3diYrDz2qOF9jE27YefE8R+tyJaLFcmmK/4XEQUdyqxZjWDLYptgh6HvQcfkx7+xjRRVWMxwvPw==",
+     "shasum": "886e3cc469cdcdab26c49795eacc30f48e1b2f9f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCJP84h2Ietg13Mhq5CQe0lVbiGDOktnjYe98XqWBJrawIhALZ8tHcMatJ1rGozSPSRIyQWgvPi9DVNCDpwCPJSPQNI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.5.1.tgz",
+     "unpackedSize": 13648
+    },
+    "gitHead": "6144eab9465efcfc7d46b8d5ad7bd364ba74a9aa",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.1"
+   },
+   "0.5.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.5.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.2_1786224451669_0.28974605151110455"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.6.0",
+     "@archsmith/schema": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-Dn088BuMe7HoD71UJFYKHLxOu/aJMdevnySqYPGMoy9Uivu+jw+fE46nhOXyl10NL3CBABY/Fk0OiKcegYEjRQ==",
+     "shasum": "aeac56ba6c3eb98e26129786d0590330e9c395a2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD4dA7qLEhq7d3n6Mio4Mh7h0IfCaiywGw6kRF9K6kkRAIhAL4aBuOG2emaBZBiFrMifbVxoV54wXMwjL0jQ80eYm7s"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.5.2.tgz",
+     "unpackedSize": 13648
+    },
+    "gitHead": "0c2b72af8ce9705513a630d5bd68697ff5cfc4bf",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.2"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.6.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1786357990934_0.14581492279966968"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.6.0",
+     "@archsmith/schema": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-bhvBN5jS8+6E2xPqyYxs0SUwpYvRkBwDFc17eLnlC1TxRgifPoYRUElpVfZxqeAQLQyIkfvHsUYHUEwlKD1RLA==",
+     "shasum": "23ec662217554e39661e6d209aeba397b1095ec4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDIFDmofx8iFUwwvoTl19v67CZklyBn0tzfvsHOsVuGVQIgaxULqwy0ouR6YviXbXfYkFamr9QCKquafpo/bUPl2Ug="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 15974
+    },
+    "gitHead": "ab5c991f68a5a94a15239076fefbe256324bb25f",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.6.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1786471108309_0.5460602850048886"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.6.0",
+     "@archsmith/schema": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-tIcLq4ygshUoUSq5oakN4z4OvM1HEBYGqb2+e7SZ2UdCqaZrOYt3USj+bllqzPH3c3VOd7j+JDc71dqF15F4HA==",
+     "shasum": "bc2e918dbca7cf0d653a62f7022498472c696463",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTg1dt1tHz3VDAr0IlVkdHDsNOZnVKRGMRzhfA4gr5vgIhAP3KPQvFExbm+crTp3fVFvXy/JBBmZ/xT0N063UuwemY"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 17092
+    },
+    "gitHead": "7e188c37ad0f1178fa0143d93b5617d01d5075e2",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.7.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1786534834652_0.6638407671460949"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.7.0",
+     "@archsmith/schema": "^0.7.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-7IjBYK+d+1EfHPUbI+7bwTEdQ7J0btoVEgxUH1VsHH4Rw2WkvU44/l4G/7FkTA5AtHbwfU2ASLIJCJjcQLnDbQ==",
+     "shasum": "c505bb8b5ffa4678b127191b0160fda1811be173",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCRoErKoUzYQidh5SLiuviwpqdkl0lutEqqwl+/GTn1eQIhAJjzMXSBdOMZQ0dZ2krCHu1059uhmVFQXBt+T9RhF9nI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 27185
+    },
+    "gitHead": "0ec8c7fcae3b21c8c1f7ce1fce51b913bded5457",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.7.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.1_1786696411907_0.41840359512588376"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.8.0",
+     "@archsmith/schema": "^0.7.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-DNvv7V2gtzKriIIEzWWKXElcdxGz6qNszVmVbU/KnvOijYmnYENwuFq/ZMHNn3gIR5tOyQw5+MEJqvwz1vODWA==",
+     "shasum": "9f075cf3bca50d2a9a76f2a3c687f5e85487e1a1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICDiL5j1pAR5HQIIIEEyVmt+ZzfdToxtb0zIT9S2lkCBAiEAwA8j+P57zAPd/ayYCu8ew7B/Ebbqv3a8TUuqG/RnUPI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.7.1.tgz",
+     "unpackedSize": 27185
+    },
+    "gitHead": "590ffc5f4e9bd92b93ce089a963dc60806513929",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.1"
+   },
+   "0.7.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.7.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.2_1786699353711_0.17925445937286444"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.9.0",
+     "@archsmith/schema": "^0.7.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-vEZBQjiLVJRjhBRYEcgeL0c4divx8r3k+w9KZxkqruEp6gHgHCgT1/eiLSRf+pl0ft/XQqPUxt6dTsEdTdQW4w==",
+     "shasum": "5a1d349d30e06fad2a94ba1958a6b574b3a98e9d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDK/6aSAPsxqs2pEruNV91lUZTrapyvcht4JS1jXX7jqgIgEzPW2Gh+vOE5UnNk6viAl2tQszOxFSKTPM2z6tGgFBM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.7.2.tgz",
+     "unpackedSize": 27185
+    },
+    "gitHead": "44c03dbdfea5e7c1cabe5b64ac2a2e4fcd89ffcc",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.2"
+   },
+   "0.7.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@archsmith/mcp-server@0.7.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.3_1787148007350_0.38585708650390016"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f34981aa142e]",
+     "name": "ayeshlk"
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "archsmith-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ayeshLK/archsmith/issues"
+    },
+    "dependencies": {
+     "@archsmith/renderer": "^0.10.0",
+     "@archsmith/schema": "^0.8.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing ArchSmith's render/validate/registry lookups to any MCP-capable agent, over stdio.",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-oCLLvcTY3/y6Nk3FS931nNGEmwvNGHCMYe+fDP98F3Fv+PpefJ1JDDqooB5xg/b/SPSFlGj9dOU0jC7iXqlDZg==",
+     "shasum": "6e4a35d3637ad22bff0d512aefb7c8c5a6f6f92b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCkBmsTM2nRWPlWqic6vgtmoiS3kaXJUShbD6oPyHVxRAIhAMMo1gRYNKwZgFX76Eu2JIYwKHnhFUyhNztx2oCrJV0P"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@archsmith/mcp-server/-/mcp-server-0.7.3.tgz",
+     "unpackedSize": 27186
+    },
+    "gitHead": "5771ebf813c5a5d9ec7faf4edba55acf1dcf5ba9",
+    "homepage": "https://github.com/ayeshLK/archsmith#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "diagram",
+     "architecture",
+     "svg",
+     "agent-tools"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f34981aa142e]",
+      "name": "ayeshlk"
+     }
+    ],
+    "name": "@archsmith/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/ayeshLK/archsmith.git"
+    },
+    "scripts": {
+     "build": "tsc -b",
+     "test": "cd dist && node --test"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.3"
+   }
+  }
+ },
+ "name": "@archsmith/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@archsmith%2Fmcp-server"
+}

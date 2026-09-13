@@ -1,0 +1,1255 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.13.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:001b4d0f7439]",
+    "name": "kaflow"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.12.1",
+   "0.13.0",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.8.0",
+   "0.8.1",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@flowboardlabs/mcp-server",
+  "_rev": "17-ce4de0f6b6a566e548626c30d25527de",
+  "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+  "dist-tags": {
+   "latest": "0.13.0"
+  },
+  "keywords": [
+   "flowboard",
+   "mcp",
+   "ai",
+   "project-management",
+   "claude"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:001b4d0f7439]",
+    "name": "kaflow"
+   }
+  ],
+  "name": "@flowboardlabs/mcp-server",
+  "readme": "# @flowboardlabs/mcp-server\n\nMCP (Model Context Protocol) server for [FlowBoard](https://flowboard.app) \u2014 lets AI tools like Claude Code, Cursor, and other MCP-compatible assistants manage your projects, tasks, ideas, and releases directly from your IDE.\n\n## Setup\n\n### 1. Get an API Key\n\nGo to **Settings > Integrations > API Keys** in your FlowBoard workspace. Click \"Generate API Key\" and copy it.\n\n### 2. Configure Your AI Tool\n\nAdd the following to your MCP server configuration:\n\n**macOS / Linux:**\n\n```json\n{\n  \"mcpServers\": {\n    \"flowboard\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@flowboardlabs/mcp-server\"],\n      \"env\": {\n        \"FLOWBOARD_API_KEY\": \"your-api-key-here\",\n        \"FLOWBOARD_USER_EMAIL\": \"[redacted-email:53e6cdc30765]\"\n      }\n    }\n  }\n}\n```\n\n**Windows (REQUIRED \u2014 npx needs cmd wrapper):**\n\n```json\n{\n  \"mcpServers\": {\n    \"flowboard\": {\n      \"command\": \"cmd\",\n      \"args\": [\"/c\", \"npx\", \"-y\", \"@flowboardlabs/mcp-server\"],\n      \"env\": {\n        \"FLOWBOARD_API_KEY\": \"your-api-key-here\",\n        \"FLOWBOARD_USER_EMAIL\": \"[redacted-email:53e6cdc30765]\"\n      }\n    }\n  }\n}\n```\n\n> **Important:** On Windows, you **must** use the `cmd /c` wrapper. Using `npx` directly as the command will fail silently.\n\n### Where to put this config\n\n- **Claude Code:** `.mcp.json` in your project root\n- **Cursor:** Cursor MCP settings\n- **Other tools:** Check your tool's MCP configuration docs\n\n## Behaviour changes for existing integrators\n\nTwo changes to `create_task` (which calls the `submitTask` endpoint) that existing integrations should know about:\n\n- **`priorityScore` is no longer a fixed default.** Previously, every task created via the API got `priorityScore: 5` regardless of workspace configuration. It's now computed from the workspace's own `priorityFormula` (Settings > Workspace) \u2014 the same formula `score_task` uses and the UI shows. Workspaces still on the default formula (`impact + clients + techEase`) see no change; workspaces with a custom formula will see different scores on API-created tasks than before.\n- **Unknown `customFields` keys are now rejected.** A `customFields` key that doesn't match a workspace-configured field (by id or by name) now returns a 400 naming the valid fields, instead of being written through silently as it was before. Call `get_workspace_schema` to see the valid keys for a workspace.\n\n## Environment Variables\n\n| Variable | Required | Description |\n|----------|----------|-------------|\n| `FLOWBOARD_API_KEY` | Yes | Your FlowBoard API key |\n| `FLOWBOARD_API_URL` | No | Custom API URL (for self-hosted instances) |\n| `FLOWBOARD_USER_EMAIL` | No | Your email address in the workspace. Enables user-aware features: `mine` filter in search, and proper comment attribution |\n| `FLOWBOARD_REVIEW_RUBRIC` | No | Path to a local Markdown file with your own idea-review rubric, used by the `flowboard://review-rubric` resource and the review prompts instead of the shipped default. If the path can't be read, the server logs a warning to stderr and falls back to the default rubric rather than failing to start. |\n\n## Available Tools \u2014 25 tools across 7 categories\n\n### Projects\n\n| Tool | Description |\n|------|-------------|\n| `list_projects` | List all projects in the workspace. Returns id, name, description, color. Use project IDs when creating flow tasks (feature/improvement/fix/chore). |\n\n### Tasks\n\n| Tool | Description |\n|------|-------------|\n| `search_tasks` | Search and filter tasks. Params: `board` (flows/bugs/ideas), `status` (open/in_progress/blocked/ready/done/paused), `statuses` (comma-separated), `projectId`, `assignee` (email or ID), `type` (idea/bug/feature/improvement/fix/chore), `tags` (comma-separated), `limit` (default 100, max 500), `mine` (boolean \u2014 requires FLOWBOARD_USER_EMAIL), `q` (free-text search across title and description \u2014 use to check whether an idea already exists), `sortBy` (`priority` (default) / `votes` / `created`). |\n| `get_task` | Get a single task by `taskId` or `taskNumber`, including all comments. Returns full task details: title, description, status, type, tags, assignee, time logs, QA status, dependencies, and comments thread. |\n| `create_task` | Create a new task. Params: `title` (3-200 chars), `description` (0-5000 chars), `type` (idea/bug/feature/improvement/fix/chore), `projectId` (required for feature/improvement/fix/chore \u2014 use `list_projects` to find IDs), `tags` (comma-separated, max 10), `linkedTaskNumbers` (comma-separated task numbers to link the new task to, e.g. `\"1474,1481\"` \u2014 links are bidirectional), `impact` (1-10, business impact), `clients` (1-10, demand), `techEase` (1-10, implementation ease), `estimate` (hours, or `null` to clear), `customFields` (object keyed by field id or name \u2014 call `get_workspace_schema` to discover valid keys). Ideas go to the ideas board, bugs to bugs board, flow types to the flows board under the specified project. `priorityScore` is computed from the workspace's own `priorityFormula` (Settings > Workspace), not a fixed default \u2014 a workspace on a custom formula will score API-created tasks differently than one on the default `impact + clients + techEase`. An unrecognized `customFields` key is rejected with a 400 that names the valid fields, rather than being written through silently. |\n| `update_task` | Update a task by `taskId` or `taskNumber`. Params: `status` (open/in_progress/blocked/ready/done/paused), `comment` (1-5000 chars \u2014 adds a comment), `assignee` (email or ID), `branchName` (git branch, max 200 chars), `externalReferenceType` (github_pr/gitlab_mr), `externalReferenceUrl`, `externalReferenceTitle`, `linkedTaskNumbers` (comma-separated task numbers to link to \u2014 appends to existing links, bidirectional, deduplicated). Multiple fields can be set in one call. |\n| `delete_task` | Soft-delete (trash) a task by `taskId` or `taskNumber`. Task can be restored from trash in the UI. |\n\n### Ideas\n\n| Tool | Description |\n|------|-------------|\n| `list_ideas` | Shortcut for `search_tasks` with `board=ideas`. Params: `status`, `limit`. |\n| `vote_idea` | Toggle a vote on an idea by `taskId` or `taskNumber`. Voting again removes the vote. Returns updated vote count. |\n\n### Idea Review\n\nRequires the **Review Ideas** (`canReviewIdeas`) API key permission. Each tool guards that the target task is actually on the workspace's ideas board \u2014 calling one on a non-idea task returns a 400 telling you to use `update_task` instead.\n\n| Tool | Description |\n|------|-------------|\n| `accept_idea` | Accept an idea: marks it ready and stamps when it was accepted. Does NOT move it into a flow \u2014 follow with `place_idea` to put it in a project, and `score_task` to set `techEase`. Params: `taskId` or `taskNumber`, `reason` (optional note recorded as an audit comment). |\n| `reject_idea` | Reject an idea. Params: `taskId` or `taskNumber`, `reason` (**required**, 1-5000 chars). Written as a comment visible to the submitter \u2014 it's permanent, so write it as feedback, not a verdict. |\n| `rework_idea` | Send an idea back for rework \u2014 also how you ask the submitter for more information. Params: `taskId` or `taskNumber`, `reason` (**required**, 1-5000 chars). Delivered to the submitter as a notification, so put the actual questions in it. |\n| `place_idea` | Move an accepted idea off the ideas board into a flow project, reopening it as work. Params: `taskId` or `taskNumber`, `projectId` (**required** \u2014 use `list_projects` or `get_workspace_schema`), `reason` (optional audit note). |\n\n### Scoring\n\n| Tool | Description |\n|------|-------------|\n| `score_task` | Set scoring fields on any task (idea, bug, or flow item) and recompute `priorityScore` using the workspace's formula. Params: `taskId` or `taskNumber`, `impact` (1-10), `clients` (1-10), `techEase` (1-10), `estimate` (hours, or `null` to clear), `customFields` (object keyed by field id or name). `impact`/`clients` reflect submitter-reported demand \u2014 ask before overwriting them; `techEase` is yours to judge. Every change is written as a before/after audit comment. If nothing actually changed, returns `changes: []` and writes nothing. Requires **Update Tasks** (`canUpdateTasks`). |\n| `get_workspace_schema` | Get the workspace's `priorityFormula`, custom field definitions, project list, and the ideas/bugs board IDs. Call this before scoring in a workspace you haven't scored before \u2014 the formula determines which fields actually move priority. Requires **View Projects** (`canViewProjects`). |\n\n### Comments\n\n| Tool | Description |\n|------|-------------|\n| `get_comments` | Get comments for a task by `taskId` or `taskNumber`. Params: `limit` (default 50, max 100). Returns comment text, author, timestamp, and type. |\n| `add_comment` | Add a comment to a task by `taskId` or `taskNumber`. Params: `text` (1-5000 chars). When FLOWBOARD_USER_EMAIL is set, the comment is attributed to your account. |\n\n### Releases\n\n| Tool | Description |\n|------|-------------|\n| `list_releases` | List confirmed releases. Params: `limit` (default 25, max 100). Returns name, version, status, task count, dates. |\n| `get_release` | Get a single release by `releaseId` with all associated tasks (id, title, status, type, taskNumber). |\n| `get_release_draft` | Get the current release draft state. Returns two lists: `releaseItems` (tasks staged for the next release) and `hotfixItems` (bugs staged for a hotfix), each with full task details, plus the draft `version` and `deployNotes`. Requires `canManageReleases` API key permission. |\n| `add_to_release_draft` | Add task(s) to the release or hotfix draft. Params: `taskIds` (comma-separated) and/or `taskNumbers` (comma-separated), `list` (\"release\" or \"hotfix\", default \"release\"). Tasks are mutually exclusive between lists \u2014 adding to one removes from the other. Requires `canManageReleases`. |\n| `remove_from_release_draft` | Remove task(s) from the release or hotfix draft. Params: `taskIds` and/or `taskNumbers`, `list`. Requires `canManageReleases`. |\n| `set_release_version` | Set the version string for the release draft. Params: `version` (e.g. \"1.2.0\"). Requires `canManageReleases`. |\n| `confirm_release` | Confirm and publish a release from the current draft. Creates the release, archives all included tasks (sets `releaseId` and `archived: true`), and clears the draft. Params: `version` (overrides draft version), `name` (defaults to \"Release {version}\"), `isPublic` (boolean), `environments` (comma-separated, e.g. \"Staging,Production\"), `list` (\"release\" or \"hotfix\"). Requires `canManageReleases`. |\n| `add_tasks_to_release` | Add task(s) to an EXISTING (already-published) release \u2014 e.g. fixes cherry-picked onto an already-cut release branch. Applies the same effects as confirming (`releaseId` + `archived: true`). Idempotent: tasks already in the release are skipped and reported. Params: `releaseId` (primary key) or `version` (fails if it matches more than one release), plus `taskIds` and/or `taskNumbers` (comma-separated). Requires `canManageReleases`. |\n| `remove_tasks_from_release` | Remove task(s) from an existing release. Clears `releaseId`, unarchives the tasks so they reappear on their board. Tasks not in the release are skipped and reported. Same params as `add_tasks_to_release`. Requires `canManageReleases`. |\n\n### Task identification\n\nAll task-related tools accept either a `taskId` (Firestore document ID) or a `taskNumber` (the human-readable integer, e.g. `42`). Task numbers are easier to work with \u2014 agents can extract them from git branch names like `feature/42-fix-login`.\n\n### User identity\n\nWhen `FLOWBOARD_USER_EMAIL` is set, the MCP server sends an `X-User-Email` header with every request. This enables:\n\n- **`mine` filter** \u2014 `search_tasks` with `mine: true` returns only tasks assigned to you\n- **Comment attribution** \u2014 comments added via `add_comment` or `update_task` are attributed to your user account instead of the generic \"api\" author\n\n### API Key Permissions\n\nEach tool requires specific API key permissions. Enable them when generating a key in Settings > Integrations:\n\n| Permission | Tools it unlocks |\n|------------|-----------------|\n| **Submit Ideas** | `create_task` (type: idea) |\n| **Submit Bugs** | `create_task` (type: bug) |\n| **Search Tasks** | `search_tasks`, `get_task`, `list_ideas`, `list_releases`, `get_release`, `get_comments` |\n| **Update Tasks** | `update_task` (including its `comment` field), `delete_task`, `vote_idea`, `score_task` |\n| **View Projects** | `list_projects`, `get_workspace_schema` |\n| **Manage Comments** | `add_comment` only \u2014 the `comment` field on `update_task` is gated by **Update Tasks**, not this permission |\n| **Manage Releases** | `get_release_draft`, `add_to_release_draft`, `remove_from_release_draft`, `set_release_version`, `confirm_release`, `add_tasks_to_release`, `remove_tasks_from_release` |\n| **Review Ideas** | `accept_idea`, `reject_idea`, `rework_idea`, `place_idea` |\n\n**Review Ideas** (`canReviewIdeas`) defaults to off \u2014 existing API keys do not gain it automatically. Enable it explicitly on a key (Settings > Integrations > API Keys > Generate API Key) to use the idea-review tools.\n\nFor a full-featured MCP agent, enable all permissions. For read-only, enable only Search Tasks and View Projects.\n\n## Prompts\n\nMCP prompts you can invoke directly (check your MCP client's docs for its prompt-invocation syntax \u2014 e.g. Claude Code exposes MCP prompts as slash commands) to drive a structured review, rather than free-form chat.\n\n| Prompt | Description |\n|--------|-------------|\n| `review_idea_backlog` | Walks the open ideas queue (sorted by votes) one idea at a time: pulls the workspace schema, checks each idea for duplicates with `search_tasks`, recommends accept/reject/rework with reasoning against the rubric, then stops and waits for you to confirm before calling any write tool. |\n| `triage_idea` | Same review process for a single idea. Param: `taskNumber` (the idea's task number, e.g. `1482`). |\n\nBoth prompts judge against the rubric returned by the `flowboard://review-rubric` resource (see below) and never write to more than one idea without your confirmation.\n\n## Resources\n\n| Resource | Description |\n|----------|-------------|\n| `flowboard://projects` | List of all projects in the workspace. |\n| `flowboard://tasks/{taskId}` | A single task with its comments. |\n| `flowboard://review-rubric` | The rubric used when reviewing ideas \u2014 the shipped default, or your own file if `FLOWBOARD_REVIEW_RUBRIC` is set. |\n\n## Reviewing ideas\n\nEnd-to-end flow for using an AI assistant as a first-pass reviewer on your ideas backlog:\n\n1. **Mint a key with Review Ideas enabled.** Settings > Integrations > API Keys > Generate API Key, check **Review Ideas** (and **Update Tasks** + **View Projects**, since the review flow also scores and places ideas). Existing keys don't gain this permission automatically \u2014 it's opt-in per key.\n2. **(Optional) Point `FLOWBOARD_REVIEW_RUBRIC` at your own rubric.** Write a Markdown file describing how your team judges ideas (what counts as high impact, what's out of scope, etc.) and set the env var to its path alongside `FLOWBOARD_API_KEY` in your MCP config. Skip this to use the shipped default rubric.\n3. **Run the `review_idea_backlog` prompt.** The assistant fetches your workspace schema, pulls open ideas sorted by votes, and works through them one at a time \u2014 checking for duplicates, proposing accept/reject/rework with a `techEase` estimate, and stopping to wait for your confirmation before writing anything.\n4. **Confirm each recommendation.** On your go-ahead, the assistant calls `accept_idea` + `place_idea` + `score_task` (to move it into a project and score it), or `reject_idea` / `rework_idea` (to close it out or send it back with your questions attached).\n\nFor a single idea instead of the whole backlog, use `triage_idea` with a task number.\n\n## Example Prompts\n\nOnce configured, just ask naturally:\n\n- \"Show me my in-progress tasks\"\n- \"Show me all open bugs in the backend project\"\n- \"Create a bug: login page returns 500 when email contains a plus sign\"\n- \"Move task 42 to in_progress and assign it to me\"\n- \"What are the latest releases?\"\n- \"Add a comment to task 15: Fixed in PR #42\"\n- \"Add tasks 10, 12, and 15 to the release draft\"\n- \"Set the release version to 2.1.0 and confirm the release\"\n- \"Show me what's in the release draft right now\"\n- \"Add bug 88 to the hotfix draft and confirm the hotfix\"\n\n## Requirements\n\n- Node.js >= 18\n- A FlowBoard workspace with an API key\n\n## Deploying and publishing (maintainers)\n\nWhen a release adds or changes Cloud Functions endpoints that this package calls, **deploy the functions before publishing the package** \u2014 not after, and not at the same time. This package talks to those endpoints on its very first tool call; a published version that expects an endpoint the deployed backend doesn't have yet fails immediately for every user who upgrades.\n\n```bash\n# 1. Verify first \u2014 from the repo root\ncd functions && npm test\ncd .. && npx nx test data-access --testPathPattern=priority-formula\nnpx nx build flowboard\n\n# 2. Deploy the functions this release touches, from the repo root\nfirebase deploy --only functions:reviewIdea,functions:scoreTask,functions:getWorkspaceSchema,functions:getTasks,functions:submitTask,functions:createApiKey\n\n# 3. Smoke-test each new/changed endpoint against production with a real API key\n#    before moving on \u2014 a bad deploy caught here is a lot cheaper than one caught\n#    after publish.\n\n# 4. Only then, publish the package\ncd packages/mcp-server\nnpm run build\nnpm publish --access public\n```\n\nIf a deploy needs to be rolled back, roll back the functions; do not try to unpublish a package version to fix it \u2014 npm publishes are effectively permanent (unpublish is restricted and doesn't retract a version already installed elsewhere).\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-02-24T09:20:06.282Z",
+   "0.1.1": "2026-02-24T09:41:21.003Z",
+   "0.10.0": "2026-09-11T09:55:00.903Z",
+   "0.11.0": "2026-09-11T10:11:29.148Z",
+   "0.12.0": "2026-09-11T11:49:51.507Z",
+   "0.12.1": "2026-09-11T11:52:48.228Z",
+   "0.13.0": "2026-09-11T13:31:38.487Z",
+   "0.2.0": "2026-02-24T10:28:59.093Z",
+   "0.2.1": "2026-02-24T11:22:09.020Z",
+   "0.3.0": "2026-02-24T12:02:28.018Z",
+   "0.4.0": "2026-04-13T13:38:39.325Z",
+   "0.5.0": "2026-04-14T11:04:04.826Z",
+   "0.6.0": "2026-08-19T11:40:26.547Z",
+   "0.7.0": "2026-08-27T12:21:05.476Z",
+   "0.8.0": "2026-09-09T08:33:07.191Z",
+   "0.8.1": "2026-09-09T08:51:56.945Z",
+   "0.9.0": "2026-09-09T10:27:18.065Z",
+   "created": "2026-02-24T09:20:06.056Z",
+   "modified": "2026-09-11T13:31:38.641Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.1.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1771924806126_0.9262568079448932"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-6+RuAfJjv40Jfn0F3Zqs32Hec9bId5wcL9EpeNyrTJWlyjFGOKKiUCjRpBzZ5Pl7fy2/u339SMQdakEP8tMi7Q==",
+     "shasum": "d14a18541bb918c0f94ce1a5b215d7da8869ab57",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCiNrFwhptk/klTaQJ+CcLp+RqQg1amrPQwmfQi/UVswgIgeApmkfdWE8sY3RfN7Y0bN8T7LVc8eJbPmxjeh4ihlJM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 32668
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "af8fafa609e87cf03a23de6e9f1895959c31d601",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.1.1",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1771926080869_0.8323853096133011"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-xHJyVCahaWbMMLxR2H6RNbA3ia5WvZXciCbfwZjSMz3xEArLmesG8Oktriz/A1Luwd71WMUi4FMIZQ9OyhdvZQ==",
+     "shasum": "d86594e67b9a02a695c34d67249a5edab78dd9d8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHrj5YE41/oeR2wOjmJelZNjas9gqpr6qS5ythWYeFHkAiAzoVuxDiDZhHbmhYlq4BSh1XfR8rV0g9W7Saw301OZ6Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 35360
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ec0b2584343ddceca71c20e4ce04c759147cadd7",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.10.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1789120500807_0.32405522448152935"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-1TXAxjZr5zSvq+h8V4NZM6Hq/QDF58Jn3LuWQOZmD4Gfbn+WIHby0Ar+fHknVplgLDVNLkgHJxoRXtg3WxqVbg==",
+     "shasum": "ae3becff742f1cd020c81bead9b76f25e5f324c7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGP140E+63AfpFC/3Iyx5w9hxEily+ajBiNwxtzgxyL9AiAOgpKm+BBe/du6bOvd+IF7qnZ3EeX7PqjCrFBQDgph4w=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCexnV46uIlJCicWL+nv5W0Z4W19yc0o1k58q8qqlKjkgIhANjXsA36ZRbFe6/yKOLLMF+4tB64IAadsbhp1sCn46vp"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 108492
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "cea8e2458cbac32c733671d74c63333b3040b873",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.11.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1789121489010_0.6253260582474311"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-POKxS27KFwEcP6WIX8aJU3ql79c4yq0tbt3dNUYtm6kEPX2q18SPfrIz1FUa8CreZe581jT6lvSgpUqIzyUcGg==",
+     "shasum": "b585932f33e78191d6981195c024e13da67e5eeb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICLB3Qp0OiIsMwRs8//KxOO3jhsEVtQ6lgJGMWoT4LqhAiEAxEkbhJznxhO/AxLLKSlJTuEFImMN88yegtkboJQGCrU="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID7aymwQOOM7mbfjjJvgIi2JbdvzEA3+pTLm+nzTLTMWAiEAuheoyxADuw/vYKYxy1UqctiL7IsEaLYINCTOEVWVzp8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 113555
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "6187ffd62bb299064900b0ce39a9d07915a13712",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.12.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.0_1789127391415_0.2823761101373443"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-bzpI4DeCndnx7lxqP1qbFz47vPKnvBEOJRNv+EipfSmrVIzp9JqY7Zp6E62DSM0M2DvYANOvYWdVuwmWIZ+cZw==",
+     "shasum": "da832e06607675330fbab520d92ea499e3195cf4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC1e3vFvc/rNT7lbG3dZGnRBOKgQ56UrHN0W8A8JvW1AwIgdKbPAlUFbno6VH4q7ybaLvvTxmVLMgOnm01rrunAJhg="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDrV9mdUhoe2126jB0Q+UvujybCCBC+SXdXR4aAVUFW0gIgJxfc3g1aZMjrFf9P+2hNbUh1FQktQZiIta1tVfFPn9o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.12.0.tgz",
+     "unpackedSize": 114196
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "7a50003815e057c3427a6a96b1a64f4c3e0f8cc2",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "readmeFilename": "README.md",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.12.0"
+   },
+   "0.12.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.12.1",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.1_1789127568150_0.5746657616143807"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-IV72hG5vhiMtHYkiupMPgZi5/jhjubxv7XfaJIkrA+eS5ZqE4a0E7v98D9mUv1DgDqeijPqMS36pLAHKV4Cqfg==",
+     "shasum": "68c2f4f34fb4cae79c34a3f8dfb68a23901b14ff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID3hmWeMwpfrXqLwqgZyqyRzewZT/1A0IJyyWLxBP0URAiEAiGLqknCEwPoZedtCrmys3XIoSWfiQOfYLNPW7CHzG6M="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDwmp9Z9rV2g87SJVq4byuFD7+iXei7T/90EKt2NrGFYgIgD4KhpqWRudp8xdSSQ11pTvkngQtabw0Q3TLAI78L+Xk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.12.1.tgz",
+     "unpackedSize": 114239
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "7a50003815e057c3427a6a96b1a64f4c3e0f8cc2",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.12.1"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.13.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1789133498398_0.6926747532351303"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-ad0Uom9WO8U+tZIVJ+D9zvZGQQPZq9W5RrexOMNhB28ABX3FsjPLlsKhyNQY5nwZo8JgvIwGG09ULqKQtz5+MA==",
+     "shasum": "f7f5efcfb3bd347ae4cd55913bb711a12b17b7db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDxr5Zitzj+QU69tlTJV6HkjuVwIpaigRhffZXBlATKkwIgaIrSwl6TMMKkojp1zScOmANXhOmsHdgORqIRCyrtzqA="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGTKXVGfLg25Kk+jHIKeAbq7vfpt14REtBJ5Jk1ai/2cAiAcQ21zYMCJxtvClt8i8EQ7OGAsQ0XgbcV4wioC9mBncA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 115057
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "c58c4876eec3d4db2c7b71e9cd731caa802fe552",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.13.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.2.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1771928938927_0.9714151796745927"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-tPgHTGEGqH35HUEbbLq0r2uMjNfr9CecKh+XFTBUHg1wMTvDBY8xE3q6RaZ8uMSK7FH2lHL60PnLF+koaEyAhg==",
+     "shasum": "793a1dbe4bbc3095911b62676c261fda6abbc31b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBj7g3Gbl8OueI6RQT2nw9Tqxq5fr47ii1Ekg0nQEhoHAiAo8o0c9KmrVSnUO2KGrrkHi/l6s3UHqgS5aU8N/rMRIw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 33691
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "c90ede2645957efe0e372691ad8445fedf6aa278",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.2.1",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1771932128847_0.12741617224372792"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-ytRhkWoacsBAyUpL+BxNb5eD/KchlXT0HTqX4eFs+eBS8dMcK1o3f5enKqSXFeHTQ1/ISBmXSWExpnmrhMxSaQ==",
+     "shasum": "dbc123369e2e982aee24b028785aeeaf6b75a3df",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCJLOsl5OVRxXMqaiE+5S9A9OzNJFN1CxDOaXsoJUI89gIgJ92PcREsxeC9tSrBoFofa9YEnrPwcmobPtFt5DIYPTM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 33692
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "2ae54be3c58d6d84beabfb9cfa9ece923052e5ce",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.3.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1771934547870_0.1072867851873216"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-vdjoBSF+V+tLj2kk7WA9+W3e3iH2BC88Hxnxm9Kldfj1McQdz8kFX72mVz1VmhkAyLcD3aF9TsSjK5EL2vEEog==",
+     "shasum": "468e7e2790b69b11ca86d6241ff23a5eb350b3a1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDt1tZVeDmgSFmWxPRdPw60Ve3jX5iv3fHzpXljX3spUAIhAO86oWLgXG9A03i2IjBczrPSOxpdA4IFvXPqIH14qmqo"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 34312
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "2c399d8dd7c601f26342ad12ebead305863d93c5",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.4.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1776087519186_0.995077905217697"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-jCsX/6z7hkUAUUAJNMgObXCwoX7YVJHGKvYuzYVBRyWyXSWV23M+rHhOElfnLrJ4mcN6rikc4jBbUbx+TA3Ckw==",
+     "shasum": "e85e46e9367d7c5dd3ace2f07e1debe39b002fe1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICB4QgyNhg/z28d1wlLeki/3LGmx/XoUkRHNeuqt7xKYAiEAy2PsyTrkdYlEbbl/0q/0XMnNuA+n6oOm7TDam7DUMDA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 40126
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "c59e1c3a6d151fe9c72fdf3c1aa3ca565137b194",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.5.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1776164644691_0.84858926461135"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-Xaf9M7RxGg+VbikFQ33lCnRrkwWhY+hyR0VZF7iNCGBPW4N0aQW4FMW8/Buvsd/QnWYcoJFrKIXi3ubqat/E1w==",
+     "shasum": "ddedf94c5e3031de87afa9fa85cc37410155dcc4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDss3qPlpWNIW0qJzoOiFHpnM6WxJRyKexLN8Mx88gQ/gIgFKvk0gmZfcbxY1CaYocVCaEAze1admG5FHr4U6mEmZ4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 52472
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ff2033ffd2fbfd5a621ccb3749b4562b97b7fcd5",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.6.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1787139626402_0.641626543532696"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-MPbavDp74gKxhL0pOx9HM9BHPeH/b/1+wQfqRnEGifihaBI9Fd9kFG6n1o9Xxz5MSnyvUTYdvzkqAWMuIF70yw==",
+     "shasum": "569a744bc7b4173e524e58321086cdddbcde7eef",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDxEs0SWHwWqmJsF0GIG/dMZVNCi1qkp/CgLoBkgBwPZQIgRyCqxqGjLXLg51TF8wWipT91MLwVXGv7oOyJ5eVPcVQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 53754
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "36aacb06e5004f8be960334aa14b75111322576c",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.7.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1787833265348_0.9580110182094523"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-M76u/HfUgONscADbLNdUq6EWYcEeqSRfQa+ZfzN7ZyPNg7a0mF+OtSB9HjhDwyrvap2rhGPCWd3dGC8SfXDqQg==",
+     "shasum": "57be175994b4173d8a53c801740ec93eeab0dddd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGbNkI5/uUE68JsCH/Ixavkn/+ZsdbjVCYVAqH9cYauIAiEAkGjeOaOJ0PeWEAuBjhPCqI2JlyuESRZqsf96PkvVn1w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 59417
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "36aacb06e5004f8be960334aa14b75111322576c",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.8.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1788942787088_0.17127897678189408"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-DyHAXaj62il4fnRfqk1AE0S4M69r2IIHOWimZGs7fVI7bjIkK8RuHNceddIJ8dKWWFEaTKvs46eumQuXfIqg2g==",
+     "shasum": "0f67aa6372f0f0287d439bcebe893843f2cbcbd6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEwOrqid7+4JS7cSTK7A+nXyIz+j6LOYrSnUumJFobVMAiB92t/wWkdPYOLfs8etfeiJW6/PZT91iLk6rkkhYvu5Zg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC0dtE0YRLnAsZvjVN85fJfa88pUBPdjOel6uN2Z9X59wIhAJDtwnN8h/03sbGnw7HVEiyLVWD8JzsBtYDKEPrM3iNu"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 91200
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ee84f7640cf46a98dfaf1d84a3140fed66a2dbbf",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.8.1",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.1_1788943916862_0.47093112162861606"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-hy+q1J/wrtkOO7j2ncdR5arPCqRuGR4IuycmgmDV35MbiRJ79ILq9otJDZgo6KJGSwA38Yd4itCIaqFPlJKkJA==",
+     "shasum": "2c0ff306284b2f157a6547b63461aa6249cab893",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCnqYaEZQVv3jvhB8vbj9TkB/WXGDqR1ADN5zxvgSUdfgIhAPVfoSPIJoH2ogf/IbT4lZEpO9GsfALcrm6Tk9srkEHe"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBhq9nZE+tQO0W5Dm5H/QGAp8Zv6/bM9gU2/QHh6bd2tAiBDUMg6t1OdRxsjzmef7sYnrrY9jPsZtgq7+TC1T+sfFg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.8.1.tgz",
+     "unpackedSize": 92178
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "aaf20487ff2af1a879062e5dae99853c0d2638ad",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.8.1"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@flowboardlabs/mcp-server@0.9.0",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1788949637981_0.5899609475861631"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:001b4d0f7439]",
+     "name": "kaflow"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "flowboard-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "zod": "^4.3.6"
+    },
+    "description": "FlowBoard MCP Server \u2014 lets AI tools manage projects, tasks, ideas, and releases",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "~5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 15,
+     "integrity": "sha512-844mefHASpYXNFyn7u1pjXRVvIBY/juzmayjQmSCQ8GjTih2YBYx86C7iZmonIAuWd20/pQROvaOvlnXy0oR+A==",
+     "shasum": "47f062d58162c8746a81071f9b9a27cdd89425e1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD8Blp7EB/xWuZtTP0RcrLt2Th+ZJoUAAaVMToFm6GGgAIgfthdTRF8UMZPk1SlJUNqv3Po4QzMCmV/2Fw39TXAmzc="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxjxr1aLO/1FVpAdNoI1YW2X21spJ6pMbcrU4x4E4VngIhAN+0Z+uvPGxzpDVrPkzFcjusX4cgSlwzjbDLmSxjLPOF"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@flowboardlabs/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 101406
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "996b84ffa405eea96bc88ce1d1676b6357a0cfb5",
+    "keywords": [
+     "flowboard",
+     "mcp",
+     "ai",
+     "project-management",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:001b4d0f7439]",
+      "name": "kaflow"
+     }
+    ],
+    "name": "@flowboardlabs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@flowboardlabs/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@flowboardlabs%2Fmcp-server"
+}

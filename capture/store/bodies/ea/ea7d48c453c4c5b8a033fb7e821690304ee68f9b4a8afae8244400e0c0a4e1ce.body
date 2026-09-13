@@ -1,0 +1,713 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@dockndevai/mcp-debezium",
+  "_rev": "7-a4a466382da4044139bb24dc719cefc9",
+  "bugs": {
+   "url": "https://github.com/dockndevai/mcp-debezium/issues"
+  },
+  "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+  "dist-tags": {
+   "latest": "0.2.2"
+  },
+  "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "debezium",
+   "kafka-connect",
+   "cdc",
+   "change-data-capture",
+   "llm",
+   "ai"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "name": "@dockndevai/mcp-debezium",
+  "readme": "# mcp-debezium\n\n[![CI](https://github.com/dockndevai/mcp-debezium/actions/workflows/ci.yml/badge.svg)](https://github.com/dockndevai/mcp-debezium/actions/workflows/ci.yml)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)\n[![npm](https://img.shields.io/npm/v/@dockndevai/mcp-debezium)](https://www.npmjs.com/package/@dockndevai/mcp-debezium)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for **Debezium** (via the **Kafka Connect** REST API). It lets an MCP-capable client (Claude Desktop, Claude Code, etc.) **monitor and manage change-data-capture connectors** \u2014 status, config, restarts, lifecycle \u2014 with behaviour controlled entirely by flags.\n\nSafe by default: it starts read-only, can be scoped to an allowlist of connectors, protects critical connectors from mutation, redacts credentials in connector configs, and gates deletion behind an explicit opt-in.\n\n## Features\n\n- **Monitoring** \u2014 worker/cluster info, connector list, plugins, per-connector config, status (with failed-task traces), and topics.\n- **Management** \u2014 create/update, pause/resume, restart connector or a single task.\n- **Lifecycle** \u2014 delete connectors (admin).\n- **Access modes** \u2014 `read-only` \u2192 `read-write` \u2192 `admin`, layered so a mode never exposes tools above its level.\n- **Credential redaction** \u2014 `database.password` and other secret-shaped config values are replaced with `***REDACTED***` before results are returned.\n- **Security flags** \u2014 connector allowlist, protected connectors, delete gating, dry-run, and JSON audit logging (see below).\n\n## Security model\n\n| Concern | Flag | Default | Effect |\n| --- | --- | --- | --- |\n| What can the server do? | `DEBEZIUM_MODE` | `read-only` | `read-only` exposes monitoring only; `read-write` adds lifecycle management; `admin` adds delete. Tools above the mode are **never registered**. |\n| Which connectors are in scope? | `DEBEZIUM_CONNECTOR_ALLOWLIST` | *(all)* | When set, operations on other connectors are refused. |\n| Which connectors are read-only forever? | `DEBEZIUM_PROTECTED_CONNECTORS` | *(none)* | Inspectable but never paused/reconfigured/deleted. |\n| Can it delete? | `DEBEZIUM_ALLOW_DELETE` | `false` | `delete_connector` needs this **and** admin mode. |\n| Preview without touching Connect | `DEBEZIUM_DRY_RUN` | `false` | Write/admin tools validate + log intent, then return. |\n| Audit trail | `DEBEZIUM_AUDIT_LOG` | `true` | Emits a JSON line to stderr per guarded operation. |\n| Interactive confirmation | *(automatic)* | \u2014 | Destructive & high-impact actions prompt the human to approve via MCP elicitation before running; clients without elicitation fall back to the `*_ALLOW_*` gate. |\n| Credential redaction | *(always on)* | \u2014 | Secret-shaped config values are redacted before return. |\n\n## Tools\n\n**Read** (`read-only`+): `cluster_info`, `list_connectors`, `list_connector_plugins`, `get_connector`, `get_connector_config`, `get_connector_status`, `get_connector_topics`\n\n**Write** (`read-write`+): `create_connector`, `update_connector_config`, `pause_connector`, `resume_connector`, `restart_connector`, `restart_task`\n\n**Admin** (`admin`): `delete_connector` (needs `DEBEZIUM_ALLOW_DELETE`)\n\n## Quickstart \u2014 add to your agent\n\nPublished on npm as [`@dockndevai/mcp-debezium`](https://www.npmjs.com/package/@dockndevai/mcp-debezium). No clone or build needed \u2014 your MCP client runs it on demand with `npx`. **Start in `read-only` mode**; see [`.env.example`](.env.example) for every variable and [docs/CLIENTS.md](docs/CLIENTS.md) for the full per-client guide.\n\n**Claude Code** (CLI)\n\n```bash\nclaude mcp add debezium -e CONNECT_URL=\"http://localhost:8083\" -e DEBEZIUM_MODE=\"read-only\" -- npx -y @dockndevai/mcp-debezium\n```\n\n**Claude Desktop \u00b7 Cursor \u00b7 Windsurf** \u2014 same block in `claude_desktop_config.json`, `.cursor/mcp.json`, or `~/.codeium/windsurf/mcp_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"debezium\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-debezium\"\n      ],\n      \"env\": {\n        \"CONNECT_URL\": \"http://localhost:8083\",\n        \"DEBEZIUM_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n**OpenAI Codex CLI** \u2014 in `~/.codex/config.toml`:\n\n```toml\n[mcp_servers.debezium]\ncommand = \"npx\"\nargs = [\"-y\", \"@dockndevai/mcp-debezium\"]\nenv = { CONNECT_URL = \"http://localhost:8083\", DEBEZIUM_MODE = \"read-only\" }\n```\n\n**VS Code (GitHub Copilot, Agent mode)** \u2014 in `.vscode/mcp.json`:\n\n```json\n{\n  \"servers\": {\n    \"debezium\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-debezium\"\n      ],\n      \"env\": {\n        \"CONNECT_URL\": \"http://localhost:8083\",\n        \"DEBEZIUM_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n## Example prompts\n\n- *\"Which connectors are FAILED, and why?\"*\n- *\"Restart the failed task on `pg-orders`.\"* (needs `read-write`)\n- *\"Show the config for `mysql-inventory`.\"* (credentials come back redacted)\n\n## Run from source (development)\n\nPrefer the published package above. To run from a clone:\n\n```bash\nnpm install\nnpm run build\nnode dist/index.js   # with the environment variables set\n```\n\n## Develop\n\n```bash\nnpm run dev\nnpm test          # security policy + config redaction\nnpm run typecheck\n```\n\n## Publishing\n\nThis server ships a [`server.json`](server.json) for the official MCP registry and an [`mcpName`](package.json) for npm ownership validation. See **[PUBLISHING.md](PUBLISHING.md)** for publishing to npm and listing on the MCP registry, Smithery, Glama, Cursor, and PulseMCP.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-23T07:49:33.141Z",
+   "0.1.1": "2026-08-28T02:50:26.598Z",
+   "0.1.2": "2026-08-30T06:18:48.394Z",
+   "0.1.3": "2026-09-09T15:55:25.906Z",
+   "0.2.0": "2026-09-09T19:25:04.544Z",
+   "0.2.1": "2026-09-09T19:43:55.402Z",
+   "0.2.2": "2026-09-12T17:56:58.599Z",
+   "created": "2026-08-23T07:49:32.876Z",
+   "modified": "2026-09-12T17:56:58.943Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.1.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.1.0_1787471372989_0.10946901142341003"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.1.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-5xsSGLT4qjA3QgpdE6JEWEqW13NhhnuYK0OVSAuMtMaeSHzwbhIJob+/bC95l5JH7D9klApSCVVjGqvZ36KmNg==",
+     "shasum": "68e850825ad54754694fd71f887ccb4fb06e9386",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF74EOJKC9JGgSrOc0fLJnZEG2SssbxgGw+mqHSvZwX3AiAMAC1c/g4nUAglcx4aGgRUAL61jApwjRuI+MwlvjCjdw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.1.0.tgz",
+     "unpackedSize": 57696
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "99c75a4f3589bfa6db665046d2a09c78c6bd05ab",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.1.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.1.1_1787885426421_0.8860041894387687"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.1.1"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-pNfDVymUCJzOwYcd1EJQiYsj2cFbZTO9WjsFkfcB5Iu4J6QD8O+FKdJ0luC9CBs9acQGRBWhEOor4LPogGssGQ==",
+     "shasum": "3973fd85d6a8ec0fc10473665e9d1506388d778b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDg19fIfIBWiqEJ1fr8ySGwbHd6JOow9fDvbYHeWJyKkAIgZPDAk659tQQU7Tu/FJswI5JcLrgJtDrqwubEB0JV6FQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.1.1.tgz",
+     "unpackedSize": 61868
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "9fc18c0de8ffacc71baf4d268e0714389a2f916a",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.1.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.1.2_1788070728273_0.32290104288621957"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.1.2"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-kZSktu99MUlzEGebOe8SS03rlIzCfL1AVRWmr1zHt979C1xqgLReuOP2gdTqwBeQnDZ3Tet+iPCxblcyO7pxfg==",
+     "shasum": "55cacd42a4a641b002bb49c559a687d4780f89fb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEsoXKciPTobRYqXqr58Ybg7Hzz6Ngix8k/f/4C5L3o9AiBeUL0cq3rfcVCuitwyBO7P3t2XCRQbKVPtQ2KvzkkWog=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.1.2.tgz",
+     "unpackedSize": 61868
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "87168b4a1e47fd9692be163af5d4a5f0124ac10f",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.1.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.1.3_1788969325782_0.06203237261189831"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.1.3"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-F8Ae4wP0uyqqIWvlghnS8M7f6jebrOB2VV/AJO8PQNn5XFWA4qr0kL/NqCxdVehRFBDvyyT4EdwOpGXUbVWO4g==",
+     "shasum": "a53a1c8993f3f4461ab6821161d5371751069332",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAT5O69boDAJQnklNO1F3kDxfoZ5usf2ax+o9j1bl39+AiA4/wSgpdFxzEjTaUjGxRd3zWYQXHxvJJnqVBstkPvjJA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.1.3.tgz",
+     "unpackedSize": 61868
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "ddcffe2be8b8983b12630e222b4617f79345c684",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.2.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.2.0_1788981904392_0.2974694355800087"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.2.0"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-B8ynqXx39WPPKybbIC1JrTFVH2kdanBoOYOhd4NQ8prXgRs+rbVbn7xQq7dDNPMVxN0Msk3pYAM4pwQBO2dY9Q==",
+     "shasum": "c66e6f22f2ea80c62750206cea8b05347ff9fc90",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDonIkOu/jf0HDFgCxKtgC36urns6cIKBac7K1eLV6ZrwIhAN/sukSYQaKQFfjvX/V3KyOvFkhosQp+uQ+jWtpqvKWO"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.2.0.tgz",
+     "unpackedSize": 67969
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "47a144d79bf901dd61f3dd57e80030a54388518f",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.2.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.2.1_1788983035272_0.632964677405059"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.2.1"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-H0DDKx6NgLJgsXe32qokeL/tOv/tcC3s3pBWKB095RqjyAp/41Vild6DMYHfw3hSS4GfvnpegCrw2Qh6d+3k3A==",
+     "shasum": "6ac43e4ebf74aeb8e1ff92a9540cf847c508657b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCZeoEaiW3Lmi0dJhOeGMRV2fLLoC28u7k6CtVaPPpn7AIhAMTi8Vlnp1GgVzZVrloRkyjWjMNYpD1J51IFR4M4rdgm"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.2.1.tgz",
+     "unpackedSize": 68183
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "f97faf5e80b10592beb8f5192d184641370dfba4",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-debezium@0.2.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-debezium_0.2.2_1789235818466_0.21533872131548049"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-debezium": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-debezium/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Debezium / Kafka Connect \u2014 monitor and manage CDC connectors with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.5.0",
+     "tsx": "^4.23.13",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-debezium@0.2.2"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-S+I+U8XTrJX7rawLd98OPkGu2fbKhXHOlBixRW+G6IbHfjjLnKEXINWjLFuwBctpV78aQSkkPstd0Fgen+W+bg==",
+     "shasum": "deaf6741349585142f6968a71000262ce5854f3b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDnQDsEmkjT6Pog3hYBopif8m3hQV0TjL1xh+JWA5Q4MwIhAKSr17TPSm1WyaA+bGKekspjIlMS5uwB4J9ERUfD8gJg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-debezium/-/mcp-debezium-0.2.2.tgz",
+     "unpackedSize": 68220
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "6b67d429fe5a7e276da4b1e7f54c3c116a1799cf",
+    "homepage": "https://github.com/dockndevai/mcp-debezium#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "debezium",
+     "kafka-connect",
+     "cdc",
+     "change-data-capture",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-debezium",
+    "name": "@dockndevai/mcp-debezium",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-debezium.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   }
+  }
+ },
+ "name": "@dockndevai/mcp-debezium",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@dockndevai%2Fmcp-debezium"
+}

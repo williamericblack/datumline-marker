@@ -1,0 +1,692 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4d235a98bf03]",
+    "name": "macterra"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.1",
+   "0.1.2",
+   "0.2.0",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@didcid/mcp-server",
+  "_rev": "7-380dcecb5f12a7274ccfa0ac79a288aa",
+  "author": {
+   "email": "[redacted-email:4d235a98bf03]",
+   "name": "David McFadzean"
+  },
+  "bugs": {
+   "url": "https://github.com/archetech/archon/issues"
+  },
+  "description": "Archon MCP server",
+  "dist-tags": {
+   "latest": "0.3.3"
+  },
+  "homepage": "https://github.com/archetech/archon#readme",
+  "keywords": [
+   "archon",
+   "mcp",
+   "did",
+   "wallet"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4d235a98bf03]",
+    "name": "macterra"
+   }
+  ],
+  "name": "@didcid/mcp-server",
+  "readme": "# Archon MCP Server\n\n`@didcid/mcp-server` lets MCP clients work with Archon identities, aliases, addresses, and JSON assets from a local wallet. It runs as a stdio server on the user's machine, so agents can use Archon from local MCP-compatible tools.\n\nThe server uses the same wallet files and passphrase flow as the Keymaster CLI, then connects to an Archon node through Gatekeeper/Drawbridge for registry reads and writes.\n\n## Usage\n\n```bash\nnpx @didcid/mcp-server\n```\n\nExample MCP client config:\n\n```json\n{\n  \"mcpServers\": {\n    \"archon\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@didcid/mcp-server\"],\n      \"env\": {\n        \"ARCHON_NODE_URL\": \"https://archon.technology\",\n        \"ARCHON_WALLET_PATH\": \"./wallet.json\",\n        \"ARCHON_PASSPHRASE\": \"your-wallet-passphrase\"\n      }\n    }\n  }\n}\n```\n\n## Environment\n\n| Variable | Default | Description |\n| --- | --- | --- |\n| `ARCHON_NODE_URL` | `https://archon.technology` | Archon Gatekeeper/Drawbridge node URL |\n| `ARCHON_GATEKEEPER_URL` | unset | Legacy fallback when `ARCHON_NODE_URL` is unset |\n| `ARCHON_WALLET_TYPE` | `json` | Local wallet backend: `json` or `sqlite` |\n| `ARCHON_WALLET_PATH` | `./wallet.json` | Wallet file path |\n| `ARCHON_PASSPHRASE` | unset | Required for wallet-backed tools; node health tools work without it |\n| `ARCHON_DEFAULT_REGISTRY` | Keymaster default | Default registry for new DIDs |\n| `ARCHON_MCP_READ_ONLY` | `false` | Set to `true` to omit mutating tools from `tools/list` |\n| `ARCHON_MCP_INLINE_LIMIT` | `16384` | Bytes at or below which `archon_get_asset_file` inlines a file rather than linking it |\n\n## Tools\n\nThe MCP server maps every Keymaster CLI command to one MCP tool. Tool names use the CLI command with `archon_` prefixed and hyphens changed to underscores.\n\nMCP-only helper tools:\n\n- `archon_get_version`\n- `archon_get_status`\n- `archon_get_current_id`\n\nCLI file commands use inline data instead of arbitrary local paths. Binary/text payloads use:\n\n```json\n{\n  \"name\": \"example.txt\",\n  \"mimeType\": \"text/plain\",\n  \"encoding\": \"base64\",\n  \"data\": \"aGVsbG8=\"\n}\n```\n\nUse `\"encoding\": \"utf8\"` when passing plain text directly. This inline shape is for tool *arguments* only \u2014 MCP defines content blocks for results, not arguments, and file paths aren't usable in an MCP server context. No tool *returns* this shape; returned binary data uses MCP content blocks \u2014 see [Tool results](#tool-results).\n\nDestructive tools require `\"confirm\": true`, secret-revealing tools require `\"reveal\": true`, and Lightning payment/broadcast tools require `\"confirmPayment\": true`.\n\nSet `ARCHON_MCP_READ_ONLY=true` to omit mutating tools from the advertised MCP tool list.\n\n### Structured inputs\n\nTools whose argument is a specific object \u2014 `archon_restore_wallet_file` (a wallet), `archon_update_credential` (a credential), `archon_create_poll` (a poll config), `archon_create_dmail` / `archon_update_dmail` (a message) \u2014 declare that object's real shape, so the advertised input schema tells a client what to send and malformed input is rejected at the tool boundary rather than failing deeper inside Keymaster.\n\nTwo rules apply when adding or changing one:\n\n- **Passthrough wherever the underlying type has an index signature.** Zod *strips* unknown keys rather than rejecting them, so a schema that omits an extension point silently deletes data \u2014 a wallet's custom metadata, or a credential's claims. Use a plain object only where the type is closed (`PollConfig`, `DmailMessage`), so junk fields are dropped instead of stored.\n- **Never be stricter than the Keymaster method behind the tool**, or the tool rejects input the CLI and REST API accept. Poll deadlines stay plain strings rather than ISO date-times because Keymaster accepts anything `new Date()` parses.\n\nKeymaster remains authoritative and re-validates everything. Semantic rules it enforces that a JSON Schema cannot express \u2014 a deadline must be in the future, a recipient must resolve to an agent \u2014 are not duplicated here; only constraints a client can act on before calling are.\n\n## Tool results\n\nResults follow the MCP specification.\n\nOn success, the result is serialized as JSON into a text content block. When the result is a JSON object it is also returned in `structuredContent`:\n\n```json\n{\n  \"content\": [{ \"type\": \"text\", \"text\": \"{\\\"didDocument\\\":{\\\"id\\\":\\\"did:cid:alice\\\"}}\" }],\n  \"structuredContent\": { \"didDocument\": { \"id\": \"did:cid:alice\" } }\n}\n```\n\nMCP requires `structuredContent` to be a JSON object, so tools returning an array or a scalar (for example `archon_list_ids`, or the DID returned by `archon_create_id`) return the text content block only.\n\nTools returning binary assets use the content block types the protocol defines for them, so clients can render them natively. `archon_get_asset_image` returns an `image` block plus a text block carrying the filename, mimeType, and dimensions:\n\n```json\n{\n  \"content\": [\n    { \"type\": \"image\", \"data\": \"<base64>\", \"mimeType\": \"image/png\" },\n    { \"type\": \"text\", \"text\": \"{\\\"name\\\":\\\"image.png\\\",\\\"mimeType\\\":\\\"image/png\\\",\\\"image\\\":{\\\"width\\\":1,\\\"height\\\":1}}\" }\n  ],\n  \"structuredContent\": { \"name\": \"image.png\", \"mimeType\": \"image/png\", \"image\": { \"width\": 1, \"height\": 1 } }\n}\n```\n\n`archon_get_asset_file` returns a file asset by its DID, which is a URI the server also serves as an MCP resource \u2014 see [Resources](#resources). Small files come back as an embedded `resource` block:\n\n```json\n{\n  \"content\": [\n    { \"type\": \"resource\", \"resource\": { \"uri\": \"did:cid:file\", \"mimeType\": \"text/plain\", \"blob\": \"<base64>\" } },\n    { \"type\": \"text\", \"text\": \"{\\\"name\\\":\\\"file.txt\\\",\\\"mimeType\\\":\\\"text/plain\\\"}\" }\n  ],\n  \"structuredContent\": { \"name\": \"file.txt\", \"mimeType\": \"text/plain\" }\n}\n```\n\nBoth return `null` when the DID is not a file or image asset \u2014 that is the only thing `null` means here. If the asset's bytes cannot be fetched from the node (unpinned data, or a gateway that is down), that is reported as a tool error naming the CID, not as an empty result: the bytes exist, they just could not be retrieved, and the two are not the same answer. `resources/read` and `archon_get_vault_item` fail the same way.\n\n### Large files are linked, not inlined\n\nA file's bytes are base64 in a tool result, costing roughly `bytes / 3` tokens of the model's context. A 1 MB asset is ~350k tokens and a 10 MB one \u2014 the largest a node accepts \u2014 is ~3.5M, more than any context window holds. So above `ARCHON_MCP_INLINE_LIMIT` (16 KiB by default) `archon_get_asset_file` returns a `resource_link` instead:\n\n```json\n{\n  \"content\": [\n    { \"type\": \"resource_link\", \"uri\": \"did:cid:z3v8Auah...\", \"name\": \"big.pdf\", \"mimeType\": \"application/pdf\", \"size\": 2097152 },\n    { \"type\": \"text\", \"text\": \"{\\\"name\\\":\\\"big.pdf\\\",\\\"mimeType\\\":\\\"application/pdf\\\",\\\"bytes\\\":2097152,\\\"linked\\\":true}\" }\n  ]\n}\n```\n\nThe client fetches the bytes with `resources/read` on that URI, if and when it wants them \u2014 the same URI, so both shapes point at the same thing. The size comes from the asset's DID document, so a linked file is never fetched at all; `size` lets a host estimate the cost before asking. An asset with no recorded size is linked rather than gambled on.\n\nThe default is low because base64 is not something a model can read \u2014 inlining only helps a client render or save the bytes, so it should stay cheap. Raise `ARCHON_MCP_INLINE_LIMIT` to inline more (a very large value restores the old always-inline behaviour, for clients that don't follow resource links); set it to `0` to link everything.\n\n`archon_get_asset_image` always inlines, whatever its size: an `image` block is how a model actually sees an image, and there is no link equivalent it could look at.\n\n`archon_get_vault_item` and `archon_get_dmail_attachment` return an embedded `resource` block the same way, identified by the container's DID plus the item name as a fragment, with the mimeType the vault recorded when the item was written \u2014 the same value `archon_list_vault_items` reports:\n\n```json\n{\n  \"content\": [\n    { \"type\": \"resource\", \"resource\": { \"uri\": \"did:cid:z3v8Auah...#notes.txt\", \"mimeType\": \"text/plain\", \"blob\": \"<base64>\" } },\n    { \"type\": \"text\", \"text\": \"{\\\"name\\\":\\\"notes.txt\\\",\\\"mimeType\\\":\\\"text/plain\\\"}\" }\n  ],\n  \"structuredContent\": { \"name\": \"notes.txt\", \"mimeType\": \"text/plain\" }\n}\n```\n\nBoth return `null` when the item does not exist.\n\nFailures \u2014 including input validation, a locked wallet, and node errors \u2014 are reported as MCP tool execution errors, with `isError: true` and the message in a text content block:\n\n```json\n{\n  \"content\": [{ \"type\": \"text\", \"text\": \"ARCHON_PASSPHRASE is required for wallet-backed MCP tools\" }],\n  \"isError\": true\n}\n```\n\nError messages are redacted of secrets (passphrases, recovery phrases, nsec keys, credentialed URLs).\n\n### Output schemas\n\nA few tools declare an `outputSchema`, so a client knows the result shape from `listTools` without having to call the tool first: `archon_resolve_did`, `archon_resolve_did_version`, `archon_check_wallet`, `archon_fix_wallet`, `archon_view_poll`, and `archon_view_ballot`.\n\nThey are declared selectively rather than everywhere, by design:\n\n- **Declaring one is binding.** Per the spec, a tool with an output schema MUST return conforming structured results. The SDK enforces it \u2014 a mismatch, or a missing `structuredContent`, turns a working call into a failed one.\n- **Most tools can't have one.** MCP requires `structuredContent` to be a JSON object, and the majority of these tools return a DID string, a boolean, or a string array. Tools that can return `null` (`archon_get_asset_image`, `archon_get_credential`, and others) are excluded for the same reason.\n- **Schemas aren't free.** Every declared schema is sent to every client on every `listTools`, competing for context with the work itself.\n\nSo the bar is: the result is an object the tool always returns, and something downstream consumes a field from it. Schemas describe the nesting a caller must navigate \u2014 leaves are intentionally loose, and fields typed `unknown` at the source (such as `didDocumentData`) stay unknown.\n\nIf you add one, it must be a `.passthrough()` object. A plain zod object serializes to `additionalProperties: false`, which makes clients reject any field the schema doesn't enumerate.\n\n## Resources\n\nThe server implements the MCP `resources` capability. An Archon asset DID is already a URI, so it is the resource URI verbatim \u2014 the same one `archon_get_asset_file` puts in its embedded `resource` block. `resources/read` on that URI returns the asset:\n\n```json\n{\n  \"uri\": \"did:cid:z3v8Auah...\",\n  \"contents\": [{ \"uri\": \"did:cid:z3v8Auah...\", \"mimeType\": \"text/plain\", \"blob\": \"<base64>\" }]\n}\n```\n\nFile and image assets return their bytes; any other asset returns its JSON data with `mimeType: \"application/json\"`. URIs that are not `did:cid:` are not matched.\n\nA vault item \u2014 or a dmail attachment, which is the same thing, since a dmail is a vault \u2014 has no DID of its own. It's a named entry keyed by (container DID, name), so it's addressed as a DID URL fragment, which is also the URI `archon_get_vault_item` and `archon_get_dmail_attachment` put in their resource blocks:\n\n```\ndid:cid:z3v8Auah...#notes.txt\n```\n\nItem names may contain any printable character, including `#` and spaces, so the fragment is percent-encoded (`#my%20notes%20%232.txt`).\n\n**`resources/list` is empty by design.** Enumerating every asset in the wallet would disclose its contents to any connected client, whether or not it ever reads one. Reads are by a DID the caller already holds, which reveals nothing that resolving that DID wouldn't. `resources/templates/list` advertises `did:cid:{id}`, so the read path is still discoverable. What a filtered list should expose is an open question.\n\nResource reads are wallet-backed and require `ARCHON_PASSPHRASE`, the same as the equivalent tools. They are reads, so `ARCHON_MCP_READ_ONLY` does not affect them.\n\n## Examples\n\nCreate an ID:\n\n```json\n{\n  \"name\": \"archon_create_id\",\n  \"arguments\": {\n    \"name\": \"alice\",\n    \"registry\": \"hyperswarm\"\n  }\n}\n```\n\nRotate the current ID keys:\n\n```json\n{\n  \"name\": \"archon_rotate_keys\",\n  \"arguments\": {\n    \"confirm\": true\n  }\n}\n```\n\nCreate a JSON asset:\n\n```json\n{\n  \"name\": \"archon_create_asset_json\",\n  \"arguments\": {\n    \"data\": {\n      \"title\": \"Example\",\n      \"status\": \"draft\"\n    },\n    \"alias\": \"example-asset\"\n  }\n}\n```\n\nCreate a file asset from inline data:\n\n```json\n{\n  \"name\": \"archon_create_asset_file\",\n  \"arguments\": {\n    \"file\": {\n      \"name\": \"hello.txt\",\n      \"mimeType\": \"text/plain\",\n      \"encoding\": \"utf8\",\n      \"data\": \"hello\"\n    },\n    \"alias\": \"hello-file\"\n  }\n}\n```\n\nIssue a credential from inline JSON:\n\n```json\n{\n  \"name\": \"archon_issue_credential\",\n  \"arguments\": {\n    \"credential\": {\n      \"@context\": [\"https://www.w3.org/ns/credentials/v2\"],\n      \"type\": [\"VerifiableCredential\"],\n      \"issuer\": \"did:cid:issuer\",\n      \"credentialSubject\": {\n        \"id\": \"did:cid:subject\"\n      }\n    }\n  }\n}\n```\n\nReveal a credential in the current ID manifest:\n\n```json\n{\n  \"name\": \"archon_reveal_credential\",\n  \"arguments\": {\n    \"did\": \"did:cid:credential\",\n    \"reveal\": true\n  }\n}\n```\n\nPay a Lightning invoice:\n\n```json\n{\n  \"name\": \"archon_lightning_pay\",\n  \"arguments\": {\n    \"bolt11\": \"lnbc...\",\n    \"confirmPayment\": true\n  }\n}\n```\n\n### Keymaster CLI mapping\n\n| CLI command | MCP tool |\n| --- | --- |\n| `create-wallet` | `archon_create_wallet` |\n| `new-wallet` | `archon_new_wallet` |\n| `change-passphrase` | `archon_change_passphrase` |\n| `check-wallet` | `archon_check_wallet` |\n| `fix-wallet` | `archon_fix_wallet` |\n| `import-wallet` | `archon_import_wallet` |\n| `show-wallet` | `archon_show_wallet` |\n| `backup-wallet-file` | `archon_backup_wallet_file` |\n| `restore-wallet-file` | `archon_restore_wallet_file` |\n| `show-mnemonic` | `archon_show_mnemonic` |\n| `backup-wallet-did` | `archon_backup_wallet_did` |\n| `recover-wallet-did` | `archon_recover_wallet_did` |\n| `create-id` | `archon_create_id` |\n| `resolve-id` | `archon_resolve_id` |\n| `backup-id` | `archon_backup_id` |\n| `recover-id` | `archon_recover_id` |\n| `remove-id` | `archon_remove_id` |\n| `rename-id` | `archon_rename_id` |\n| `list-ids` | `archon_list_ids` |\n| `list-registries` | `archon_list_registries` |\n| `use-id` | `archon_use_id` |\n| `rotate-keys` | `archon_rotate_keys` |\n| `resolve-did` | `archon_resolve_did` |\n| `resolve-did-version` | `archon_resolve_did_version` |\n| `revoke-did` | `archon_revoke_did` |\n| `change-registry` | `archon_change_registry` |\n| `encrypt-message` | `archon_encrypt_message` |\n| `encrypt-file` | `archon_encrypt_file` |\n| `decrypt-did` | `archon_decrypt_did` |\n| `decrypt-json` | `archon_decrypt_json` |\n| `sign-file` | `archon_sign_file` |\n| `verify-file` | `archon_verify_file` |\n| `create-challenge` | `archon_create_challenge` |\n| `create-challenge-cc` | `archon_create_challenge_cc` |\n| `create-response` | `archon_create_response` |\n| `verify-response` | `archon_verify_response` |\n| `bind-credential` | `archon_bind_credential` |\n| `issue-credential` | `archon_issue_credential` |\n| `list-issued` | `archon_list_issued` |\n| `update-credential` | `archon_update_credential` |\n| `revoke-credential` | `archon_revoke_credential` |\n| `accept-credential` | `archon_accept_credential` |\n| `list-credentials` | `archon_list_credentials` |\n| `get-credential` | `archon_get_credential` |\n| `view-credential` | `archon_view_credential` |\n| `publish-credential` | `archon_publish_credential` |\n| `reveal-credential` | `archon_reveal_credential` |\n| `unpublish-credential` | `archon_unpublish_credential` |\n| `add-alias` | `archon_add_alias` |\n| `get-alias` | `archon_get_alias` |\n| `remove-alias` | `archon_remove_alias` |\n| `list-aliases` | `archon_list_aliases` |\n| `list-addresses` | `archon_list_addresses` |\n| `get-address` | `archon_get_address` |\n| `import-address` | `archon_import_address` |\n| `check-address` | `archon_check_address` |\n| `add-address` | `archon_add_address` |\n| `remove-address` | `archon_remove_address` |\n| `publish-address` | `archon_publish_address` |\n| `unpublish-address` | `archon_unpublish_address` |\n| `add-nostr` | `archon_add_nostr` |\n| `import-nostr` | `archon_import_nostr` |\n| `remove-nostr` | `archon_remove_nostr` |\n| `add-lightning` | `archon_add_lightning` |\n| `remove-lightning` | `archon_remove_lightning` |\n| `lightning-balance` | `archon_lightning_balance` |\n| `lightning-decode` | `archon_lightning_decode` |\n| `lightning-invoice` | `archon_lightning_invoice` |\n| `lightning-pay` | `archon_lightning_pay` |\n| `lightning-check` | `archon_lightning_check` |\n| `publish-lightning` | `archon_publish_lightning` |\n| `unpublish-lightning` | `archon_unpublish_lightning` |\n| `lightning-zap` | `archon_lightning_zap` |\n| `lightning-payments` | `archon_lightning_payments` |\n| `create-group` | `archon_create_group` |\n| `list-groups` | `archon_list_groups` |\n| `get-group` | `archon_get_group` |\n| `add-group-member` | `archon_add_group_member` |\n| `remove-group-member` | `archon_remove_group_member` |\n| `test-group` | `archon_test_group` |\n| `create-schema` | `archon_create_schema` |\n| `list-schemas` | `archon_list_schemas` |\n| `get-schema` | `archon_get_schema` |\n| `create-schema-template` | `archon_create_schema_template` |\n| `create-asset` | `archon_create_asset` |\n| `create-asset-json` | `archon_create_asset_json` |\n| `create-asset-image` | `archon_create_asset_image` |\n| `create-asset-file` | `archon_create_asset_file` |\n| `get-asset` | `archon_get_asset` |\n| `get-asset-json` | `archon_get_asset_json` |\n| `get-asset-image` | `archon_get_asset_image` |\n| `get-asset-file` | `archon_get_asset_file` |\n| `update-asset-json` | `archon_update_asset_json` |\n| `update-asset-image` | `archon_update_asset_image` |\n| `update-asset-file` | `archon_update_asset_file` |\n| `transfer-asset` | `archon_transfer_asset` |\n| `clone-asset` | `archon_clone_asset` |\n| `get-property` | `archon_get_property` |\n| `set-property` | `archon_set_property` |\n| `list-assets` | `archon_list_assets` |\n| `create-poll-template` | `archon_create_poll_template` |\n| `create-poll` | `archon_create_poll` |\n| `add-poll-voter` | `archon_add_poll_voter` |\n| `remove-poll-voter` | `archon_remove_poll_voter` |\n| `list-poll-voters` | `archon_list_poll_voters` |\n| `view-poll` | `archon_view_poll` |\n| `vote-poll` | `archon_vote_poll` |\n| `send-poll` | `archon_send_poll` |\n| `send-ballot` | `archon_send_ballot` |\n| `view-ballot` | `archon_view_ballot` |\n| `update-poll` | `archon_update_poll` |\n| `publish-poll` | `archon_publish_poll` |\n| `reveal-poll` | `archon_reveal_poll` |\n| `unpublish-poll` | `archon_unpublish_poll` |\n| `create-vault` | `archon_create_vault` |\n| `list-vault-items` | `archon_list_vault_items` |\n| `add-vault-member` | `archon_add_vault_member` |\n| `remove-vault-member` | `archon_remove_vault_member` |\n| `list-vault-members` | `archon_list_vault_members` |\n| `add-vault-item` | `archon_add_vault_item` |\n| `remove-vault-item` | `archon_remove_vault_item` |\n| `get-vault-item` | `archon_get_vault_item` |\n| `create-dmail` | `archon_create_dmail` |\n| `update-dmail` | `archon_update_dmail` |\n| `send-dmail` | `archon_send_dmail` |\n| `get-dmail` | `archon_get_dmail` |\n| `list-dmail` | `archon_list_dmail` |\n| `file-dmail` | `archon_file_dmail` |\n| `refresh-dmail` | `archon_refresh_dmail` |\n| `import-dmail` | `archon_import_dmail` |\n| `remove-dmail` | `archon_remove_dmail` |\n| `add-dmail-attachment` | `archon_add_dmail_attachment` |\n| `remove-dmail-attachment` | `archon_remove_dmail_attachment` |\n| `get-dmail-attachment` | `archon_get_dmail_attachment` |\n| `list-dmail-attachments` | `archon_list_dmail_attachments` |\n| `pack-didcomm` | `archon_pack_didcomm` |\n| `unpack-didcomm` | `archon_unpack_didcomm` |\n| `send-didcomm` | `archon_send_didcomm` |\n| `receive-didcomm` | `archon_receive_didcomm` |\n| `mediate-didcomm` | `archon_mediate_didcomm` |\n| `publish-didcomm` | `archon_publish_didcomm` |\n| `unpublish-didcomm` | `archon_unpublish_didcomm` |\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/archetech/archon.git"
+  },
+  "time": {
+   "0.1.1": "2026-06-06T18:50:16.902Z",
+   "0.1.2": "2026-06-06T21:59:30.868Z",
+   "0.2.0": "2026-06-26T16:27:37.441Z",
+   "0.3.0": "2026-06-26T16:29:06.455Z",
+   "0.3.1": "2026-07-20T22:31:15.943Z",
+   "0.3.2": "2026-07-31T18:35:31.094Z",
+   "0.3.3": "2026-08-26T20:20:49.266Z",
+   "created": "2026-06-06T18:50:16.605Z",
+   "modified": "2026-08-26T20:20:49.429Z"
+  },
+  "versions": {
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.1.1",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1780771816755_0.10992518230316994"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.2.12",
+     "@didcid/gatekeeper": "^0.4.12",
+     "@didcid/keymaster": "^0.4.12",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-qAaC+4Z9MyJlIdgkk8SEm9n7uPafM4wPDM4iSwDIx8o/s65SCYJGX17NU+D5Lx0/oQZ+uvBK3evXLhl1LPeqZA==",
+     "shasum": "ef439d4cc2c9aabacaa1bdb8249f3b10c9ccf39b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGY5pi5aLiJTcIawEVzS+Lsjm+THMAPITgOFqu4l9n/YAiBXLTPAkjEFkJnYjOSpQxv6BUjv193BtQH9DkbXr07q2w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 33920
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f6cced9ea07a7de85e205922710f608982853fcc",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.1.2",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.2_1780783170719_0.9621686219603958"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.2.13",
+     "@didcid/gatekeeper": "^0.4.13",
+     "@didcid/keymaster": "^0.4.13",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-pwUpPyNUSdXr7AEQx2/pctIIGeqGsmgpqXwSMeFeXeTKrqhQYnRDzQ9WMwsD6UKtfRfUzfVHLpKnD1Pj5vGG4g==",
+     "shasum": "9c748ea60768fe9054b801cb6d99600e4377755f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxUFv8gMXMvf/BE3KfG2HIfXsy28LXNMYOgrAFN/41lQIhAMcwvjxWpdexyVipCXl9XEEJj7dZwUsaczEmiMsP+Ts9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.1.2.tgz",
+     "unpackedSize": 119400
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "ecd16e30d8c8ae9af77541eab4108308a14b529f",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.2.0",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1782491257301_0.21805356187091496"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.3.0",
+     "@didcid/gatekeeper": "^0.5.0",
+     "@didcid/keymaster": "^0.5.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-NCRqwau1mD8QIiukR1+6qLS7VC45X3GxlE0TPYi+5TK4RPR/X68BkPHfflRkL2SKbtLf72RFa6xApPXbzPc5IA==",
+     "shasum": "8c6fad60dffb8baeedd15143a9fd7d91bdbd5dda",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCzpd+H9lwPfHPfe04Wo8zFNFJdza1ksrGH3eeP7W3AsAIgO0WAJNjHPNrDaAlOVvubB5jjqAgiaumvqufN8DPJ9Zc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 126051
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7a184ebd10dc5b8f521252a21532c3fc526f0dec",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.3.0",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1782491346316_0.7601372783444666"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.4.0",
+     "@didcid/gatekeeper": "^0.6.0",
+     "@didcid/keymaster": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-DsLWq5cfrbkU7zIOmiz/KmrpHz3g5hS5kbzSgVGvsHtD/BnCSm9Orf+NX+Sn2tJjmtNDDzT71BRBzZXaxjFi0g==",
+     "shasum": "aca87d017643c70a1afce64f9c3a5c776497385d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHNE5X5uAk9ZXd6ABAcJbktyFj15PLeo3GJ0mG72SaL0AiBGy7/SGevwjukjOAPoTCYSv5RXa86wjFgpivuohw5ieQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 126051
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "44f6351362d3c46402fc44ebe5035115569f50bc",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.3.1",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.1_1784586675781_0.4819308182260158"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.4.1",
+     "@didcid/clients": "^0.1.1",
+     "@didcid/keymaster": "^0.6.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-uGA9PHoKa8Y0D89eDAT91IxiGZVlpmTu5o5arM0YVxgJesjLRM45O/0mrNE8oNp7ZxDcQ09Ie3Z1Gd6CMPnmVw==",
+     "shasum": "5dadc991b921a1b92355898e845678aa2c928005",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCD4vhxkwqjRi6EIyr7/evR3eUxx0xdXbiYqhXPk2/4xgIgHkSxvn/zl9LJFlDm6wo8Ekzx80XKSiPnrxiDdYEtAI4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.3.1.tgz",
+     "unpackedSize": 174210
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "6e677d9e0da85a8703a7f7635ba7ba91cae76046",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.3.2",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.2_1785522930945_0.05321287136510189"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.15.0+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.4.2",
+     "@didcid/clients": "^0.1.2",
+     "@didcid/keymaster": "^0.6.2",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-tA+xDV/yl0ARZt4s6nkNpIi4kQGFOQCgz/Q4CqrJGj/6gWMB2VoVU6OrWkIcScAfM8XTL2b0Kbpxlhkc3Mf/Ug==",
+     "shasum": "e0bc2fdaf5a9c3dabbdb0d715cccd2199d89c1af",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDylWk+4JRjrRLPceMfbGB1fUktJQfJWIbPNTlIwDojQwIhAPo6gFWPqPhox/mhjUNH8LXE2z7f98yHYtymDIpDLwHK"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.3.2.tgz",
+     "unpackedSize": 174543
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d1a2bf0b7b1a9fab442f8dd6b180ab5c6a0f31ee",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@didcid/mcp-server@0.3.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.3_1787775649106_0.4689766791367578"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "macterra"
+    },
+    "_npmVersion": "lerna/9.0.7/node@v22.23.2+x64 (linux)",
+    "author": {
+     "email": "[redacted-email:4d235a98bf03]",
+     "name": "David McFadzean"
+    },
+    "bin": {
+     "archon-mcp-server": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/archetech/archon/issues"
+    },
+    "dependencies": {
+     "@didcid/cipher": "^0.4.3",
+     "@didcid/clients": "^0.1.3",
+     "@didcid/keymaster": "^0.6.3",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.5",
+     "zod": "^3.25.76"
+    },
+    "description": "Archon MCP server",
+    "devDependencies": {
+     "@types/node": "^22.18.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-3ykg29w7DCIhWEblIOjx1YhG0hJ86pvO9b5++cWURagy21dspMC+dctSYN78wsgbX8YAf8tlApF3jso0RTdRZg==",
+     "shasum": "a87cbf659c75b4f6c1be0af4c8ba69e583577970",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC3dWpnKk8Y3jbvd/FKJQTSXptl4NPviJvWGejPdq/PRgIhAL16r3kmETtUhmrFwXNGb+14uJ596MiAdfYOBMO7IHPC"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@didcid/mcp-server/-/mcp-server-0.3.3.tgz",
+     "unpackedSize": 177784
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b589db23efafa1e0c6c630b52f4a0361590ab475",
+    "homepage": "https://github.com/archetech/archon#readme",
+    "keywords": [
+     "archon",
+     "mcp",
+     "did",
+     "wallet"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d235a98bf03]",
+      "name": "macterra"
+     }
+    ],
+    "name": "@didcid/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/archetech/archon.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/cli.js",
+     "clean": "rm -rf dist"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.3"
+   }
+  }
+ },
+ "name": "@didcid/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@didcid%2Fmcp-server"
+}

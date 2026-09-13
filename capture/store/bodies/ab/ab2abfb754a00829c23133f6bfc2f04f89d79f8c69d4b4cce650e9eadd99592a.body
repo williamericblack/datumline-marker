@@ -1,0 +1,1169 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.4.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.4.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-npm",
+  "_rev": "9-ba095387974a3887bba3c208f076fd99",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-npm/issues"
+  },
+  "description": "Model Context Protocol server for the npm registry",
+  "dist-tags": {
+   "latest": "0.4.0"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "npm"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-npm",
+  "readme": "# @mgcrea/mcp-npm\n\n[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-npm.svg)](https://www.npmjs.com/package/@mgcrea/mcp-npm)\n[![ghcr](https://img.shields.io/badge/ghcr.io-mgcrea%2Fmcp--npm-blue)](https://github.com/mgcrea/mcp-npm/pkgs/container/mcp-npm)\n\nA Model Context Protocol server for the npm registry, built around the thing npm's own\ntooling makes hardest to automate: **configuring trusted publishers**. It also covers package\nintel, dist-tags, deprecation, access, org and team governance, tokens, security advisories,\nand publishing. Read-only by default \u2014 the mutating tools are not registered at all unless you\nturn them on.\n\n## Features\n\n- **Trusted publishing, programmatically.** Read, set and revoke the OIDC trusted publisher on\n  a package, or apply one across a batch of packages with a single browser authorization.\n- **Works with zero configuration.** If `npm whoami` answers, so does this \u2014 it reads the token\n  `npm login` already wrote to `~/.npmrc`, scoped to the registry you are actually talking to.\n- **Read-only by default.** Write tools are _absent_, not refused, until `NPM_ALLOW_WRITES=1`.\n  Everything irreversible additionally needs an explicit `confirm: true`.\n- **Never exits on missing credentials.** An unconfigured server still answers, and\n  `npm_auth_status` tells you exactly what to set.\n- **Responses shaped for a context window.** A raw packument is megabytes; these are a screen.\n- Native `fetch`, no runtime dependencies beyond the MCP SDK, Zod and `@mgcrea/mcp-totp`.\n\n## Security\n\n**Supply chain.** Three runtime dependencies: `@modelcontextprotocol/server`, `zod` and\n`@mgcrea/mcp-totp`. No HTTP client, no logging framework. Every transitive dependency would be\nattack surface on a process holding a live npm token.\n\nThe third is ours, and it is the fleet's usual justification for one: `@mgcrea/mcp-totp/core` is\nthe dependency-free half of our own TOTP server \u2014 RFC 6238, `otpauth://` parsing and the macOS\nkeychain store \u2014 and re-deriving it here would fork it on day one. It is imported **lazily**, so\na server in the default `web` mode never loads it, and it pulls in nothing of its own.\n\n**Your credentials.** The token is read from `NPM_TOKEN`, a config file, or the entry in\n`~/.npmrc` **matching the configured registry** \u2014 a token for npmjs.org is never sent to a\nprivate registry, or the reverse. Nothing is written to disk. One-time passwords are held in\nmemory only, for the life of the process.\n\n**Blast radius.** With the defaults, this server can only read. With `NPM_ALLOW_WRITES=1` it can\nchange what your CI is allowed to publish, move dist-tags, deprecate versions, alter org and team\nmembership, mint and revoke tokens, and publish or unpublish packages. Grant it deliberately.\n\n**Token choice matters.** A granular access token with _Bypass 2FA_ enabled is rejected by every\ntrusted-publisher write. See [Traps worth knowing](#traps-worth-knowing).\n\n## Configure\n\n**The server starts with no configuration at all.** In that state it registers only the tools\nthat need none \u2014 `npm_auth_status` and `npm_audit_dependencies`, since npm's advisory endpoint\ntakes no authentication \u2014 and `npm_auth_status` tells you what to set for the rest. It never\nrefuses to start over a missing token, because an MCP server that exits shows up in the client\nas a bare `Connection closed` with the explanation swallowed.\n\nMost people need nothing:\n\n```bash\nnpm login        # this server reads the resulting ~/.npmrc entry\nnpm whoami       # if this answers, you are configured\n```\n\n| Variable                    | Required | Description                                                                                                  |\n| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |\n| `NPM_TOKEN`                 | no       | Overrides the `~/.npmrc` lookup. Needed in Docker and CI.                                                    |\n| `NPM_REGISTRY`              | no       | Defaults to `https://registry.npmjs.org`. The `.npmrc` token is looked up for this host.                     |\n| `NPM_DOWNLOADS_URL`         | no       | Defaults to `https://api.npmjs.org`. A different host, never authenticated.                                  |\n| `NPM_ALLOW_WRITES`          | no       | `1` to register the write tools. Off by default.                                                             |\n| `NPM_OTP_MODE`              | no       | `web` (default), `totp`, `static`, or `none`. See [Two-factor](#two-factor).                                 |\n| `NPM_TOTP_LABEL`            | no       | `totp` mode: which seed to read. Defaults to `npm`.                                                          |\n| `NPM_TOTP_SECRET`           | no       | `totp` mode: an `otpauth://` URI or base32 key, instead of the keychain.                                     |\n| `NPM_TOTP_KEYCHAIN_SERVICE` | no       | `totp` mode: keychain service holding the seed. Defaults to `com.mgcrea.mcp-totp`.                           |\n| `NPM_OTP_AUTH_TYPE`         | no       | Overrides the `npm-auth-type` header. Escape hatch; leave unset.                                             |\n| `NPM_OTP`                   | no       | A code. Almost always wrong \u2014 see the note in `.env.example`.                                                |\n| `NPM_OTP_TTL_SECONDS`       | no       | How long a confirmed code is reused. Defaults to `300`, npm's own window.                                    |\n| `NPM_OTP_MAX_USES`          | no       | Calls one code covers. Defaults to `80`, npm's own guidance.                                                 |\n| `NPM_AUTO_OPEN_BROWSER`     | no       | `0` to print the URL instead of launching a browser.                                                         |\n| `NPM_MAX_RETRIES`           | no       | Retry budget for 429/5xx. Defaults to `3`.                                                                   |\n| `NPM_BIN`                   | no       | Path to npm's `npm-cli.js` (or an npm executable), for `npm_publish`. Only needed when npm is not on `PATH`. |\n| `NPM_MCP_CONFIG`            | no       | Path to a JSON config file.                                                                                  |\n| `NPM_DEBUG`                 | no       | `1` to log to stderr.                                                                                        |\n\nSee [.env.example](./.env.example) for the annotated list.\n\n### Config file\n\n- **The environment wins, field by field.** A config file supplies whatever the environment\n  does not, so Docker and CI keep working, and a one-off `NPM_ALLOW_WRITES=0` still overrides a\n  file that says `true`.\n- Keys are camelCase (`allowWrites`, not `NPM_ALLOW_WRITES`).\n- **Unknown keys are an error**, not ignored \u2014 a typo'd `allowWrite` tells you so instead of\n  silently falling back to the environment.\n- Location: `$NPM_MCP_CONFIG`, else `$XDG_CONFIG_HOME/npm-mcp/config.json`, else\n  `~/.config/npm-mcp/config.json`. An absent file is fine; a malformed one is reported with its\n  path. The variable is `NPM_MCP_CONFIG`, not `NPM_CONFIG`, because npm reads its own\n  `npm_config_*` namespace out of the environment.\n- The server warns on stderr if the file is readable by other users.\n\n## Quick start\n\n### A. npx\n\n```json\n{\n  \"mcpServers\": {\n    \"npm\": { \"command\": \"npx\", \"args\": [\"-y\", \"@mgcrea/mcp-npm\"] }\n  }\n}\n```\n\n### B. Docker\n\n```bash\ndocker run --rm -i -e NPM_TOKEN ghcr.io/mgcrea/mcp-npm\n```\n\n### C. From source\n\n```bash\npnpm install && pnpm build\nnode dist/cli.js\n```\n\n### Inspect the tools\n\n```bash\nnpx @modelcontextprotocol/inspector node dist/cli.js\n```\n\n## Two-factor\n\nnpm requires an `npm-otp` header on **all three** trusted-publisher endpoints \u2014 including the\nread \u2014 and a one-time password lasts about five minutes. A code cannot be configured once at\nstartup and reused: it is dead before anything runs.\n\nHow far that gets you depends on `NPM_OTP_MODE`:\n\n| Mode            | Where the code comes from                    | Unattended?                                            |\n| --------------- | -------------------------------------------- | ------------------------------------------------------ |\n| `web` (default) | npm's browser confirmation page              | No \u2014 one human click per five-minute window            |\n| `totp`          | Minted locally from a stored seed            | **Yes**                                                |\n| `static`        | `NPM_OTP`, typed in                          | No, and usually already expired by the time it is used |\n| `none`          | Nothing; `npm_auth_otp` can still supply one | No                                                     |\n\n`npm_auth_status` reports which flow will actually run, and says plainly what each one can and\ncannot do rather than offering a setting that looks like it should work.\n\n### `totp` mode\n\nSet `NPM_OTP_MODE=totp` and the second factor is computed on the spot, with no browser and no\nclick, so batches and scripted publishes run start to finish on their own:\n\n```bash\nNPM_OTP_MODE=totp            # seed read via @mgcrea/mcp-totp\nNPM_TOTP_LABEL=npm           # which seed; defaults to \"npm\"\nNPM_TOTP_SECRET=...          # optional: otpauth:// URI or base32 key, for Docker/CI\n```\n\nWith no `NPM_TOTP_SECRET`, the seed comes from the macOS login keychain \u2014 see\n[`@mgcrea/mcp-totp`](https://github.com/mgcrea/mcp-totp) for how to get one in there, including\nsharing it with Passwords.app so your phone keeps working.\n\n**The trade is real and worth stating.** npm's second factor then lives on the same machine as\nthe npm token, so anything that can read that keychain item can publish as you. Where it applies,\n**trusted publishing over OIDC is strictly better \u2014 it needs no second factor at all.** Reach for\n`totp` for local publishes and account management, not as a substitute for OIDC in CI.\n\nOne implementation detail that matters if you are debugging it: a TOTP code is single-use, so the\nprovider never replays one npm has already consumed \u2014 if the current 30-second window is burnt it\nwaits for the next.\n\n`npm-auth-type` stays `web` in this mode too. That was checked against the live registry rather\nthan assumed: a TOTP typed straight from an authenticator was accepted on both the publish and\ntrusted-publisher endpoints with `web` set, so npm validates `npm-otp` without consulting it \u2014\nand `web` is what makes npm attach an authorization URL to a challenge, which is the only way a\nhuman recovers from a missing or wrong code. `NPM_OTP_AUTH_TYPE` overrides it if npm ever changes\nhow it negotiates.\n\n### Publishing without a human\n\n`npm_publish` meets the same wall, and the same mode gets past it: under `NPM_OTP_MODE=totp` a\nchallenged publish mints its code locally and continues. In the default `web` mode it fails\nimmediately instead, because the browser provider will not open a page and block unless the call\nasked it to \u2014 pass `wait_for_otp: true` when someone is there to click, or run `npm_auth_otp`\nfirst and let the publish ride the cached code.\n\nThe credential half has an escape hatch too. **`npm_auth_login`** runs npm's browser sign-in and\nholds the resulting session token in memory for the life of the server process \u2014 never on disk,\nnever in a tool result. It exists because `npm login` in a terminal cannot be driven by an agent:\nwith stdin at EOF, npm falls through to its legacy `Username:` prompt and exits having written\nnothing. Reach for it when the configured token turns out to be the wrong kind \u2014 a granular token\nthat cannot create a package, or one whose selected-packages list does not name yours. It is\nbehind `NPM_ALLOW_WRITES`, and a token it obtains dies with the process; `npm login` plus\n`npm_auth_reload` is still what makes one durable.\n\nIn `web` mode, what _is_ possible is spending one authorization on many packages. npm's confirmation page has a\nsame-IP cooldown; this server caches the confirmed code for that window (in memory, never on\ndisk) so `npm_set_trusted_publisher_batch` prompts once for up to 25 packages.\n\nThe `web` flow, when npm asks:\n\n1. A trust call goes out without a code and npm answers `401` with an authorization URL.\n2. **Every trust tool except `npm_auth_otp` fails right there**, with that URL in `authUrl` and\n   a `remedy` explaining the fix. None of them knows whether a human is watching this session, so\n   none of them blocks waiting to find out \u2014 an immediate, actionable failure beats a multi-minute\n   hang with nobody to click the link, which is what an earlier version of this server did.\n3. `npm_auth_otp` is the one call that _does_ wait: run it first \u2014 with `code` from an\n   authenticator app, or with `package` to open the browser and poll for up to `otpTimeoutMs`\n   (180s default) \u2014 and every trust call after it rides the cached code until it expires.\n   `npm_set_trusted_publisher_batch` does this too, once, on the first package only; the other 24\n   ride the same cache, which is the whole mechanism behind its \"one prompt\" promise.\n\nReach for `npm_auth_otp` before any trust call in a non-interactive or agentic session \u2014 there is\nno other way past step 2 there \u2014 or whenever you would rather approve the prompt at a moment of\nyour choosing. Pass it `code` to skip the browser entirely, or `open: false` when the browser is\non another machine.\n\n## Tools\n\n42 tools. **W** = needs `NPM_ALLOW_WRITES=1`; \u26a0 = also needs `confirm: true`.\n\n| Area               | Tools                                                                                                                                                                                                                                              |\n| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| Auth               | `npm_auth_status`, `npm_auth_reload`, `npm_auth_login` **W**, `npm_auth_otp`, `npm_auth_clear_otp`, `npm_whoami`                                                                                                                                   |\n| Trusted publishing | `npm_get_trusted_publisher`, `npm_set_trusted_publisher` **W**, `npm_set_trusted_publisher_batch` **W**, `npm_delete_trusted_publisher` **W**\u26a0                                                                                                     |\n| Packages           | `npm_get_package`, `npm_get_package_version`, `npm_list_versions`, `npm_search_packages`                                                                                                                                                           |\n| Dist-tags          | `npm_get_dist_tags`, `npm_add_dist_tag` **W**, `npm_remove_dist_tag` **W**\u26a0                                                                                                                                                                        |\n| Downloads          | `npm_get_downloads`, `npm_get_version_downloads`                                                                                                                                                                                                   |\n| Security           | `npm_audit_dependencies` _(no credentials needed)_                                                                                                                                                                                                 |\n| Access             | `npm_get_package_visibility`, `npm_list_collaborators`, `npm_set_package_access` **W**\u26a0, `npm_deprecate_package` **W**\u26a0                                                                                                                            |\n| Publishing         | `npm_publish` **W**\u26a0, `npm_unpublish` **W**\u26a0                                                                                                                                                                                                       |\n| Orgs               | `npm_list_org_members`, `npm_list_org_teams`, `npm_list_org_packages`, `npm_set_org_member_role` **W**, `npm_remove_org_member` **W**\u26a0                                                                                                             |\n| Teams              | `npm_list_team_members`, `npm_list_team_packages`, `npm_create_team` **W**, `npm_delete_team` **W**\u26a0, `npm_add_team_member` **W**, `npm_remove_team_member` **W**\u26a0, `npm_grant_team_package_access` **W**, `npm_revoke_team_package_access` **W**\u26a0 |\n| Tokens             | `npm_list_tokens`, `npm_create_token` **W**, `npm_revoke_token` **W**\u26a0                                                                                                                                                                             |\n| Escape hatch       | `npm_request`                                                                                                                                                                                                                                      |\n\n## Worked example: trusted publishing across a fleet\n\nThe problem this server was written for. You have several packages published from one repo, and\nnpm's UI wants you to configure each by hand.\n\nFirst, check you can:\n\n```\nnpm_auth_status\n```\n\n`trusted_publishing_available` must be `true`. If it is not, `blockers` says why \u2014 the usual\nanswers are a `bypass_2fa` token or 2FA not enabled on the account itself.\n\nSee what one package has today:\n\n```\nnpm_get_trusted_publisher  package=\"@mgcrea/mcp-ovh\"\n```\n\nThis is the call that triggers the browser confirmation, because npm requires an OTP even to\nread. Approve it once.\n\nNow preview the whole batch \u2014 nothing is written:\n\n```\nnpm_set_trusted_publisher_batch\n  packages=[\"@mgcrea/mcp-npm\", \"@mgcrea/mcp-ovh\", \"@mgcrea/mcp-x\"]\n  provider=\"github\"\n  repository=\"mgcrea/mcp-npm\"\n  workflow_filename=\"ci.yml\"\n  dry_run=true\n  confirm=true\n```\n\nThen drop `dry_run`. Packages already configured correctly come back as `unchanged` and cost\nnothing. Verify against npm's own CLI, which calls the same endpoint:\n\n```bash\nnpm trust list @mgcrea/mcp-ovh\n```\n\nWith that in place, CI publishes with no token anywhere:\n\n```yaml\npermissions:\n  contents: read\n  id-token: write   # this is what OIDC trusted publishing needs\n# ...\n- run: npm publish --provenance --access public\n```\n\n## Traps worth knowing\n\n1. **A \"Bypass 2FA\" granular token is refused by every trust write** (403, pointing at\n   `gh.io/npm-gat-bypass2fa-deprecation`) **and by a direct publish** \u2014 npm's own login banner\n   puts \"account changes and direct publishing\" behind the same restriction. Reads keep working,\n   so it only surfaces on the write. Worse, a publish refused this way answers **404, not 403**,\n   which reads as \"no such package\". `npm_publish` says so when it has already read the\n   packument and knows the package exists. Create a token without that option, or use a session\n   token from `npm login` (or `npm_auth_login`).\n2. **Two-factor must be on the npm _account_, not just the token.** No token setting substitutes.\n3. **Several governance reads accept only a session token.** `npm_list_tokens`,\n   `npm_list_org_members`, `npm_list_collaborators` and `npm_get_package_visibility` refuse a\n   granular access token \u2014 so a _read_ can fail where the matching _write_ succeeds. This is the\n   failure someone who followed npm's own \"use granular tokens\" advice will hit.\n4. **One trusted publisher per package, and no update endpoint.** Changing one is genuinely\n   delete-then-create. `npm_set_trusted_publisher` owns both steps for a reason: split apart, a\n   failed create after a successful delete leaves the package with _no_ publisher and a broken\n   release pipeline.\n5. **`workflow_filename` is a bare filename.** `ci.yml`, never `.github/workflows/ci.yml`.\n6. **Scoped names are escaped two different ways.** `/@babel%2fcore` for the packument,\n   `%40babel%2Fcore` for the `/-/package/` routes. The wrong one returns 404, which reads like\n   \"no such package\".\n7. **Bulk downloads rejects scoped packages**, caps at 128, and cannot do a daily series. The\n   single-package form handles `@scope/name` fine.\n8. **Deprecating with an empty message *un*deprecates.**\n9. **`npm_create_token` shows the value once.** It is never retrievable again, only revocable.\n10. **`npm_publish` produces no provenance attestation.** A CI publish over OIDC does. Prefer it.\n11. **npm publishes no rate-limit headers**, and documents no per-endpoint numbers \u2014 only that\n    5M requests/month is acceptable. Assume nothing; the batch tool paces itself at 2s.\n12. **A successful publish can 404 on the read path for several minutes** \u2014 `npm view`,\n    `npm_get_package`, even `registry.npmjs.org` directly. Seen on an ordinary Nth publish, not\n    only the first-publish case in npm-first-publish-bootstrap. The write already landed if the\n    CLI printed `+ <pkg>@<version>` or, for a provenance publish, logged a transparency-log URL\n    (`search.sigstore.dev/?logIndex=...`) \u2014 that log entry is independently verifiable and does\n    not depend on npm's own read path at all. A stale read right after publishing is not\n    evidence of failure; poll rather than conclude.\n\n## Troubleshooting\n\n**A tool I expected is missing.** Call `npm_auth_status`. An absent tool almost always means\nmissing configuration or `NPM_ALLOW_WRITES` being off \u2014 write tools are not registered at all\nwhen it is unset, by design.\n\n**Everything 401s, but `npm whoami` works in my terminal.** The token this server holds is a\nstale copy. It reads `~/.npmrc` once at startup, so an `npm login` that visibly succeeded does\nnot reach a server that was already running. Call **`npm_auth_reload`** \u2014 it re-reads the token\nand reports whether it changed. A 401 also triggers the same re-read automatically and retries\nonce, so this is mostly self-healing now; the tool is for confirming it, and for the case where\nyou would rather not spend a failed call finding out.\n\nOne thing a reload cannot fix: if the server started with **no** token at all, the credentialled\ntools were never registered, and only a restart adds them.\n\n**`Connection closed` in the client.** Run the binary by hand with the same environment; the\nerror the client swallowed is on stderr.\n\n**A publish 404s on a package I have published thirty times.** npm answers 404 rather than 403\non a write the token may not perform, so this is about the token, not the path. `npm_publish`\nreads the packument first and says which of the two stories applies. The usual causes are a\ngranular token whose selected packages do not include this one, and a token with _Bypass 2FA_\nenabled \u2014 npm refuses those for direct publishing, not only for trusted-publisher writes.\n`npm_auth_login` gets a session token without leaving the session.\n\n**Every trust call 403s.** Read the `remedy` field on the error. The three causes are a\n`bypass_2fa` token, 2FA not enabled on the account, and not being a maintainer.\n\n**The browser prompt keeps reappearing.** The cached code is being minted for a different npm\naccount than the token belongs to. `npm_auth_clear_otp`, then check `npm_auth_status` names the\naccount you expect.\n\n## Develop\n\n```bash\npnpm install\npnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build\n```\n\nCheck the built server still speaks the protocol and gates what it should:\n\n```bash\nprintf '%s\\n' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"cli\",\"version\":\"0\"}}}' \\\n  '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' \\\n| node dist/cli.js 2>/dev/null | jq -r '.result.tools[]?.name'\n```\n\n### Publish\n\n```bash\npnpm dlx release-it       # bump, commit, tag\ngit push --follow-tags    # CI publishes to npm and GHCR from the tag\n```\n\nCI publishes over OIDC trusted publishing with provenance, so no npm token exists anywhere.\n\n## License\n\nMIT \u2014 see [LICENSE](./LICENSE).\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-npm.git"
+  },
+  "time": {
+   "0.1.0": "2026-09-01T15:41:25.337Z",
+   "0.1.1": "2026-09-01T16:12:38.538Z",
+   "0.1.2": "2026-09-01T20:20:02.640Z",
+   "0.1.3": "2026-09-01T21:43:14.776Z",
+   "0.2.0": "2026-09-04T09:33:31.634Z",
+   "0.2.1": "2026-09-04T10:53:32.522Z",
+   "0.2.2": "2026-09-04T12:42:18.515Z",
+   "0.3.0": "2026-09-04T18:36:08.705Z",
+   "0.4.0": "2026-09-07T14:22:25.406Z",
+   "created": "2026-09-01T15:41:24.564Z",
+   "modified": "2026-09-07T14:22:25.673Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.1.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.1.0_1788277285195_0.9125100844659162"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-SIyI8By//iY52I1Bzc7u1tF90EvPK+fa5dqiqkbMkkpb6U66Ji5ei07YQcoIgcnyCmRKeh2p8vQ23Wk45jp2Sw==",
+     "shasum": "59155001daeee13b5d5a3578f77db12ce8f3e3ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICEMaWx7n0EjoQ4a21lizschJFlD5UVfgGpLr1BUJczkAiEA3yP1gjy1fcOuC1lgeNgaxTbjwvSVtkZod3l1UeuxhP8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.1.0.tgz",
+     "unpackedSize": 392822
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "22cb0d4defa52afb11c110dd9efe06423bafde4c",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.1.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.1.1_1788279158401_0.5560101940639095"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.1.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-nGjfooWbpWrljIXBA2z+Qwc6d0ZX+suZeyCVhi718aBvmMur/ECGQLCNTG43CiAcmXx0KT3b7NsSR/2sALiFvg==",
+     "shasum": "9f97236f972b734f0d9c91017b4892fed84eab8b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDxxYi4h6IQ5kazCnY0HccXVRotdJxIVYog/V94v3N3owIgLTMTLbq/sfYo0ln0zE4i3zzvceIebRsM4gV3bjBl8Is="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.1.1.tgz",
+     "unpackedSize": 393403
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "193fd20dd0db26cdc29115f512d938d473446fc2",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.1.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.1.2_1788294002479_0.1449056514578626"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.1.2"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-UYdfifpMhr+VOrUvdcIaWuku551D4JOlXFDYsA4nYSd0GdbQHjxUg9ReH46oLTEJ6D0t9dIbYLG6x0pqsOF9yg==",
+     "shasum": "a012264d3db3abcabcb7178c7ba6292a540fe39d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC6K+AMxNMigLDEvb/BZSm5WDHPnPe5MU9M5iZCF0ZPnAiAA1tcrsp/wkRdgWriy0F/KATuaFUGJ7wNN6pflwTJIfA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.1.2.tgz",
+     "unpackedSize": 404069
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "45711c37cd961806e7203e5a4c7cc470d447ce95",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.1.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.1.3_1788298994624_0.5285458483916705"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.1.3"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-j4kTIqkLgeIlqHOU/u4IghEzJDaYI40HIh1qGC+X73nxmf5u5mO7zlT3I8RmAapyNZrLqozAqUYPzON3lyjRqQ==",
+     "shasum": "efb81f15f1781f4f215354cab9e304dea01db258",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDJnk4ENpLDiXjfmqsQAFfaGZ8bExsXXoutOvTMX9hYygIhANnUVb7RKqclb/DXnZ0zJzHjInjZeJuym5LsmNd86bLt"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.1.3.tgz",
+     "unpackedSize": 416888
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0366eea79252ba2cd5c3877785eed9634a9b02d0",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.2.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.2.0_1788514411486_0.7688909061422127"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.2.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-mybcvit495FQBsIMt+/F7c8bs3hksmJnL0LrMUGWfdaxXBvbJXRsMeh7oNjw+i/DwV6yUPxGHPCKFBQMPHYSLQ==",
+     "shasum": "b0547325de0f79f12a5e930fc59f96167c52fc71",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFC18hvqQWQ227pPv2zp9H1BkDUAW7WxYbLuJ1Eva6ujAiEAop7kf7Eu5Nv3OWW2K8pM5g2cfbQSV3NLzvaWfNaVi2U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.2.0.tgz",
+     "unpackedSize": 437321
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "73ba34514c6d7ea96c3c1973a37fc6304cc99774",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.2.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.2.1_1788519212384_0.8127568534560556"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.2.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-PjhXu/Bdyba/x/PdXcEGQ9us2EmOaBuUPl9xrH94auWs56uDx2gXijQSOmvEh9sY8thVW5H5SfMOFSzdP1/PAQ==",
+     "shasum": "d9f2056fe9d95ebb5268e95a28782f2d95425100",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEXaLDP8b2vZH6P0Wur8yw1aat8FyEiYbXSh4hmdkfnRAiB2RmUTLzQBQpjSc4K3VHHQgigU0VdLRp9XmHxlH+Syhw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.2.1.tgz",
+     "unpackedSize": 440859
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cdefb276facb215fea3e1bfa94145784959e1dea",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.2.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.2.2_1788525738375_0.35987649148685064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.2.2"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-Kr0wzKCeJdipthuSnKwcqaYNi2zGEcuA5ftoZpbmiEWHNw9ngVy4+LsxSFxjiaYiPHwAJyLV2/0rOxN4aVv7lA==",
+     "shasum": "80fe778c1b1a8b1753598ae2ce715bba61786b6b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC1oGLUeolD35tPPwP2MAEQdW6sxYsfW8tfL1eBDycjbAiBB9DI+e2rl7PW79mPJINj9GZfu9YXk5kiC9HCad2jsyA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.2.2.tgz",
+     "unpackedSize": 447291
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "44eae0d506aca7b7bd4bd0972015589b1ce962ef",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.3.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.3.0_1788546968505_0.5752785550041639"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@mgcrea/mcp-totp": "^0.1.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.3.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-oLNIj5/VrMY7r9xmdQE3qseOQLwycu0EhuSn0Aco2fFAgdWYQz65A37ySthrVB6anz3AnOL54KxE4+IdRMxjiQ==",
+     "shasum": "1cc99b4e26bb9a156873e49bb2955e0a9450b105",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCkr5RGwGsJgRQ8qffx+F51v+QvOwXcxe9x1q1+ATH6dQIhAIZs/+PvaEtD3UlVHC2K5FxagC5bcI3ZF8e8XrOdq7Ru"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.3.0.tgz",
+     "unpackedSize": 471523
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b66aa77bf1a8a81262225c48c6fcbd1600734854",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-npm@0.4.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-npm_0.4.0_1788790945231_0.179602599909642"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ca6c724b-d390-4aa0-8aee-c2eef487e602"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "npm-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-npm/issues"
+    },
+    "dependencies": {
+     "@mgcrea/mcp-totp": "^0.1.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the npm registry",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-npm@0.4.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-XzVe9Cw90uCahlcKsro8413GnZXitBNuI69DITDqrSDa++6VSIuMbHoNvPf67le0aAE50X5x9XLohcYbecZB4g==",
+     "shasum": "2081fa9c62e61dc8c8ea20357c582b1a3129741f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDAodKf0iv1VSegzps9REthlD9cjaaYoQg++t4AUWaOdAiEAz6N/g5BjC+6h/JsLgir/2ig+EIl5yx1Aj3JXb+4z7zY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-npm/-/mcp-npm-0.4.0.tgz",
+     "unpackedSize": 528781
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e56f37c11d79cd9681fba32ea6940de3cd2988ba",
+    "homepage": "https://github.com/mgcrea/mcp-npm#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "npm"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-npm",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-npm.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-npm:latest && docker push mgcrea/mcp-npm:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-npm",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-npm"
+}

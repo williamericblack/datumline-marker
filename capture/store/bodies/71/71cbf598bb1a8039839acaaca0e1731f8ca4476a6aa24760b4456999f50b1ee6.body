@@ -1,0 +1,160 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4ba78de61d3f]",
+    "name": "aethereum-dev"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@aethereumdev/mcp-audit",
+  "_rev": "1-ae8ffb9a4c372b463a01d9ebcf096960",
+  "author": {
+   "email": "[redacted-email:32540355074c]",
+   "name": "Bruno Jaamaa",
+   "url": "https://github.com/br9704"
+  },
+  "bugs": {
+   "url": "https://github.com/br9704/mcpaudit/issues"
+  },
+  "description": "A first-pass linter for MCP servers: spec conformance + safety heuristics, in one local zero-dependency CLI.",
+  "dist-tags": {
+   "latest": "0.1.0"
+  },
+  "homepage": "https://github.com/br9704/mcpaudit#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "linter",
+   "conformance",
+   "security",
+   "static-analysis",
+   "sarif"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4ba78de61d3f]",
+    "name": "aethereum-dev"
+   }
+  ],
+  "name": "@aethereumdev/mcp-audit",
+  "readme": "# mcpaudit\n\n[![npm](https://img.shields.io/npm/v/%40aethereumdev%2Fmcp-audit)](https://www.npmjs.com/package/@aethereumdev/mcp-audit)\n[![CI](https://github.com/br9704/mcpaudit/actions/workflows/ci.yml/badge.svg)](https://github.com/br9704/mcpaudit/actions/workflows/ci.yml)\n[![runtime deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)](#supply-chain)\n[![node](https://img.shields.io/badge/node-%E2%89%A5%2020-blue)](#supply-chain)\n[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)\n\n**A conformance + safety linter for MCP servers.** Point it at any Model Context Protocol\nserver \u2014 stdio or Streamable HTTP \u2014 and get a report.\n\n![mcpaudit auditing a reference MCP server: one warning, one info, four checks skipped as not applicable](https://raw.githubusercontent.com/br9704/mcpaudit/main/docs/media/demo.svg)\n\n```bash\nnpx @aethereumdev/mcp-audit \"npx -y @modelcontextprotocol/server-filesystem /tmp\"\n```\n\nZero runtime dependencies. No API key. No telemetry. The only network traffic is to the\nserver you asked it to audit.\n\n---\n\n## What it found\n\nReal audits of four official reference servers, run with this tool at v0.1.0. Raw\n`--json` output for every row is committed under [`audits/`](./audits) \u2014 nothing here is\nsummarised by hand. The **Reports itself as** column is the server's own `serverInfo`,\nwhich is what the audit records; it does not always match the npm package name.\n\n| Server (npm) | Reports itself as | Protocol | Findings |\n|---|---|---|---|\n| `@modelcontextprotocol/server-everything` | `mcp-servers/everything` 2.0.0 | 2025-11-25 | 1 warn, 1 info |\n| `@modelcontextprotocol/server-filesystem` | `secure-filesystem-server` 0.2.0 | 2025-11-25 | 1 warn, 1 info |\n| `@modelcontextprotocol/server-memory` | `memory-server` 0.6.3 | 2025-11-25 | 1 warn, 1 info |\n| `@modelcontextprotocol/server-sequential-thinking` | `sequential-thinking-server` 0.2.0 | 2025-11-25 | 1 warn, 1 low, 1 info |\n\nThe headline is the **Protocol** column. The current specification revision is\n`2026-07-28`, which removed the `initialize` handshake and made `server/discover`\nmandatory. Every server above \u2014 and every SDK we could find \u2014 still speaks an\n`initialize`-era revision. That is not a defect in these servers; it is where the\necosystem is. It is also why every check in this tool is *era-aware*: checks written for\nthe stateless protocol are **skipped with a stated reason** against older servers rather\nthan failed. Without that, this table would be a wall of false failures.\n\nThe recurring `warn` is finding `C8_ANSWERS_BEFORE_INITIALIZE`, from rule\n[`C8_LEGACY_PREINIT`](./RULES.md): all four answer `tools/list` on a fresh connection with\nno handshake sent. The specification calls this out directly as a version-negotiation\nhazard, and it is why it recommends probing with `server/discover` first even for clients\nthat only speak modern revisions.\n\n**No exploitable vulnerability was found in any audited server, and nothing here was\ndisclosed privately first because there was nothing to disclose.** These are hygiene and\nspec-currency observations about servers that are, by design, demonstration and reference\nimplementations.\n\n---\n\n## What this is, honestly\n\n> **A first-pass linter that catches common issues \u2014 not a security audit.**\n\nThat framing is load-bearing. This tool reads what a server *says about itself* \u2014 tool\nnames, descriptions, schemas, annotations, protocol behaviour \u2014 and applies documented\nheuristics. It does not execute tools in a sandbox, analyse server source, or prove\nanything. A clean report means \"nothing common was found\", not \"this server is safe\".\n\nEvery check documents **how it misfires**, in [RULES.md](./RULES.md), which is *generated\nfrom the rule metadata in code* so the docs cannot drift. `falsePositiveModes` is a\nrequired field on every rule, and CI fails if the committed RULES.md is stale.\n\nThis discipline is not decorative. Auditing the official filesystem server surfaced four\nfindings that turned out to be false positives \u2014 the word \"clearly\" in a description was\nmatching the destructive verb `clear`. That bug was found by hand-reviewing every finding\nbefore publishing this table, and there are now regression tests for those exact strings.\nIf a check fires on your legitimate server, that is a bug in the check; please report it.\n\n---\n\n## Two lanes\n\n**Lane A \u2014 conformance.** Does it implement the specification correctly? Built against\n`2026-07-28` (stateless) first, with a back-compat lane for `initialize`-era servers.\nNine checks, `C0`\u2013`C8`.\n\n**Lane B \u2014 safety.** Is it dangerous? Tool poisoning, annotation contradictions,\ncredential exposure, `$ref` SSRF, cross-server shadowing, terminal-escape injection,\nunsafe icon URIs. Seven checks, `S1`\u2013`S7`. These are **heuristics** \u2014 they surface signals\na human should look at; they do not prove anything.\n\n**Plus drift.** `D1_SURFACE_DRIFT` diffs a server against a baseline you pinned earlier.\nIt lives outside the rule registry because it needs a caller-supplied baseline, which is\nwhy `src/rules/` holds seven files while the documentation lists eight safety checks.\n\n17 checks in total. All of them are in [RULES.md](./RULES.md), with their false-positive\nmodes.\n\n## Architecture\n\n```mermaid\nflowchart TD\n    T[\"target: a command, or a URL\"] --> D{detectTargetKind}\n    D -->|command| S[\"stdio transport<br/>shell:false, hand-tokenized\"]\n    D -->|URL| H[\"Streamable HTTP transport\"]\n    S --> C[\"McpClient \u2014 never throws;<br/>caps on line size, body size, stderr\"]\n    H --> C\n    C --> E{detectEra}\n    E -->|\"server/discover answers\"| M[\"modern \u00b7 2026-07-28\"]\n    E -->|\"-32601, then initialize\"| L[\"legacy \u00b7 pre-2026\"]\n    M --> R[\"rule registry\"]\n    L --> R\n    R --> LA[\"Lane A \u00b7 conformance<br/>C0\u2013C8\"]\n    R --> LB[\"Lane B \u00b7 safety<br/>S1\u2013S7\"]\n    B[(\"pinned baseline\")] --> DR[\"D1 \u00b7 surface drift\"]\n    LA --> AR[\"AuditReport\"]\n    LB --> AR\n    DR --> AR\n    AR --> O1[\"terminal\"]\n    AR --> O2[\"--json\"]\n    AR --> O3[\"--sarif\"]\n```\n\nTwo decisions shape everything above.\n\n**Era is resolved before any check runs.** Every rule declares which eras it applies to,\nand an inapplicable check is *skipped with a reason*, never failed. This was not the\noriginal design; it became mandatory once research showed that no shipping server\nimplements `2026-07-28`. Firing modern checks at legacy servers would produce a wall of\nfalse positives and destroy the tool's credibility on contact.\n\n**The transport never throws.** A hostile server is data, not an exception \u2014 every\nrequest returns an outcome (`result`, `error`, `timeout`, `transport-error`,\n`invalid-json`, `invalid-envelope`), so a server that emits garbage, hangs, or dies\nmid-conversation produces a finding rather than a stack trace.\n\n## How it was built\n\nThe full record is in [masterplan.md](./masterplan.md) \u2014 sprint by sprint, with as-shipped\ndeltas, deferrals and their reasons. Four repairs are worth pulling out, because each one\nis a bug a green test suite was actively hiding.\n\n**The CLI worked in tests and produced no output when packed.** The\n`import.meta.url === file://${process.argv[1]}` entry-point guard silently fails under\n`npx`, because npm installs `bin` as a symlink. Every unit test passed throughout. Only an\nacceptance test that ran the *packed binary* caught it, so packing-and-running is now a CI\nstep rather than a pre-release ritual.\n\n**A determinism check never fired because the fixture was a palindrome.** The\ndeliberately-broken fixture reversed its tool order to trip `C2_NONDETERMINISTIC_ORDER`,\nbut its tool names were symmetrical, so reversal was a no-op. A fourth tool broke the\nsymmetry. Similarly, `S6_CONTROL_IN_OUTPUT` scanned the raw wire bytes, where an ESC byte\nalways arrives already JSON-escaped, so it could never match. It now scans decoded text.\n\n**Two false positives on the benign fixture were both modes I had documented but not\nimplemented.** `S1_HIDDEN_CHARACTERS` fired on the zero-width joiners inside an emoji\nsequence; `S2_DESTRUCTIVE_CLAIMS_READONLY` fired on `remove_background`. The fix was a\ntwo-tier verb model: strong verbs (`delete`, `drop`, `purge`, `wipe`) count alone, weak\nverbs (`remove`, `reset`, `clear`) count only when paired with a stateful object and only\nin the tool *name* \u2014 prose is too noisy to carry that signal.\n\n**The rug-pull detector hashed uncanonicalised JSON**, so a server that merely reordered\nits keys would have looked like a deliberate downgrade on every re-audit. Keys are sorted\nbefore hashing now, and that is tested explicitly.\n\nTwo more, briefly: the report sanitises every finding before display, because otherwise a\nserver flagged for ANSI injection could inject ANSI into the report flagging it. And the\nfirst version of the weekly spec-drift job was circular \u2014 it read the protocol version out\nof the versioned file, which always matches itself; it now compares against the published\nrevision directory listing.\n\n## Verification\n\n| | |\n|---|---|\n| Tests | **113**, across 13 files |\n| CI | Node 20, 22, 24 \u2014 lint, typecheck, test, RULES.md staleness, packed-CLI smoke test |\n| Fixtures | 8 stdio servers: benign, hostile, legacy, malicious, modern-bad, modern-good, reserved-code, shadow |\n| Network required | none \u2014 every fixture runs locally |\n\nThe hostile fixture is the interesting one. It serves a 2000-tool list, a 400-deep schema,\na 500-notification flood, garbage on stdout, truncated JSON, wrong-shaped envelopes, a\nframe with no trailing newline, a server that says nothing at all, and a server that exits\nmid-conversation. Those tests passed on the first run, which is the payoff for the size\ncaps and never-throw transport rather than a coincidence.\n\nReproduce the two ends of the range yourself, with no network:\n\n```bash\nnpm run build\nnode dist/cli.js \"node fixtures/malicious/server.mjs\"   # 12 error, 10 warn \u2014 exit 1\nnode dist/cli.js \"node fixtures/benign/server.mjs\"      # clean \u2014 exit 0\n```\n\n## Usage\n\n```bash\n# stdio (a command)\nnpx @aethereumdev/mcp-audit \"npx -y @modelcontextprotocol/server-memory\"\n\n# Streamable HTTP (a URL)\nnpx @aethereumdev/mcp-audit https://example.com/mcp\n\n# CI: SARIF for GitHub code scanning\nnpx @aethereumdev/mcp-audit https://example.com/mcp --sarif > mcp.sarif\n\n# Cross-server shadowing needs more than one target\nnpx @aethereumdev/mcp-audit \"npx -y server-a\" \"npx -y server-b\"\n```\n\nAnything after `--` is passed through verbatim to a stdio server command.\n\n### Rug-pull detection\n\nA server can pass review and then quietly rewrite a tool description \u2014 which changes the\ninstructions your model follows, with no version bump and no code change on your side.\nPin the surface, then diff it:\n\n```bash\nnpx @aethereumdev/mcp-audit \"npx -y my-server\" --pin          # writes .mcpaudit-baseline.json\nnpx @aethereumdev/mcp-audit \"npx -y my-server\" --baseline .mcpaudit-baseline.json\n```\n\nDrift reports which field changed, with the old and new values inline. Description and\nschema changes are errors, because they alter what the model is told. Annotation changes\nthat *weaken* a safety claim (`destructiveHint` flipping to `false`) are called out\nseparately, because that is the shape of a deliberate downgrade rather than an ordinary\nrelease edit. Drift means \"changed since you approved it\" \u2014 not \"malicious\".\n\n### Options\n\n| Flag | Meaning |\n|---|---|\n| `--json` | machine-readable report on stdout |\n| `--sarif` | SARIF 2.1.0, for GitHub code scanning |\n| `--fail-on <level>` | `info` \\| `low` \\| `warn` \\| `error` (default `warn`) |\n| `--pin[=<path>]` | write a baseline snapshot (default `.mcpaudit-baseline.json`) |\n| `--baseline <path>` | diff against a baseline; drift is a finding |\n| `--timeout <ms>` | per-request timeout (default `10000`) |\n| `--color` / `--no-color` | force or disable ANSI colour; `NO_COLOR` is respected |\n| `--icons <mode>` | `auto` \\| `plain` \\| `nerd` \\| `none` (default `auto`) |\n| `-h, --help` \u00b7 `-v, --version` | |\n\n`--pin` takes its optional path with `=` only (`--pin=path`); a bare `--pin path` reads\n`path` as another target. `--json` and `--sarif` are never styled.\n\n**Exit codes:** `0` clean \u00b7 `1` findings at or above `--fail-on` \u00b7 `2` tool or connection\nerror, including a server we could not talk to at all. Designed for CI.\n\n## Supply chain\n\nA security tool's own dependency tree is part of its argument.\n\n| Runtime dependencies | **0** |\n|---|---|\n| Install lifecycle scripts | **none** \u2014 nothing runs on `npm install` |\n| Network calls | only to the server you name |\n| Node | \u2265 20 |\n\nBoth the zero-dependency claim and the absence of install scripts are\n[enforced by a test](./test/supply-chain.test.ts), not just asserted here. Development\nuses TypeScript, vitest and eslint; none of it ships. What that costs is spelled out under\nLimitations.\n\n## Limitations\n\nA credibility section, not a weakness section. Everything here is a deliberate boundary.\n\n- **Schema validation is structural, not semantic.** `inputSchema` is checked for being\n  parseable, an object, `type: \"object\"` at the root, and bounded in depth and `$ref`\n  count \u2014 not validated against JSON Schema 2020-12, which would need a validator\n  dependency. A schema can pass this check and still be rejected by a strict validator.\n- **Only tools are inspected.** Resource descriptions and prompt templates carry the same\n  injection surface and are not covered yet.\n- **The modern lane is exercised against hand-written fixtures**, because no shipping\n  server implements `2026-07-28`. `C7_HTTP_HEADERS` in particular has never met a real\n  modern HTTP server; none exists.\n- **No token-passthrough or OAuth-metadata SSRF check.** Deferred for the same reason:\n  there is no live `2026-07-28` auth server to test against.\n- **`S5_CROSS_SERVER_SHADOWING` needs two or more targets** in a single run, and is\n  skipped otherwise.\n- **No sandboxed execution, no source analysis, no spec-completeness claim.** This covers\n  common cases. It says so on purpose.\n- **Heuristics misfire.** Every rule ships at least two documented false-positive modes.\n  A false positive on your legitimate server is a bug in the check \u2014 please file it.\n\n## Status\n\nv0.1.0. All eleven engineering sprints are closed: both transports, 17 checks, era\ndetection, terminal/JSON/SARIF output, pin-and-drift, 113 tests, CI on three Node\nversions, and a release pipeline on npm trusted publishing (OIDC) with automatic\nprovenance. Release is tag-driven; no npm token exists in the repo or in CI.\n\nNext, in rough order of usefulness: resource and prompt coverage, an env-dump rule for\ntools that return the whole environment, `S8` token passthrough once there is anything to\ntest it against, and `--theme` loading for the TOML palettes the terminal report already\nunderstands. See [CONTRIBUTING.md](./CONTRIBUTING.md) for these as good first issues, and\nthe owner-gate block at the end of [masterplan.md](./masterplan.md) for what is left.\n\n## Contributing\n\nNew rules and false-positive reports are equally welcome. A rule needs a stable id, a\n`why` that can be checked against the specification, at least two honest false-positive\nmodes, a remediation, and both a fixture that triggers it and one that must not. See\n[RULES.md](./RULES.md) and the servers under [`fixtures/`](./fixtures).\n\nSecurity issues in **this tool** go to [redacted-email:32540355074c]. For issues found *by* this\ntool in someone else's server, see [SECURITY.md](./SECURITY.md).\n\n## License \u00b7 Author\n\nMIT \u00a9 [Bruno Jaamaa](https://brunojaamaa.dev) \u00b7 [github.com/br9704](https://github.com/br9704)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/br9704/mcpaudit.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-15T08:09:25.769Z",
+   "created": "2026-08-15T08:09:25.454Z",
+   "modified": "2026-08-15T08:09:26.001Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aethereumdev/mcp-audit@0.1.0",
+    "_nodeVersion": "24.12.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-audit_0.1.0_1786781365631_0.9180929268651181"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4ba78de61d3f]",
+     "name": "aethereum-dev"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "email": "[redacted-email:32540355074c]",
+     "name": "Bruno Jaamaa",
+     "url": "https://github.com/br9704"
+    },
+    "bin": {
+     "mcpaudit": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/br9704/mcpaudit/issues"
+    },
+    "description": "A first-pass linter for MCP servers: spec conformance + safety heuristics, in one local zero-dependency CLI.",
+    "devDependencies": {
+     "@types/node": "^22.10.2",
+     "@typescript-eslint/eslint-plugin": "^8.18.0",
+     "@typescript-eslint/parser": "^8.18.0",
+     "eslint": "^9.17.0",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 109,
+     "integrity": "sha512-5EgjYNGGEPEXGFsWQMWWPMxz36abZ/uVy0NXxWrn6zC+zutlqgRVSZCubEqzjY6YZCBjOdKljFvOR9kvSbfixg==",
+     "shasum": "3504b0af08a73d466be6b2fb55d239e68b3fbe70",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDvCUJK5RP8fm0rWkbn1ftBepb8mBmkjQoGx5bMXA4EXgIhANBlAjrw++y/Z6WIIRh4qPgoFxbO3wfvtuGO3B1Ul+oq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aethereumdev/mcp-audit/-/mcp-audit-0.1.0.tgz",
+     "unpackedSize": 419143
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": "./dist/index.js"
+    },
+    "gitHead": "3f6220cd99c21b38f16d560fb374ea7763aafab1",
+    "homepage": "https://github.com/br9704/mcpaudit#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "linter",
+     "conformance",
+     "security",
+     "static-analysis",
+     "sarif"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4ba78de61d3f]",
+      "name": "aethereum-dev"
+     }
+    ],
+    "name": "@aethereumdev/mcp-audit",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/br9704/mcpaudit.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json && node scripts/chmod-bin.mjs",
+     "lint": "eslint .",
+     "prepack": "npm run build",
+     "rules:gen": "UPDATE_RULES=1 vitest run test/rules-doc.test.ts",
+     "test": "npm run build && vitest run",
+     "test:unit": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   }
+  }
+ },
+ "name": "@aethereumdev/mcp-audit",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@aethereumdev%2Fmcp-audit"
+}

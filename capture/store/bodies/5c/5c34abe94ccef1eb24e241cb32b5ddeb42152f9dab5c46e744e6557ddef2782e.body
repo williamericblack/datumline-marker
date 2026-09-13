@@ -1,0 +1,1131 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.26",
+  "maintainers": [
+   {
+    "email": "[redacted-email:27ef1e588e90]",
+    "name": "michal.wieczorek"
+   },
+   {
+    "email": "[redacted-email:7049c2c1bb69]",
+    "name": "maciejpieprzyk"
+   },
+   {
+    "email": "[redacted-email:1e2d2f49b5fe]",
+    "name": "lukaszc"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.18",
+   "0.1.19",
+   "0.1.20",
+   "0.1.21",
+   "0.1.22",
+   "0.1.23",
+   "0.1.24",
+   "0.1.25",
+   "0.1.26"
+  ]
+ },
+ "manifest": {
+  "_id": "@computec/mcp-remote",
+  "_rev": "9-3b7c4c30ca4f72c48e0b61d0dbf7e2c4",
+  "author": {
+   "email": "[redacted-email:6295518a11ea]",
+   "name": "Glen Maddern"
+  },
+  "bugs": {
+   "url": "https://github.com/geelen/mcp-remote/issues"
+  },
+  "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+  "dist-tags": {
+   "latest": "0.1.26"
+  },
+  "homepage": "https://github.com/geelen/mcp-remote#readme",
+  "keywords": [
+   "mcp",
+   "stdio",
+   "sse",
+   "remote",
+   "oauth"
+  ],
+  "maintainers": [
+   {
+    "email": "[redacted-email:27ef1e588e90]",
+    "name": "michal.wieczorek"
+   },
+   {
+    "email": "[redacted-email:7049c2c1bb69]",
+    "name": "maciejpieprzyk"
+   },
+   {
+    "email": "[redacted-email:1e2d2f49b5fe]",
+    "name": "lukaszc"
+   }
+  ],
+  "name": "@computec/mcp-remote",
+  "readme": "# `mcp-remote-appengine`\nThis is a fork of mcp-remote with changes:\n* Acess Token is now automatically refreshed 5 minutes before the expiry\n* I have internally changed the reference library @modelcontextprotocol/sdk to reflect issue https://github.com/geelen/mcp-remote/issues/128\n* `--static-oauth-client-info-base64` option added where json parameter is now encoded as base64\n\n# OAuth Token Refresh Enhancements\n\n## Overview\n\nThe `NodeOAuthClientProvider` has been enhanced with automatic token refresh capabilities to prevent authentication failures due to expired access tokens.\n\n## Key Improvements\n\n### 1. **Automatic Token Expiration Tracking**\n- Tokens are now stored with an `issued_at` timestamp\n- The system can accurately calculate when tokens expire\n- Accounts for time drift and provides a 30-second buffer before expiration\n\n### 2. **Automatic Token Refresh**\n- When `tokens()` is called and the access token is expired, it automatically attempts to refresh using the refresh token\n- Uses the MCP SDK's `refreshAuthorization` function\n- Seamlessly handles the OAuth metadata discovery and token exchange\n\n### 3. **Enhanced Token Validation**\n- New `checkTokenValidity()` method for diagnostic purposes\n- Improved debug logging with expiration details\n- Better error handling for invalid or malformed tokens\n\n### 4. **Graceful Degradation**\n- If a token refresh fails, the proxy first re-reads the shared token store \u2014 a concurrent\n  instance may have refreshed successfully \u2014 and only then reports that re-authentication is\n  required. Token files are never deleted on a failed refresh, so one instance's failure cannot\n  destroy the refresh token other sessions seed from.\n- Maintains backward compatibility with existing token files\n\n### 5. **Path\u2011aware OAuth discovery builds an invalid URL**\n- If Authorization server has realm in path the path builded in mcp is incorrect \n\n### 6. **No silent hangs (0.1.24)**\nFixes the failure mode where the proxy stopped answering entirely, without an error, until it\nwas restarted:\n\n- **Every request gets an answer.** A rejected upstream `send()`, a closed upstream transport, or\n  an unanswered request now produces a JSON-RPC error for the client instead of a stderr line and\n  an orphaned request id.\n- **Proactive refresh actually runs.** The refresh decision is made on the time *remaining*, not\n  on `expires_in` (the total lifetime), which never crossed the buffer and left the feature dead.\n  A background timer refreshes one buffer ahead of expiry, so an idle proxy no longer drifts past\n  the refresh token's own lifetime and into an interactive re-login it cannot complete.\n- **One refresh at a time.** Concurrent callers join a single in-flight refresh instead of racing\n  with the same refresh token, which a rotating auth server rejects for all but the first.\n- **Bounded OAuth calls.** Metadata discovery and token refresh have a timeout, so an auth server\n  that accepts the connection and never answers can no longer stall every proxied request.\n- **Session directories are cleaned up.** Own directory on shutdown, plus orphans left by\n  processes that no longer exist.\n\n#### Timeout flags\n\n| Flag | Default | Meaning |\n|---|---|---|\n| `--request-timeout <seconds>` | 300 | Answer a request with a timeout error if the upstream stays silent. `0` disables. |\n| `--oauth-timeout <seconds>` | 30 | Ceiling for a single OAuth round trip. `0` disables. |\n\n## Usage\n\nThe enhancements are transparent to existing code:\n\n```typescript\n// Existing code continues to work unchanged\nconst provider = new NodeOAuthClientProvider(options)\nconst tokens = await provider.tokens() // Now automatically refreshes if needed\n\n// New diagnostic capability\nconst validity = await provider.checkTokenValidity()\nconsole.log('Token expires in:', validity.timeLeftSeconds, 'seconds')\n```\n\n## Token Storage Format\n\nTokens are now stored with an additional `issued_at` field:\n\n```json\n{\n  \"access_token\": \"...\",\n  \"refresh_token\": \"...\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 3600,\n  \"issued_at\": 1643723400000\n}\n```\n\n## Debugging\n\nEnable debug mode to see detailed token refresh information:\n\n```bash\nnpx tsx proxy.ts https://your-server.com --debug\n```\n\nDebug logs include:\n- Token expiration calculations\n- Refresh attempt details\n- Success/failure notifications\n- Timing information\n\n## Error Handling\n\nThe system handles various failure scenarios:\n\n1. **No refresh token**: Clears expired tokens and forces re-auth\n2. **Refresh endpoint unavailable**: Falls back to full re-authentication\n3. **Network failures**: Retries based on underlying HTTP client behavior\n4. **Invalid refresh token**: Clears all tokens and forces re-auth\n\n## Migration\n\nExisting token files will continue to work:\n- Tokens without `issued_at` fall back to using `expires_in` directly\n- First token refresh will add the `issued_at` timestamp\n- No manual migration required\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/geelen/mcp-remote.git"
+  },
+  "time": {
+   "0.1.18": "2025-07-31T09:49:58.367Z",
+   "0.1.19": "2025-08-12T07:22:51.535Z",
+   "0.1.20": "2026-05-19T11:35:11.595Z",
+   "0.1.21": "2026-06-03T11:07:38.335Z",
+   "0.1.22": "2026-06-03T11:37:49.030Z",
+   "0.1.23": "2026-06-03T16:49:27.651Z",
+   "0.1.24": "2026-08-10T11:48:02.594Z",
+   "0.1.25": "2026-08-10T15:51:22.147Z",
+   "0.1.26": "2026-08-11T13:22:10.095Z",
+   "created": "2025-07-31T09:49:58.137Z",
+   "modified": "2026-08-11T13:22:10.321Z"
+  },
+  "versions": {
+   "0.1.18": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.18",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.18_1753955398193_0.41212157029242347"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7049c2c1bb69]",
+     "name": "maciejpieprzyk"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-QKFSB0PbpdAxSS3r1Cz0lkOLaIP02Arf2MC9l02nmJ6rjpZVpU30tp0k9HnYz7tRIKoRNOfMsNb8A0Gu6CWwvg==",
+     "shasum": "c8a632e5f93423f5daab4cdf62785ca003150f10",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCmid4KQFg5v4BIxEUxbA7Uw6smWNQG7GwNTxgF9E2L3QIgB8ALFAoAuo2hk7Nvj2CH2CFhQo/TyQPzK24eILiw93U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.18.tgz",
+     "unpackedSize": 569764
+    },
+    "gitHead": "929c97c4a762da0fbd1f5e2cbbc8dca0c5742f65",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check . && tsc",
+     "lint-fix": "prettier --check . --write",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.18",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.19": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.19",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.19_1754983371354_0.8930387658345229"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7049c2c1bb69]",
+     "name": "maciejpieprzyk"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-XCBK+kuhAE38t+QsPn6WZQ+T8OnW6LqckiPngGlVVEn032drso0kV+NspXlsGOVy4Rjq+Ik+BwZ6K49KjeNBxA==",
+     "shasum": "f8445f9b992e77e3442f5bcffd1a781560221001",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC2uc3nmwIgOKX0rfJegATXBW3voksim0haUWO7YHlLFgIgQST1r3gfJbMJFKK54DqzbrSI70J6FYIuHeDbm7JUCfQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.19.tgz",
+     "unpackedSize": 563765
+    },
+    "gitHead": "faabbf7e2155250c158cd23f0aecbc863d2d4f37",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check . && tsc",
+     "lint-fix": "prettier --check . --write",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.19",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.20": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.20",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.20_1779190511139_0.029126726918676127"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-KCYesodu0whmG+Mbj61JTGhFbKiKI2t2a7LyT057tYlb3HwiB2cuP5yKucS4KaKpFKAunMt7kT8h8DNT4l3iEA==",
+     "shasum": "970ac80e493d7d4a5f29636eb79822899dbe2566",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCMaM9mZuAgDfN0E1CDPQ8ikdsCt/lZ//TT4PVI1YvO9gIhANJUtyICSDRvIr4/kr9AFKIkWRPI3xASdiEDsmywTGGR"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.20.tgz",
+     "unpackedSize": 566138
+    },
+    "gitHead": "ed454c695881f815dfd6deafb81db1986515b774",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check . && tsc",
+     "lint-fix": "prettier --check . --write",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.20",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.21": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.21",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.21_1780484858155_0.20986912637409727"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-+v9UpggIkLQaJabSf+urzkcuk7m+UcKYxERaeE+Y+/zEd+wnEyRsLkGs8WQDJTCDMN+GsDSPFM26Ix1geKAfAQ==",
+     "shasum": "93ab5ab7779d6903857dd8f830b24df6abd20f11",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDhrl4BnrQ9elhKSsX9h4FzpfGkNaHMUe4pQ2plicdDuQIhAJGoBkJ9UT5Omm4zBGGmT3+IfjxFozL6fS/0YtX9BJbJ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.21.tgz",
+     "unpackedSize": 566488
+    },
+    "gitHead": "3122c480c0313bcde226102e09e43e21c5892121",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check . && tsc",
+     "lint-fix": "prettier --check . --write",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.21",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.22": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.22",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.22_1780486668886_0.47676356484693905"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-/f595m1wpE9aPWyqC2Y8yPiOBPXAZeb0Nmk48mqhet/ynzyV3XI1C7Gk9ZNxpUE2BwLU5X63WVnpYv4PCjNjpw==",
+     "shasum": "992af43830b93d082553ce124052afbbf35b8385",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCi1YiLLZ7RmRw8Ypip8E352RBSwtfSj1oz8dLKrBowTQIgM084vyrS0CotaOExvnHFCA6BojgrpMuXIX9pJ3fwgYg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.22.tgz",
+     "unpackedSize": 566489
+    },
+    "gitHead": "6042e7b4f59e30f8da40b5745e7e824ba2465878",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check . && tsc",
+     "lint-fix": "prettier --check . --write",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.22",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.23": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.23",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.23_1780505367478_0.2537061428479155"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-2DRhgOgyIE8JVwRqV40/CF/21CnLUNj/jMArnLp0T8SIxL17ENKnSTzpCcVg9kqyGNYZk8+z6HfuN+ScPSHe+w==",
+     "shasum": "c2a162d6800c74cf091df4f9c53b0643cd178ce5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGYz7hkuyqQ7VngKbbKufm/O4lm/80gpYWtDeO13hIxJAiArzHgQr6pg7PrlKCF5QDhf3vgLkEZ6eemQen/isf4PeQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.23.tgz",
+     "unpackedSize": 567938
+    },
+    "gitHead": "6042e7b4f59e30f8da40b5745e7e824ba2465878",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check src && tsc",
+     "lint-fix": "prettier --write src",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.23",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.24": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.24",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.24_1786362482465_0.7608008304220759"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-DPvOMaZwlQB+zcYcM2M+75UIWLLiJqTxIxnOtVjDlI+zbLYeSLowDuhWwNe5fIT7J7R0PFcjaOULdZbuaQ/iBw==",
+     "shasum": "b579fa47dc6cfcd95fb8ad5283756577a8ff6042",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDkdTS8QbwQGHhKqL1PNYg1H9+19QwgKaN+h3diSuVowwIgD22Kp+27EdBLM7UfJXOnEQViDtW683DyH9QvKn6qZPc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.24.tgz",
+     "unpackedSize": 573233
+    },
+    "gitHead": "71a2ed74c589f4e0eeaf7d216a0c69c539aa9347",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check src && tsc",
+     "lint-fix": "prettier --write src",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.24",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.25": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.25",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.25_1786377081987_0.9540038912169131"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-6snTr5yeYHHxA2UhTj6DeCDFFqk7Owor3JHnwE2ir8TIZ5LNRL9eHT5mRuqO9Av3Dh7tCZXFein7A7qjZySa3A==",
+     "shasum": "23052913fa61875b2c00f36a85ac38727e3ec46d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCqfnTaiyiMxAty0/FEGQYhXAdgOe426LKsJiTHM/RgQgIgBzF4YAnSXwIRhs7sfQd/+71pMv5VhX7dmdmOx2lxIGE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.25.tgz",
+     "unpackedSize": 650779
+    },
+    "gitHead": "382e68990d4558d841793e1e24f143bfff785b48",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check src && tsc",
+     "lint-fix": "prettier --write src",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.25",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   },
+   "0.1.26": {
+    "_hasShrinkwrap": false,
+    "_id": "@computec/mcp-remote@0.1.26",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-remote_0.1.26_1786454529916_0.9938858879010342"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:27ef1e588e90]",
+     "name": "michal.wieczorek"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:6295518a11ea]",
+     "name": "Glen Maddern"
+    },
+    "bin": {
+     "mcp-remote": "dist/proxy.js",
+     "mcp-remote-client": "dist/client.js"
+    },
+    "bugs": {
+     "url": "https://github.com/geelen/mcp-remote/issues"
+    },
+    "dependencies": {
+     "express": "^4.21.2",
+     "open": "^10.1.0",
+     "strict-url-sanitise": "^0.0.1"
+    },
+    "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.13.10",
+     "prettier": "^3.5.3",
+     "tsup": "^8.4.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.8.2",
+     "vitest": "^3.2.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-G4IGlplm9bLVDFEQ01KyBF2pYlOZXV83FxE+GFNbMk7MhC3yKwpRQ6DJEj69JWqbelczmVJV2sP8BMdX9tX8yw==",
+     "shasum": "0fa6c71c49cce0a6cdc3e95591240d76a0660b99",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIESLW/KPkCiWgE0WVIHT9XUMs5lz7aWhIpFAKJMKlLN7AiBlXOWPmPS/jL2id6Ip5lvoNmcqIchcAZHLKPvIKJcqSg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@computec/mcp-remote/-/mcp-remote-0.1.26.tgz",
+     "unpackedSize": 654359
+    },
+    "gitHead": "69baea4586c7d1e0b91d9497ee27e9410cb39b72",
+    "homepage": "https://github.com/geelen/mcp-remote#readme",
+    "keywords": [
+     "mcp",
+     "stdio",
+     "sse",
+     "remote",
+     "oauth"
+    ],
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:27ef1e588e90]",
+      "name": "michal.wieczorek"
+     },
+     {
+      "email": "[redacted-email:7049c2c1bb69]",
+      "name": "maciejpieprzyk"
+     },
+     {
+      "email": "[redacted-email:1e2d2f49b5fe]",
+      "name": "lukaszc"
+     }
+    ],
+    "name": "@computec/mcp-remote",
+    "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/geelen/mcp-remote.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "build:watch": "tsup --watch",
+     "check": "prettier --check src && tsc",
+     "lint-fix": "prettier --write src",
+     "test:unit": "vitest run",
+     "test:unit:watch": "vitest"
+    },
+    "tsup": {
+     "clean": true,
+     "dts": true,
+     "entry": [
+      "src/client.ts",
+      "src/proxy.ts"
+     ],
+     "external": [],
+     "format": [
+      "esm"
+     ],
+     "outDir": "dist"
+    },
+    "type": "module",
+    "version": "0.1.26",
+    "vitest": {
+     "environment": "node",
+     "globals": true,
+     "include": [
+      "src/**/*.test.ts"
+     ]
+    }
+   }
+  }
+ },
+ "name": "@computec/mcp-remote",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@computec%2Fmcp-remote"
+}

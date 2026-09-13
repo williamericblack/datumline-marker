@@ -1,0 +1,2190 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.15.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:7e898dc6b059]",
+    "name": "elixium"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.6",
+   "0.1.7",
+   "0.1.8",
+   "0.1.9",
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.14.0",
+   "0.14.1",
+   "0.14.2",
+   "0.15.0",
+   "0.15.1",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.3.6",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@elixium.ai/mcp-server",
+  "_rev": "32-9537aaae8b8c7530bd883eb3b5f63fa7",
+  "description": "MCP Server for Elixium.ai",
+  "dist-tags": {
+   "latest": "0.15.1"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:7e898dc6b059]",
+    "name": "elixium"
+   }
+  ],
+  "name": "@elixium.ai/mcp-server",
+  "readme": "# Elixium MCP Server\n\nThis server implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), allowing AI agents (like Antigravity, Cursor, or Windsurf) to interact directly with your Elixium Board.\n\n## Features\n- **List Stories**: See the current backlog and icebox.\n- **Create Story**: Add new stories directly from your editor.\n- **Update Story**: Move stories between lanes and update fields.\n- **Iteration Context**: Provide the AI with the full context of your Current and Backlog lanes for better planning.\n- **Board Context** (new in 0.6.0): One-call grounding tool (`get_board_context`) that returns a time-balanced workspace snapshot \u2014 in-flight work, queued/icebox/recently-completed stories and epics, recent decisions, objectives, learnings, and workspace configuration \u2014 so agents ground themselves before drafting or updating content. Requires a backend release that includes `GET /api/board-context` (SaaS: live since 2026-05-17; self-hosted: update to a matching release). Falls back gracefully with a usable message if the backend is older.\n- **Per-blocker mutations** (new in 0.7.0): Declare structural dependencies between stories during grooming via `add_blocker` (storyId + blockerStoryId + reason) and `remove_blocker` (storyId + blockerStoryId). Per-element mutation eliminates the fetch-modify-write race a full-array PATCH would re-introduce. Each mutation emits a typed audit_log row (`story.blocker_added` / `story.blocker_removed`) so structural dependencies carry the same attestation discipline as test approvals. Backend resolves the blocker's title authoritatively from its row at write-time \u2014 callers don't supply it. Requires a backend release that includes `POST /api/stories/:id/blocked_by` + `DELETE /api/stories/:id/blocked_by/:blockerStoryId` (SaaS: live since 2026-05-18; self-hosted: update to a matching release).\n- **Per-role Three-Amigos attestations** (new in 0.8.0): `update_three_amigos_check` (storyId + role + value) writes a single role's signoff atomically via `jsonb_set`, eliminating the fetch-modify-write race a full-object PATCH would re-introduce. Each mutation emits a typed `three_amigos.attested` audit_log row with the role and value in `details`. Requires a backend release that includes `PATCH /api/stories/:id/three_amigos_checks/:role` (SaaS: live since 2026-05-19; self-hosted: update to a matching release). Gated per-workspace by the `balancedTeam` feature flag \u2014 when off, the discipline is opt-out and no MCP read surface renders it.\n- **Read-path coherence in `prepare_implementation`** (new in 0.8.0): The implementation brief now surfaces what writes have landed \u2014 `## Blocked By` renders when `story.blocked_by` is a non-empty array (paired with `add_blocker` / `remove_blocker` from 0.7.0); `## Three-Amigos Readiness` renders the per-role attestation state with a count summary, gated on the workspace's `balancedTeam` flag (paired with `update_three_amigos_check`). Honors the Read-Path Coherence discipline \u2014 write surfaces ship paired with read surfaces in the same release wave so agents reading the brief always see what other agents wrote.\n- **Read-path coherence in `start_story` and `get_board_context`** (new in 0.9.0): The `start_story` response now carries the same `## Blocked By` + `## Three-Amigos Readiness` sections that v0.8.0 added to `prepare_implementation`, so agents walking the TDD flow encounter structural state at every grounding moment, not just at implementation time. `get_board_context.inFlight.stories[]` entries now carry `threeAmigosChecks` (full per-role object) + `attestedSummary` (scannable single-line string with 8 canonical states from a `formatAttestationSummary` helper) on every entry \u2014 explicit `null` on workspaces with `balancedTeam: false` for wire-shape consistency with the v0.8.0 backend response pattern. Requires a backend release that includes the `POST /api/stories/:id/start` response extension + the `boardContext.ts` CTE projection + composer changes (SaaS: live since 2026-05-19; self-hosted: update to a matching release).\n- **Methodology-aware response shaping \u2014 hypothesis-driven shape in `start_story`** (new in 0.10.0): First instantiation of the participation thesis \u2014 `start_story` now renders a `## Hypothesis Check` section on workspaces with `teamProfile.developmentApproach: 'hypothesis-driven'`, framing the implementation around validating the hypothesis (not just rendering the field). Two variants: hypothesis-present (with \"moves the hypothesis from belief to evidence\" + 3 ordered bullets) and hypothesis-missing (\u26a0\ufe0f MISSING warning with explicit exception phrasing for spike / refactor / non-falsifiable-claim prerequisite work). New `acknowledge_no_hypothesis: true` + `acknowledge_no_hypothesis_reason: string` (\u226520 chars) override flag on `start_story` for legitimate exceptions; acknowledgment emits a typed `participation.hypothesis_acknowledged_absent` audit_log row (distinct namespace from `gates_bypassed.*` \u2014 methodology overrides are not compliance bypasses). Other 5 `developmentApproach` enum values (`continuous-delivery`, `tdd`, `scrum`, `kanban`, `other`) fall through to default behavior in v1; future shapes for these methodologies follow under the same `services/methodologyShaping.ts` registry. Backend renders the section; mcp-server consumes the pre-rendered string adjacent to existing sections (matches d778a968's package boundary precedent). Requires a backend release that includes the methodology shaping registry + start endpoint extension (SaaS: live since 2026-05-19; self-hosted: update to a matching release).\n- **Tool-topology gate for `update_three_amigos_check`** (new in 0.11.0): The `update_three_amigos_check` tool is now structurally absent from the `ListTools` response on workspaces with `balancedTeam: false` \u2014 closing the v0.8.0 reviewer-found gap where the tool could be successfully called on non-opt-in workspaces with no warning, no refusal, no audit annotation. Implementation follows the codebase's established house pattern for workspace-opt-in tools: a new `balancedTeamTools` conditional array gated at MCP registration time, mirroring the four prior conditional arrays (`tddTools`, `learningLoopTools`, `teamDecisionsTools`, `ragTools`). Level-4 affordance applied via *consistency* with the established house pattern, not deliberate escalation from the reviewer's level 2/3 suggestion. Read-surface gating (section rendering in `prepare_implementation` / `start_story` handlers) preserved and operative as a separate layer; both gates run independently. Workspaces with `balancedTeam: true` see the tool exposed and operating exactly as before; workspaces with `balancedTeam: false` or `undefined` don't see it at all. No backend changes required \u2014 the `balancedTeam` flag was already exposed in `GET /config/features`; this release is mcp-server-only.\n\n## Quick Start\n\n### 1. Install (Optional)\nIf you want to install the package locally:\n```bash\nnpm install -D @elixium.ai/mcp-server@latest\n```\n\nOr install globally:\n```bash\nnpm install -g @elixium.ai/mcp-server@latest\n```\n\n> [!TIP]\n> You can also use `npx` to run the server without installing it (recommended for IDE configurations).\n\n### 2. Get Your API Key\n\nEach workspace member generates their own API key \u2014 no admin involvement required.\n\n1. Sign in to the Elixium app\n2. Click your profile (top right) to open the **Profile** tab\n3. Scroll to the **Workspaces** section and find the card for the workspace you want a key for\n4. Click **Generate Key**. A modal opens with an optional scope picker\n5. (Optional) Expand **Advanced: Key Scopes** to restrict what the key can do (presets: Full Access / Read Only, or per-scope checkboxes). Leave collapsed for a full-access key.\n6. Click **Generate API Key** \u2014 copy the key immediately when it appears. It is only shown once and cannot be retrieved later.\n\nTo rotate later: click **Generate Key** on the same workspace card and **Regenerate**. The old key is invalidated as soon as the new one is created.\n\n### 3. Configure Your IDE\nAdd the following to your IDE's MCP configuration file (e.g., `mcp_config.json`):\n\n```json\n{\n  \"mcpServers\": {\n    \"elixium\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@elixium.ai/mcp-server@latest\"\n      ],\n      \"env\": {\n        \"ELIXIUM_API_KEY\": \"<YOUR_API_KEY>\",\n        \"ELIXIUM_API_URL\": \"https://<YOUR_TENANT>.elixium.ai/api\",\n        \"ELIXIUM_BOARD_SLUG\": \"main\",\n        \"ELIXIUM_USER_EMAIL\": \"<YOUR_EMAIL>\"\n      }\n    }\n  }\n}\n```\n\nReplace:\n- `<YOUR_API_KEY>` with the API key you generated in step 2\n- `<YOUR_TENANT>` with your workspace subdomain (e.g., `acme` for `acme.elixium.ai`)\n- `<YOUR_EMAIL>` with your email address (used as the \"requester\" on stories you create)\n\n> [!NOTE]\n> Different IDEs and MCP clients expect different top-level keys and file paths.\n> Use the setup that matches your IDE:\n> - **VS Code + Elixium Companion**: `.vscode/mcp.json` with `mcpServers`\n> - **Cursor**: `.cursor/mcp.json` with `mcpServers`\n> - **Cline (VS Code extension)**: `cline_mcp_settings.json` with `mcpServers`\n> - **Continue**: `.continue/config.yaml` (or `.continue/mcpServers/*.json`) with `mcpServers`\n> - **VS Code native MCP**: `.vscode/mcp.json` with `servers`\n\n### Shared Daemon (SSE)\nIf you want a single MCP server shared by multiple clients (VS Code, Codex, etc),\nrun the server in SSE mode and point each client to the same `url`.\n\nStart the daemon:\n```bash\nelixium-mcp-server --sse --host 127.0.0.1 --port 7357\n```\n\nClient config example:\n```json\n{\n  \"mcpServers\": {\n    \"elixium\": {\n      \"transport\": \"sse\",\n      \"url\": \"http://127.0.0.1:7357/sse\"\n    }\n  }\n}\n```\n\nFor VS Code auto-start and multi-client setup, see `docs/ide/README.md`.\n\n### Multi-MCP Example (Stripe + Elixium)\nIf you're using multiple MCP servers, combine them in the same config:\n\n```json\n{\n  \"mcpServers\": {\n    \"stripe\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@stripe/mcp\", \"--tools=all\", \"--api-key=<STRIPE_KEY>\"],\n      \"env\": {}\n    },\n    \"elixium\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@elixium.ai/mcp-server@latest\"],\n      \"env\": {\n        \"ELIXIUM_API_KEY\": \"<YOUR_API_KEY>\",\n        \"ELIXIUM_API_URL\": \"https://<YOUR_TENANT>.elixium.ai/api\",\n        \"ELIXIUM_BOARD_SLUG\": \"main\"\n      }\n    }\n  }\n}\n```\n\n## Environment Variables\n\n| Variable | Required | Description |\n|----------|----------|-------------|\n| `ELIXIUM_API_KEY` | \u2705 Yes | Your tenant-scoped API key |\n| `ELIXIUM_API_URL` | \u2705 Yes | Your tenant's API endpoint (e.g., `https://acme.elixium.ai/api`) |\n| `ELIXIUM_BOARD_SLUG` | \u26a0\ufe0f Recommended | Board slug to scope operations (e.g., `main`) |\n| `ELIXIUM_USER_EMAIL` | Optional | Your email address. Sets the \"Requested by\" field when creating stories. Defaults to API key owner. |\n| `ELIXIUM_LANE_STYLE` | Optional | `upper` for `BACKLOG/CURRENT` or `title` for `Backlog/Current` (auto-detected) |\n\n> [!IMPORTANT]\n> If you set `ELIXIUM_BOARD_SLUG`, the MCP server will only read/write stories for that board.\n> The server resolves the board slug to a boardId on startup, so the slug must match an existing board.\n\n## Required Scopes (for Scoped API Keys)\n\nIf you generate a **scoped** API key (via Profile \u2192 workspace card \u2192 **Generate Key** \u2192 expand *Advanced: Key Scopes* in the modal that opens), the key must include the scopes below to use the corresponding MCP tools. An **unscoped** key (leave *Advanced: Key Scopes* collapsed when generating) has full access and works with every tool.\n\n| Tool category | Tools | Required scopes |\n|---|---|---|\n| **Read stories** | `list_stories`, `get_story`, `get_iteration_context`, `prepare_implementation`, `estimate_cost` | `stories:read` |\n| **Write stories** | `create_story`, `update_story`, `start_story`, `propose_test_plan`, `submit_for_review`, `record_learning`, `create_hypothesis` | `stories:read` + `stories:write` |\n| **Read epics** | `list_epics`, `get_epic_cost_rollup` | `epics:read` |\n| **Write epics** | `create_epic`, `update_epic`, `prioritize_epic` | `epics:read` + `epics:write` |\n| **Read boards** | `list_boards`, `select_board` | `boards:read` |\n| **Write boards** | `create_board` | `boards:read` + `boards:write` |\n| **Read workspace config** | `get_feature_config`, `get_infrastructure_profile` | `workspace:read` |\n| **Team decisions** | `list_decisions`, `search_decisions` | `stories:read` |\n| **Team decisions (write)** | `record_decision` | `stories:read` + `stories:write` |\n| **Objectives** | `list_objectives` | `stories:read` |\n\n**Recommended baseline for full MCP functionality:**\n```\nstories:read, stories:write, epics:read, epics:write, boards:read, workspace:read\n```\n\nIf a scoped key is missing a scope, the MCP server surfaces an actionable error message naming the missing scope and directing you to regenerate the key with the required scope. You do NOT need to restart the MCP server after regenerating \u2014 just update `ELIXIUM_API_KEY` in your config and reload the server.\n\n## Usage\nOnce configured, your AI agent will have access to tools like:\n- `list_stories` - View all stories on the board\n- `create_story` - Add new stories with title, description, lane, and points\n- `update_story` - Move stories between lanes or update fields\n- `list_epics` - View epics on the board\n- `get_iteration_context` - Get current iteration and backlog for planning\n\n### TDD Workflow Tools\nThese tools enforce Test-Driven Development for AI agents:\n\n- `start_story` - Start TDD workflow: creates branch, sets workflow_stage to `tdd_start`\n- `propose_test_plan` - Submit test plan for human review (BLOCKS implementation)\n- `submit_for_review` - Submit implementation for human review (requires approved tests)\n\nSee the [TDD Workflow Guide](/docs/tdd-workflow) for the complete workflow.\n\n> [!NOTE]\n> Many MCP clients namespace tools by server name. If your MCP config uses the\n> server key `\"elixium\"`, Codex will typically expose these tools as\n> `mcp_elixium_list_stories`, `mcp_elixium_get_iteration_context`, etc.\n\n## Initialize Agent Workflows\n\nNew projects can scaffold the agent workflow documentation with:\n\n```bash\nnpx @elixium.ai/mcp-server init\n```\n\nThis creates `.agent/workflows/` with:\n- `implement-story.md` - TDD implementation workflow\n- `manage-board.md` - Board management commands\n- `load-board-context.md` - Session context loading\n\nIf you already have workflows and want to restore the originals:\n```bash\nrm -rf .agent/workflows\nnpx @elixium.ai/mcp-server init\n```\n\n## Development (Source Build)\nIf you're contributing or developing from source:\n\n```bash\ncd mcp-server\nnpm install\nnpm run build\n```\n\nTo use the local build, update your config:\n```json\n{\n  \"elixium\": {\n    \"command\": \"node\",\n    \"args\": [\"/path/to/mcp-server/dist/index.js\"],\n    \"env\": { ... }\n  }\n}\n```\n\n## Maintainers: Release Process\n\n```bash\ncd mcp-server\nnpm install\nnpm run build\nnpm version patch  # or minor/major\nnpm publish --access public\n```\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2025-12-06T18:32:52.863Z",
+   "0.1.1": "2026-01-17T20:53:36.447Z",
+   "0.1.2": "2026-01-18T01:36:00.383Z",
+   "0.1.3": "2026-01-18T05:33:54.567Z",
+   "0.1.4": "2026-01-25T17:47:52.695Z",
+   "0.1.6": "2026-01-25T19:21:18.955Z",
+   "0.1.7": "2026-01-30T23:53:43.580Z",
+   "0.1.8": "2026-02-01T01:23:08.196Z",
+   "0.1.9": "2026-02-04T02:35:06.158Z",
+   "0.10.0": "2026-05-19T19:44:28.600Z",
+   "0.11.0": "2026-05-20T03:19:31.853Z",
+   "0.12.0": "2026-05-20T21:56:47.742Z",
+   "0.13.0": "2026-05-21T18:55:23.761Z",
+   "0.14.0": "2026-05-24T00:43:22.907Z",
+   "0.14.1": "2026-07-12T13:27:48.811Z",
+   "0.14.2": "2026-07-12T14:09:25.126Z",
+   "0.15.0": "2026-07-17T23:31:59.860Z",
+   "0.15.1": "2026-07-20T13:09:05.518Z",
+   "0.2.0": "2026-02-15T20:15:34.295Z",
+   "0.2.1": "2026-02-15T21:57:30.062Z",
+   "0.2.2": "2026-02-22T04:47:10.958Z",
+   "0.3.0": "2026-02-25T13:10:57.635Z",
+   "0.3.1": "2026-03-04T15:57:22.162Z",
+   "0.3.2": "2026-03-04T16:13:25.539Z",
+   "0.3.3": "2026-03-04T16:17:48.776Z",
+   "0.3.6": "2026-03-21T04:12:38.867Z",
+   "0.4.0": "2026-03-25T02:55:31.396Z",
+   "0.5.0": "2026-05-02T16:36:38.995Z",
+   "0.6.0": "2026-05-17T20:36:47.518Z",
+   "0.7.0": "2026-05-18T20:33:08.719Z",
+   "0.8.0": "2026-05-19T11:07:38.141Z",
+   "0.9.0": "2026-05-19T17:49:18.578Z",
+   "created": "2025-12-06T18:32:52.667Z",
+   "modified": "2026-07-20T13:09:05.668Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.0",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1765045972734_0.3016501418647546"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-RCxOUpuZZIQYA4aAT5yOqHI/IFb6rD08niqtncxW9tYA/iZcZKSatXePRD6WR5SUinLEjxg2YhrkUgSG3CFGJw==",
+     "shasum": "e0a0074962e17f7809a7821831f4f6a7d2d3691f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCCX+3DYLirzBTTW8Jk5V6eeQ9RJMR+k99TS62S9vd4fgIhAOfR4cZ6c2yCbg+ZiyKlGYqvZZ+m/9G8vgrBS9J4pXOG"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 9115
+    },
+    "gitHead": "6562b288246ce996a8809ccd0f0ecd78dcfd449c",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.1",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1768683216299_0.421346227676175"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-rNdRkkFPQSOq17xBPntLkQLcnYJFHXbYYnOCZatN98mwYKjTIcuVXG4XPBlfQXgHNRfS0BOxvdk5G5fu4na1gQ==",
+     "shasum": "07891ab5b5e6db633135691f3174725ee252e0d0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGFA04t2JvRM/Ip68Ge/0Nos+kUrIhKh8RgOESIB9PXUAiB0aQ+rYaVw6aBT03HBJM2sfN22CaxgwVDqJLExHVocaQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 26829
+    },
+    "gitHead": "fc02466b79ebdecaab6461b318a1b648f141ac19",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.2",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.2_1768700160170_0.904786951691454"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-5ws3x05F7z6pDQjB1t19DqJ/+hAqeXhtbrpDgJMVXgHAowTMi1D8d1mPp5DdjIPvYfy/aBXoemRdRfRU45Skaw==",
+     "shasum": "026be6cf3223daf5f522b73eb7e18b951ae15db3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHKRaKZ5E/rx5qI3ZfJiCOCV0vciM0v2YpL460YYbwduAiB92QToL6NiNCE358ODPNX9XVf5Mif6oD1HbJ+Uon7G7g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.2.tgz",
+     "unpackedSize": 27510
+    },
+    "gitHead": "66a3507b30b60b36122afd7e8be689c32aa22e67",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.3",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.3_1768714434415_0.5904226291006078"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-2BMtuJz32/Ba5fP2iCe3gYE3RQS99F6s3WF6U9ibmv1/o2F4jtMOgen9SUoO3NWboVjQy2eHswA9vzEGfwN+KQ==",
+     "shasum": "34ac7fc76b2f4d7ea0a5a5abb970d7cb18e26d04",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB1czf3IwjjX3UdwUeaHKnV9GiU2fbL+EOQNtnXTqaEbAiEAu5TEjTM8r789zotWU5+Z3fGh2HDehrXe9Qr4XuigE9w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.3.tgz",
+     "unpackedSize": 28143
+    },
+    "gitHead": "0c8283302a9591a556bef78a77660f7ecbb4a0f5",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.4",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.4_1769363272555_0.9251479036678094"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-pgLC3YifO0u+SS7Crb3VODd6d2GDrBSyB2JRtWpiPm8AvVd+euJ+2u7mPaT1S/T7MrMBR4w4WpYN04/goNwdDg==",
+     "shasum": "975b4eb90e906a3ec9d5f466723b8e75cb23eca7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC5VwADZk89xaDt95ZcdavYVf+UKcvkbsBdjMrZ139C7QIhAPFVFC8RvDo67jaW9X2+N6/v8t1Gyn3vPMp+gMou1OXF"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.4.tgz",
+     "unpackedSize": 32702
+    },
+    "gitHead": "745cd5527cdab6350d9f19f11436874136d83f88",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.4"
+   },
+   "0.1.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.6",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.6_1769368878808_0.8646671804319672"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-dS8lJ/TLsdklaO+sQQ96jZtplgOouW/Hb3zQ03AFlGVFBaBzblQz2tQjftN1lHEArOT3QErQgrl770c6wtsCPQ==",
+     "shasum": "38fe4533866244d677dcc6e79be977af8fba9fea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD0SPlBkHREbe5/sry6yhpM0iX8C92t+46GJMS3kvhwNgIgVbHe9gGVCJgA4tsS2zaajc1uKjC2/pOXUghkyiK2X+A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.6.tgz",
+     "unpackedSize": 38450
+    },
+    "gitHead": "fb10b765788793c45d6894e32c5969f10f2e8078",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.6"
+   },
+   "0.1.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.7",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.7_1769817223414_0.08376263902463954"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-Ea5ntcE3FxXrKaYgOgcr11OpehrG24a4/7iDTmWV7fLihHIlkb9/84amMRaAzy6ygAmx2sHEP0WdvG8bGrXAWQ==",
+     "shasum": "c3e93a2ce4e437d5e0be13bd5d7e62278083b871",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGc0OO3kMRZTiYWOJFAlQAQYAA5uJU7WKCWangoa0vQrAiEAthy3dBl8329Ouvl00bndPrRN9ri98GTZVCIizenD7gc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.7.tgz",
+     "unpackedSize": 52062
+    },
+    "gitHead": "28abcda3922abc2802a7b681851a0e52a1d26304",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.7"
+   },
+   "0.1.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.8",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.8_1769908988036_0.7340857516959975"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-0YYuuB+QJ1lEVlEtGOpzMQJ8JnHsNqbR96dTn3l1jaMuwVa4XHPHSm2wWHPcVlKBLAiiODFMGV3fpFRY0pofYw==",
+     "shasum": "6636c442ba512977c7a89a44a9e9a54251a7924d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICUdGj5iE81O4uaeFBqqKxpSiPdZpgueNObpM4y/TxkNAiBGN9MP2lO/wl7gO7v4Q7zI+StWZdbSOADk/6aifkfRaQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.8.tgz",
+     "unpackedSize": 53856
+    },
+    "gitHead": "3aebcf5693217a153a3d3cda9c489aafde3f280c",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.1.9",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.9_1770172505998_0.39345685228644434"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-V1MtMKtHYDTXPZOH+oLruOBQnMkWiVvyFAN3GIo/Cn2OZTkjj/wTbW5KnpXrkVI4Ha38YeNgsj4TGZ9W6ZfwyA==",
+     "shasum": "4519ffe44493ba3ab20f438bd01286a9e87b0406",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAgI1D8LyQewxe5EFzCA9fiQD6BQb+xiyuAKmJALAbTwAiEA9NNH0KgnUSL0ZJyzrc/ak2RYr0MPAZdO/CqODs0PbrI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.1.9.tgz",
+     "unpackedSize": 54150
+    },
+    "gitHead": "9c906c42dce6af50f913ed332d87a9b7478a94ae",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.9"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.10.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1779219868452_0.6533341607812175"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-C92jug52GwnrZ3V0T4l/hxKTGZWYbuSsDQ35xJ2PHCp9fayXEZC+yoIbejy9VmHjuhAiANs2FheLibXenqH8tg==",
+     "shasum": "1a507d248acee683aca73adbd199a45c9accec66",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDoZWEj63C7qAK2VvgbL6plS1DQza0bTGAH1bbIe3wvdgIhALfznt+NFjvJB2uQ0ndTmoOwyNAWIlb0CbK3R+4qcNNM"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 186633
+    },
+    "gitHead": "f0385a43b6f2aa625a6cf22586c74c511012e61c",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.11.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1779247171696_0.006043143242652871"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "11.14.1",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-8eJaHmcZma7A6/Y94NomucVy5PAWMAUg8nhi8DaD9jxezss1YLoOI6cqAK8bjb0BEFdo+CMWT5IFXKHIaIZ72A==",
+     "shasum": "ad8f6b8b338ce8d8913bd33f589a564c515c29ed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIE9yHRaBXG4FrhW1ZEHIoSEDS7hYQ3c5u4Y0645MYuygAiEAjwHp1XpUVCE3q/7HKpUUTeAPKlHlh0/Ywl+buWRUxHg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 188333
+    },
+    "gitHead": "45b23ccdb98aa5da0dfb3eacf02df50ab066eac5",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.12.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.0_1779314207610_0.8209113575445774"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "11.15.0",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-09s7rDf+ngOma1vKLOQ0zJj08eANUU0CoBUHVcYOjjJ0Bp4hsgBDZblW/TnmAFC2sTifuhP0KfCkbtW0mzljnQ==",
+     "shasum": "89127d8d8131cd36db29208a897ab8c3673ac2c4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBNvgf2YSgddtK4L8ft21goCY5bbjACp9RL4LnJg3HjnAiEA0DqdyYuoiSWOLV6tt0QNNzJ/x6HdNnZcGBjBWMsH+sQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.12.0.tgz",
+     "unpackedSize": 193045
+    },
+    "gitHead": "585cef399d5a95c87c8c35b7f5b5c1784a29ddc3",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.13.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1779389723617_0.9814691676670482"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "11.15.0",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-66di4es65YtIXCRpYQw8bioVNmeuKmo/ml7WKWI+18e5qMZWD2LuFo4HKrS8/SXrOdiWj6fHfG5ldMAnVcPxuA==",
+     "shasum": "ba5989c64ecbd4ff09b828f69809022820808a79",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDugbVj/gomt5vptRp8eYtgXrGe86ORUMusT7bGErJDmgIhAKMWU+xzUWLnbNuLBqavOb18i5RI7toKOm+rcQB7W0lv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 193045
+    },
+    "gitHead": "659f843b981d88c59a1e2f08c319ed87ada7c641",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.13.0"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.14.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.0_1779583402751_0.11931947608952442"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "11.15.0",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-I7XWFncDIzuYasHEPo9f01wsUkJfZfEXhsGGgW3F1k8vDDFqv9CqB1Yo618eDgcsgCI5Bc4Yi19TZVjKgh/BBA==",
+     "shasum": "d35dc1e5bf75f4bad38f123b363a20d2d1114f52",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDDItXlY9oqj/Jca9hsKKU9Mz6YmbeNcJP+BHAApyWHoAiBzFAi0rJ6vtcgHiaFP+/nKuKtQywGJU1BWTdGA2iSuvA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.14.0.tgz",
+     "unpackedSize": 194501
+    },
+    "gitHead": "247cd28ee0bbb4d05de352c881a9a811ad5eb2a9",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.14.0"
+   },
+   "0.14.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.14.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.1_1783862868671_0.8696154923422426"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.16.1",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-ZY43XU3IOjdHFGcSYn1TYsxWKdK5zJG0ZfM/zn13LJTEBAVnc9OGXHpdgD19+P9OBVrfWvzdhbjoO1K4TQUw2g==",
+     "shasum": "6d40009dda3c7b93e625a1f82305f90727923df7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF9plhqbWgmQzYDtmOZZo6ILX4L7J2azVzHHXmwtEaBAAiBh4CxIN2tihAL797C5x03+5j7Vd0sPpLAruYJlJWhXtQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.14.1.tgz",
+     "unpackedSize": 245576
+    },
+    "gitHead": "766b507c5d4c199a08c64fce00801b2ed729fa5d",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.21",
+     "ip-address": "^10.1.1",
+     "qs": "^6.15.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.14.1"
+   },
+   "0.14.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.14.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.2_1783865364976_0.13946958951366173"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.16.1",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-yydAfi1yKGsgL1Q84LoNFLMn95l/IG1W1YHsrAal4nB+eNON6s6upEDkqScPLldF5rm15tGT3+6D35GkBDahxQ==",
+     "shasum": "47e2bf26f63766532354e0348bbd313ee37dc627",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH/f2Yw5ctLqbBd2I5d1KWHi8HUPOjN0lZYf06F9Hn9jAiEA846NfMTr+1GTkAxGn3Gl/+YdGK3IrmsnyIsWmN3buPQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.14.2.tgz",
+     "unpackedSize": 257343
+    },
+    "gitHead": "8ae41bbcb4f58cad3d35a8fcd5b3f540524961a4",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.21",
+     "ip-address": "^10.1.1",
+     "qs": "^6.15.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.14.2"
+   },
+   "0.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.15.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.15.0_1784331119725_0.7749908661480753"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.16.1",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-EpLxFTSFNDRzFeo7J5WrgtcLfE5a7czimGD2EUZ+kgnbB1dICQeJ1WEKoeLkC9umRbe7nn2bMoATzeKaT+X5dQ==",
+     "shasum": "311e4bcc3451caece24e2077bbb44688f7d50f7c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZ/vea4K5wGUyT0f3l0JxTmYo84KG6KqLJ43e70q5oOAIhAMpemQ/aR0DFRLedi0rP3fbKmnbhCJ8is/E9FtsA8SnV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.15.0.tgz",
+     "unpackedSize": 304609
+    },
+    "gitHead": "7186a399a9b36ffab1105a12898a6201cc84559f",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.21",
+     "ip-address": "^10.1.1",
+     "qs": "^6.15.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.15.0"
+   },
+   "0.15.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.15.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.15.1_1784552945368_0.8070140146000426"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:55805bcb-e4f4-46a3-869f-961ec48ded58"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.16.1",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 29,
+     "integrity": "sha512-0vO9UNgbKI9sSzB02xVdy8DSCzR8SwvXZuBtedc7djxoo8E+f6QxbTVNge5UPa2cV1huGb6kCDDJ1lCHRbStTg==",
+     "shasum": "565dc4c1234a4e5bb441b69e8d431d364173f013",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICEODip2qAZ+CEoup2qaWhTwjoz8rf1OgAEM6GT0wgt1AiB9YIQHFa3WphqcVrbMtCsbNDSR5p5BujR8SK0+wDBXhg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.15.1.tgz",
+     "unpackedSize": 309557
+    },
+    "gitHead": "9c34c1658d377aef5e988be5a0b10944b63d18dd",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.21",
+     "ip-address": "^10.1.1",
+     "qs": "^6.15.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.15.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.2.0",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1771186534128_0.16824628616959836"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-Ai5L4lMGNpCe9kpgGVnWuLCMH1i/88Gl+Tdp5MK3sx2jYlQSquW99rh5lE4VVSFVm1JUvV5cJ1H4YgMk/vyoHg==",
+     "shasum": "27f38665e93a0fb218c046098def4ade02826860",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDTZ8aQzQwDG4gQH/P2/vNio4CxDg/vp8BvO6aKk2LjsgIhAIbJX6C1vFBMYkGQLjQYRUh+QlcN/DG+TTKXAlM3Ye16"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 71572
+    },
+    "gitHead": "0c2f14c688ec619b1a15f76fb7cbc47f660a5ff8",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.2.1",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1771192649927_0.05725696564763916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-BWLPM5BYFHYkaMxk5jLZIfZ+V+Z7u04cKE0AY4YyW0fFmHYhGE3LzxZXW/rGKANYgkCdONnQAjxAtkfw6rA7qA==",
+     "shasum": "b48e73101d63061cc82e190027bda3ed5ec8b195",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmQUFoy9CgiBd2EwsVBX6LVGIF4xeRGsVhp0c/5N5uvQIgX8ghKJJMXO43+w3O6f9NJjTSGtuVGlQ5LW4+LJ5tKCA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 76213
+    },
+    "gitHead": "0c2f14c688ec619b1a15f76fb7cbc47f660a5ff8",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.2.2",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.2_1771735630800_0.22215194168405938"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-ZCebREeSbT3FfR4aoJjRw1++onOXB6sgUMV2BDFKBtbA8NfJDzZVP42lYjiEY8bLMhZDgVZCPDLTDz74n7vnmw==",
+     "shasum": "dbc1fb29186b47d9d6842d5b4a44ea6e6dcf6862",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEf4dFsDZ/cn2g6FVDwZtLAMtzjKmHrUtpPvCvXVLtZkAiADHByOupt/00pGZbDjYIU6b1ao1s7FdAFGTPj8pfpcSg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.2.2.tgz",
+     "unpackedSize": 79006
+    },
+    "gitHead": "f62bf0a10465fb43de577992a1bcdc21a8a1c7e2",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.3.0",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1772025057488_0.2120957540631807"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-rjAJ0NS5NDxp6U7sgfoPlK6RvjPLsVQJKGYGH3QniOkgRH/vHaC5yDYMZfct4pQP/whNDzuFqIgO0gJja9p9Ow==",
+     "shasum": "c2624b1411e03757bff2aa95afd0e9667183a844",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICqP6/qlQjSRmf3tXQoTlzb3IINbWztbcLl9ZHp/fbxyAiBz8eEtzEuN7R9mhrg/RVmat/cbKofL8JhcEeEW1f1MWQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 90921
+    },
+    "gitHead": "0183e0513f5e394c163ab6f65089ce80f2aedaf4",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.3.1",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.1_1772639841998_0.42681290943192796"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-ij1q+dtohEcyFGueqXUAG+1EFNf4KmH9OvFLP09u6aZv5SW6xsg63sRghz5euGlwt9aOjHC3eyaCOgt4mEGDTg==",
+     "shasum": "9bed768bc67890179b056694b387907d931b699b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHWLA2tQQsW14cwuA5pbY6RGZRHSqkFSgP6fhbARvohXAiBrEjOCxki8Lo7VTZpsdZQVzpvfLqzwh3MwW5DzzmjH1A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.3.1.tgz",
+     "unpackedSize": 90969
+    },
+    "gitHead": "82e2f78ca8d45c64d78220f7c8f4c40b176f1680",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.elixium-ai/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.3.2",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.2_1772640805346_0.10969389936358076"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-ZM+t7o5t+L8nALs1jWuiStgUO5beEb8GiiGLioT/cf6CPNIxVGvAmT/uR8KTNvM5oNov4xcMjDelsArzJIsSpA==",
+     "shasum": "341d5922b5804819dc093d61acda9244687bf2b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDavPf34CjzOBJU6eUYMIsp3fD2rNHlkJYLnCPsMImOjwIhAKMGhHTFZ0GrAJQ83llHSrNwQRNNmo19nzo346lEXDvD"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.3.2.tgz",
+     "unpackedSize": 90969
+    },
+    "gitHead": "e894381a70ebe6d811458ee061d0cdeb23d67c7d",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.elixium-ai/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.3.3",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.3_1772641068637_0.9187142502793586"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-zR+VX0hCEkxu2n1JKUSjBVyPt3ONiqFO72TWh37y1LFQhVxg+e/TCjBTJ98yyUEIjkQaOkpFrLSE6N2mk/6xng==",
+     "shasum": "2d8fa4037f012816b775c1956f9628352500f21d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDvUBM+MCFUzrhmnMlrxiTOTscqLNIpLPgIWDlD40O+VAIhAPjkuBvjKj0Geob6I+OyZpYdZTVAa1nlSArqQ6jmlg1Z"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.3.3.tgz",
+     "unpackedSize": 90970
+    },
+    "gitHead": "ed00ffb12993177d65d2fa831482fab1be74a8c8",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.3"
+   },
+   "0.3.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.3.6",
+    "_nodeVersion": "20.20.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.6_1774066358718_0.5931250335835232"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-qGz1pYDw+3ZJtGyosJ9oREx4sNf7+Sa2qZI8nHktpK1Xpi11nGcknJVgVWsRMQWdFZJhKyVnGzoCrFl3HYEY8Q==",
+     "shasum": "c1dcd1fd7f657a8a59b8e5588e6379ee33152aa6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDmVBwi+3ar1DFKnpXStnTu7DqiEP26slX1EPdwWCHD6QIhAMK8j6Q21FyBDbeKr7hzY8y5biiVX1W1yBb/6shkMwjP"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.3.6.tgz",
+     "unpackedSize": 118147
+    },
+    "gitHead": "55b48c75f2f7764d0a52dd46553d4fbb8c2e982d",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.6"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.4.0",
+    "_nodeVersion": "20.20.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1774407331228_0.7666108977229047"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.6.0",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0",
+     "vitest": "^4.1.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-tQiMACbx6ICoXw3Pq5JjoAuCuRC/O64NaKbi5ELF3buNi500QQY/AW/J0NGmpiwbPj8sTV+ZFQzx/SOvitwsTw==",
+     "shasum": "737fc0b20b1083b1108bc18880534b9c27c166c3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCtbHvNEjUGExi9NxuKebTUbZfUU9fEb7GJ4ABajituSQIgDVmmPvatSZqf+rWXFA6WIsuu52PvOTNhAEtgLh9SuC4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 149733
+    },
+    "gitHead": "ae37d03986242823dbdbbd7fd34af74bf6687ae1",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.5.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1777739798855_0.7681363854421814"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 12,
+     "integrity": "sha512-CibIJyuJd0ZjhwhJZDsBuyNyzIdZSTrfck4YuFzqgzaDn/yRRAcpIRqAZA0WWu9DFtpFot6sFMedga+pgP6mwg==",
+     "shasum": "342d8b394b1168cfa796a9982c984e5ba9ed4a62",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH5E01XiZNVyYY02qCD8/MYUa42UlBWzrc3+Llo7GkJ8AiBMpBqthyGFIAxkeB+zcBlWcjuY46kWgs8SLsYOxiuGFw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 157712
+    },
+    "gitHead": "00dd7a4cec112864f6780f2e1b144cec2248ecf1",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.6.0",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1779050207376_0.5290888101311311"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-nZxijfqE8oLiYPLU78xX/Q3Uvcgh26/2eet3DZuIIDAeg9kwn43W7nBMxk5XVcoyRkiZ/t7zXZx7+DhcxHJSnQ==",
+     "shasum": "6b3876206a4f60801f4578ea750253a3eb19cc16",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD14py6zZOJoadKEwqtqnG67Gu2FUD5Yid+xJBMwaSPDQIgURyn2aSRtRlZCH1e9jNAr2C+ug5Ayn3co60orEG/zY0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 167595
+    },
+    "gitHead": "e92ed4e9bee6c00e68efd0d993e6365a1e8551ab",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.7.0",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1779136388568_0.4356966403055824"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-sCJ4eF6M7akH6fsNckOpuljFruMOkudq3q8G6T7dr1fnJDHLXKvNQzAuJKmHfTo/oz31gahUSVeAWVwf3PGmgg==",
+     "shasum": "3f8ff590701a16f0a48aceb1dfb193c971cc988b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCvkaiB/MObx86QO+rRtWyD3gQzOHNH6Km/3a9o1Log5AIhAKMdQXRUF5bsWVw4dLI7RkdOAMKwSizZME8ew7BMxLAi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 172488
+    },
+    "gitHead": "f1ebb2c60ec7371e27d5f4a5562b14436f16235c",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.8.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1779188857988_0.9518073900554538"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-xlpZbpfYm5El6rNzMAtrcYrUJnxhHq+O8Ybb8roB9kzvujEi70rmbqtvHuJBqKMdQp4FUBmM8wsNeph9+y5n7A==",
+     "shasum": "84e92b6429ec743a353909fed817e97c885f24bf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFxyS2+zyDQ42NFxE4K36AYWSCmwI2ZC2iDHjl0jAE+xAiEAi4g3WbdAztRHdZybPQhilO94aXCJ5QI+9sjeH0OqY30="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 180045
+    },
+    "gitHead": "2a7fb34cfe8bd9a862ea2d049dd09cf93152c7c2",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@elixium.ai/mcp-server@0.9.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1779212958430_0.014776168008207913"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7e898dc6b059]",
+     "name": "elixium"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "elixium-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "axios": "^1.6.0",
+     "zod": "^3.22.0"
+    },
+    "description": "MCP Server for Elixium.ai",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "ts-node": "^10.9.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-VHdFjXtn6X2ci8EniG/QfujH2jWLjiSYx7rU3yZfcvqfMLem7FLvlG1Rpdu5FrMtlD/5rBtfyGYhlikFYEW/Hw==",
+     "shasum": "c66893ce5318f920968c3b940aeb3b7c687e1dec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDQfF8T6LVdhQ2c5xeVhgsZ1RoUqO1Gny41hL+uhPNfAAiEAy3Uo9eY84QJSZcRD37R0AFkizblkNKRBPzZcns4df/4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@elixium.ai/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 184200
+    },
+    "gitHead": "8215d1daaab8643319ce69de62a4a2a4a80c9238",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7e898dc6b059]",
+      "name": "elixium"
+     }
+    ],
+    "mcpName": "io.github.IndirectTek/mcp-server",
+    "name": "@elixium.ai/mcp-server",
+    "overrides": {
+     "fast-uri": "^3.1.2",
+     "hono": "^4.12.18",
+     "ip-address": "^10.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "ts-node src/index.ts",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@elixium.ai/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@elixium.ai%2Fmcp-server"
+}

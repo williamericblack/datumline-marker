@@ -1,0 +1,1166 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.12.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2a7e509c9d6a]",
+    "name": "k08200"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.8.0",
+   "1.0.0",
+   "1.10.0",
+   "1.10.1",
+   "1.11.0",
+   "1.12.0",
+   "1.4.0",
+   "1.5.0",
+   "1.6.0",
+   "1.8.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@k08200/mcp-probe",
+  "_rev": "11-355552f6ec9939a3611329dd9028952b",
+  "author": {
+   "name": "k08200"
+  },
+  "bugs": {
+   "url": "https://github.com/k08200/mcp-probe/issues"
+  },
+  "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+  "dist-tags": {
+   "latest": "1.12.0"
+  },
+  "homepage": "https://github.com/k08200/mcp-probe#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "mcp-server",
+   "mcp-client",
+   "ai",
+   "agent",
+   "agentic",
+   "llm",
+   "cli",
+   "ci",
+   "github-actions",
+   "testing",
+   "validation",
+   "readiness",
+   "healthcheck",
+   "inspector",
+   "checker"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2a7e509c9d6a]",
+    "name": "k08200"
+   }
+  ],
+  "name": "@k08200/mcp-probe",
+  "readme": "# mcp-probe\n\n[![CI](https://github.com/k08200/mcp-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/k08200/mcp-probe/actions/workflows/ci.yml)\n[![npm](https://img.shields.io/npm/v/@k08200/mcp-probe)](https://www.npmjs.com/package/@k08200/mcp-probe)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)\n\n**Self-report is not a receipt.**\n\n`mcp-probe` is a CI readiness gate for MCP servers. It checks what actually happened at runtime, not just what a server advertised through `tools/list`.\n\nAn MCP server can start, advertise a clean schema, and still fail every real tool call because auth, scopes, downstream permissions, response shapes, or environment setup are broken.\n\n`mcp-probe` gives CI an independent receipt for the path an agent actually depends on:\n\n- MCP `initialize` handshake\n- `tools/list` discovery\n- real `tools/call` dry-runs\n- sidecar sample inputs for meaningful calls\n- contract assertions for result shape, JSON Schema, row limits, stable error codes, and leak checks\n- GitHub Actions summaries and machine-readable JSON output\n- JSON receipt artifacts for independent CI evidence\n\n## Tested Servers\n\nSmoke-tested targets:\n\n| Server | Coverage |\n|---|---|\n| `@modelcontextprotocol/server-memory` | pass: handshake, `tools/list`, schema validation; 9 tools |\n| `@modelcontextprotocol/server-sequential-thinking` | pass: handshake, `tools/list`, schema validation; 1 tool |\n| `@modelcontextprotocol/server-everything` | pass: handshake, tools/resources/prompts discovery, schema validation; 14 tools, 7 resources, 4 prompts; executable contract recipe in `examples/recipes/everything.config.json` |\n| `examples/fixtures/stdio-mcp-server.js` | tool calls, auth warning, DB read contract, denied write, JSON Schema, receipt artifact |\n\nTrying it on another MCP server? Add the result to [#4 Tested MCP servers](https://github.com/k08200/mcp-probe/issues/4).\n\n## Looking For Real-World Recipes\n\nThe core tool is useful only if it reflects real MCP failure modes. If you run MCP servers in agent workflows, recipe contributions are especially useful for:\n\n| Server | What to validate | Issue |\n|---|---|---|\n| Datadog | OAuth/scopes, logs/metrics read paths, auth handoff failures | [#1](https://github.com/k08200/mcp-probe/issues/1) |\n| Supabase | read-only roles, row limits, tenant/project scope, denied writes | [#2](https://github.com/k08200/mcp-probe/issues/2) |\n| Gmail | OAuth browser handoff, stable auth errors, no private email leaks | [#3](https://github.com/k08200/mcp-probe/issues/3) |\n\nDo not paste secrets. Recipes should use placeholders such as `${DATADOG_MCP_TOKEN}` and read-only sample calls.\n\nWant to contribute a recipe for another server? Start with\n[`docs/RECIPE_GUIDE.md`](docs/RECIPE_GUIDE.md) and\n[`examples/recipes/TEMPLATE.tools.json`](examples/recipes/TEMPLATE.tools.json).\n\n## Quick Start\n\n```bash\nnpx @k08200/mcp-probe@latest @modelcontextprotocol/server-memory\n```\n\nFor CI, scaffold a config, sidecar, and workflow:\n\n```bash\nnpx @k08200/mcp-probe@latest init \\\n  --target @your-org/your-mcp-server \\\n  --discover \\\n  --lock-tools \\\n  --github-actions\n```\n\nThen run:\n\n```bash\nnpx @k08200/mcp-probe@latest --config mcp-probe.config.json --github-summary --fail-on-warn\n```\n\n`init --discover` uses the advertised input schemas to seed sidecar samples,\nincluding defaults, enum values, numeric minimums, nested objects, and arrays.\nReview those samples before running them in CI; generated inputs are a starting\npoint, not proof that the call is safe for your environment.\nDo not run generated sidecars against production credentials until mutating,\nadmin, export, or environment-inspection tools have been removed or replaced\nwith safe read-only samples.\n\nWhen discovery succeeds, the generated config includes `expectedTools` so CI\nfails if a required tool disappears. Add `--lock-tools` to also generate\n`allowedTools`, which fails CI when unexpected tools appear.\n\n## Commands\n\n```bash\n# Check one server\nmcp-probe @modelcontextprotocol/server-memory\n\n# Check a local server\nmcp-probe ./server.js\n\n# Check a remote Streamable HTTP server\nmcp-probe https://mcp.example.com/mcp --header \"Authorization: Bearer $TOKEN\"\n\n# Batch-check from config\nmcp-probe --config mcp-probe.config.json\n\n# Persist an independent readiness receipt artifact\nmcp-probe --config mcp-probe.config.json --receipt-file mcp-probe.receipt.json\n\n# Call tools, not just tools/list\nmcp-probe @scope/server --probe-tools\n\n# Use meaningful sidecar inputs\nmcp-probe @scope/server --tools-file .mcp-probe.json\n\n# Preflight local mcp-probe setup\nmcp-probe doctor\n\n# Make warnings fail CI too\nmcp-probe --config mcp-probe.config.json --fail-on-warn\n\n# Create missing config/sidecar/workflow files\nmcp-probe doctor --fix --target @scope/server\n\n# Scaffold CI config from the server's live tools/list catalog\nmcp-probe init --target @scope/server --discover --lock-tools --github-actions\n```\n\n## Config\n\nUse `mcp-probe.config.json` when a repository depends on one or more MCP servers:\n\n```json\n{\n  \"timeoutMs\": 10000,\n  \"servers\": [\n    {\n      \"name\": \"datadog\",\n      \"target\": \"https://mcp.example.com/mcp\",\n      \"transport\": \"http\",\n      \"headers\": {\n        \"Authorization\": \"Bearer ${DATADOG_MCP_TOKEN}\"\n      },\n      \"expectedTools\": [\"logs_query\"],\n      \"forbiddenTools\": [\"delete_dashboard\", \"rotate_api_key\"],\n      \"toolsFile\": \"./datadog.tools.json\"\n    }\n  ]\n}\n```\n\nRelative local `target` and `toolsFile` paths are resolved from the config file directory.\n\nUse `expectedTools` for tools that must be advertised, `allowedTools` for an exact allow-list, and `forbiddenTools` for dangerous tools that must not appear in low-trust configs.\nWhen `expectedTools` and a `toolsFile` are both set, every expected tool must also have a sidecar sample input so CI proves the tool is actually dry-run.\n\nRun:\n\n```bash\nmcp-probe --config mcp-probe.config.json --github-summary --fail-on-warn\n```\n\n## Sidecar Inputs\n\nAuto-generated tool inputs mostly test schema validation. Production CI should use sidecar inputs that reach real read-only paths.\n\nWhen a sidecar is provided, mcp-probe calls only the tools listed in that file. Tools that are discovered but not listed are not called.\n\n```json\n{\n  \"tools\": {\n    \"logs_query\": {\n      \"input\": {\n        \"query\": \"service:web status:error\",\n        \"timeframe\": \"1h\"\n      },\n      \"retry\": {\n        \"attempts\": 3,\n        \"delayMs\": 1000,\n        \"retryOn\": [429, 500, 502, 503, 504, \"timeout\"]\n      },\n      \"expect\": {\n        \"status\": \"pass\",\n        \"not_error_code\": [401, 403],\n        \"requiredFields\": [\"source\", \"freshness\"],\n        \"maxRows\": 100,\n        \"jsonSchema\": {\n          \"type\": \"object\",\n          \"required\": [\"source\", \"freshness\"],\n          \"properties\": {\n            \"source\": { \"type\": \"string\" },\n            \"freshness\": { \"type\": \"string\" }\n          }\n        }\n      }\n    }\n  }\n}\n```\n\nSupported assertions:\n\n| Assertion | Purpose |\n|---|---|\n| `status` | Expected call status: `pass`, `fail`, or `warn`. |\n| `requiredFields` | Fields that must appear somewhere in the result payload. |\n| `maxRows` | Maximum allowed row count from metadata or row arrays. |\n| `errorCode` | Stable error code expected in an error response. |\n| `contains` | Text snippets that must appear. |\n| `notContains` | Text snippets that must not appear, useful for leak checks. |\n| `not_error_code` | HTTP/status codes treated as warnings, usually auth handoff codes. |\n| `jsonSchema` | JSON Schema subset for validating the observed tool result shape. Supports `type`, `required`, `properties`, `items`, `enum`, `additionalProperties`, `minimum`, `maximum`, `minLength`, `maxLength`, and `pattern`. |\n\nUse `retry` for transient downstream failures only. Retry attempts are recorded\nin JSON output and receipt artifacts so flaky dependencies are visible instead\nof silently hidden.\n\n## Doctor\n\n`doctor` checks whether the repository is ready to run mcp-probe in CI:\n\n```bash\nmcp-probe doctor\n```\n\nIt validates:\n\n- Node.js version\n- config file shape\n- sidecar file shape\n- `expectedTools` sidecar sample coverage\n- GitHub Actions workflow presence, strict CI flags, receipt generation, and artifact upload\n- whether mcp-probe is actually executed from a workflow `run:` step\n\n`doctor --fix` creates missing files. It does **not** rewrite existing workflows unless `--force` is explicitly passed.\nWhen a config already declares `expectedTools`, missing sidecar files are scaffolded with those tool names instead of a generic placeholder.\n\n```bash\nmcp-probe doctor --fix --target @your-org/your-mcp-server\n```\n\n## GitHub Actions\n\n```yaml\nname: MCP Probe\n\non:\n  pull_request:\n  push:\n    branches: [main]\n\njobs:\n  mcp-probe:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v6\n      - uses: actions/setup-node@v6\n        with:\n          node-version: 20\n      - run: |\n          npx @k08200/mcp-probe@latest \\\n            --config mcp-probe.config.json \\\n            --github-summary \\\n            --fail-on-warn \\\n            --receipt-file mcp-probe.receipt.json\n      - uses: actions/upload-artifact@v4\n        with:\n          name: mcp-probe-receipt\n          path: mcp-probe.receipt.json\n```\n\n## Receipt Artifacts\n\n`--receipt-file` writes a redacted JSON artifact containing the observed handshake, tool catalog, dry-run calls, contract assertions, and final status.\n\nUse it when CI needs durable evidence of what actually happened, not just terminal output:\n\n```bash\nmcp-probe --config mcp-probe.config.json --receipt-file mcp-probe.receipt.json\n```\n\n## Exit Codes\n\n| Code | Meaning |\n|---|---|\n| `0` | Passed, or warnings only unless `--fail-on-warn` is set |\n| `1` | One or more checks failed |\n\nWarnings do not fail CI by default. They are intended for degraded states such as OAuth handoff or permission issues that should be visible but may not block every deploy.\nUse `--fail-on-warn` for production readiness gates where auth handoff, permission warnings, or incomplete receipts should block the workflow.\n\n## Development\n\n```bash\nnpm install\nnpm run typecheck\nnpm test\nnpm run build\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/k08200/mcp-probe.git"
+  },
+  "time": {
+   "0.1.0": "2026-05-17T13:40:22.016Z",
+   "0.8.0": "2026-05-19T04:29:56.427Z",
+   "1.0.0": "2026-05-20T15:55:07.713Z",
+   "1.10.0": "2026-05-31T03:19:02.020Z",
+   "1.10.1": "2026-05-31T10:08:18.396Z",
+   "1.11.0": "2026-06-01T06:35:39.272Z",
+   "1.12.0": "2026-06-04T15:44:22.864Z",
+   "1.4.0": "2026-05-23T15:47:11.710Z",
+   "1.5.0": "2026-05-25T15:38:55.323Z",
+   "1.6.0": "2026-05-26T04:34:53.631Z",
+   "1.8.0": "2026-05-28T11:42:33.435Z",
+   "created": "2026-05-17T13:40:21.730Z",
+   "modified": "2026-06-04T15:44:22.973Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@0.1.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_0.1.0_1779025221868_0.43279601730723427"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, tool discovery, and response latency",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^2.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-/LLhP2umSKvChPPL/qshObJQaGgINK8jMe5jwEb4i64cOAjaqjWI/5OP6pegscuBSvnlna5Im59PxGbXcrtMeA==",
+     "shasum": "877353e7823778b1ce109e05588b2cbaf80d12e9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHDRyNp9WTqs7/X2ExFxKY0WxTRIYe+r64zpw+eOFevbAiEAyaHEUrBcFNnFLf1ogvGPb8rp8aXP3rSepQMnvO/DMsE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-0.1.0.tgz",
+     "unpackedSize": 36865
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "33279bf0458c48010800f785a936c81cf5c3d023",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "llm",
+     "cli",
+     "testing",
+     "validation",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@0.8.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_0.8.0_1779164996256_0.4547611227604009"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^2.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 48,
+     "integrity": "sha512-GWawDbq+SvEz/LnhweT5xhM4Jn4Ye0n2BOHWPxp6IkmzYdnQY7dbJABoXJvQncL5Qg8N2F/u3GUDjrWtx/tabA==",
+     "shasum": "8800cd5f8b5199f5f451ee45754ede448d4f0a1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGahUHXxGK/B75tSbBIftNu7P/y1Y9+3DaOgyqSlqbkaAiATZOxQgrq4R3yNjevrqLWNAE8juuL2WoyK9ete8drMAw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-0.8.0.tgz",
+     "unpackedSize": 109320
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a3296e98900efaeb73aec3c0f28b2bbbf61b9fbc",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "llm",
+     "cli",
+     "testing",
+     "validation",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.0.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.0.0_1779292507562_0.8221279731448405"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^2.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-nPhocpqeuff9/rhCr/Da1kaY1Q6OB3Oywgyhq+sb76Z+E00iDDpMLwHKabgtbq4wb5P9+LENjZ/FrcKV8eGi+w==",
+     "shasum": "179473335f62975dfaa5c35acfb3ca4bd395426b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFLk3wmBNLde/96xtxqEkq2Q9Rma6b3Gng83ecO9x7ilAiEAtN6z4I0YUgKA3mkJtdpjFsnKgcT14lP+5cSvG2a4Vvw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.0.0.tgz",
+     "unpackedSize": 116971
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "036eb820bddd83e38462d91124b7bfe5f322fd21",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "llm",
+     "cli",
+     "testing",
+     "validation",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.10.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.10.0_1780197541864_0.8726269723279576"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-/KDBikqMqwsC98xreThpmRxdg9HlgO3KNVn5yO6GP7m+sdRYK2i6hbqX/bVoz/XRUDZuV3SuGvoWjAM+p8jWXQ==",
+     "shasum": "410ffc169b305ded41d956bab6ffa6d8871f273d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFB+7I1ixaMJIDxSnzoA4CiV1an3iqsH7iyEowvN77jxAiEAq6qNxQt2x7nwXFzzmCfI22QqMPSfVJshVID6B6obc3w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.10.0.tgz",
+     "unpackedSize": 244081
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "1a1cb4b28c5346adde782cfb6c93db501a290871",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.10.0"
+   },
+   "1.10.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.10.1",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.10.1_1780222098255_0.7131518290619441"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-n7d5uSkfexCeYKMhWzQNlrdEnD+3yPt9lrX+qr3GqI6QcyTBH7KEu8/iWuvfNG6f16K5+V+p0xXfox+PKobgfA==",
+     "shasum": "241b8c45702f04b2d520e2d6352d8a2ebe6a2efc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB1Z0u3L+vtAe+EPJImMTlOrTdj6wC57Qmpb+5+ErApeAiBuV5VoMnb5ZKcqBFhvuH+UM3EIAqjstdOYfsLCMrdg3A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.10.1.tgz",
+     "unpackedSize": 247810
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "f443870db1e776d78e605fc6eee8ee85758be7fe",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.10.1"
+   },
+   "1.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.11.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.11.0_1780295739097_0.9767544494908007"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 102,
+     "integrity": "sha512-ZSWCsgXpVG7AmytT0tETAzbJHwm1xt6pSizDKYzzBIkh6DDJesDD1+eUnV6p0ycWixBLM7D5QnJ+wn6CeR3r2A==",
+     "shasum": "7632e410a761002f4c60d0ab01bd55cd40282c7b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCIHFAj63HN0S8UEDr0UYeYcF0B9LC3j+7bUOUJdFqSRgIhAJh14HJLJ5Rlm3S6wtVfloNxnwJwEBmNO/VQqjhP4+Dj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.11.0.tgz",
+     "unpackedSize": 257042
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "521ccde05ed73d30cc396b3c6331158befc9c821",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.11.0"
+   },
+   "1.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.12.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.12.0_1780587862733_0.5184167644819118"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 103,
+     "integrity": "sha512-VgpgYNxMlBmuimZfdZppiB0mibDgioPzDuwjF21A8mP4aLoYhgU5U0N/FVf/w0jF9ttOhwzEL11BZEqkC+fdow==",
+     "shasum": "f84f853a941d0bcd3e89f585a61c932b0bc4e5a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAW3gj6NGQYFLoqjESTRZgyBAIPBcQSR2035T9vRgfSjAiADAzq1LOXlJjAPizu54qEIGurooiv6ynj3AC5gIrpM8g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.12.0.tgz",
+     "unpackedSize": 268367
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "fd6b222c62322e7c711490693e0c5956735a5597",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.12.0"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.4.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.4.0_1779551231540_0.1841241483478271"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 68,
+     "integrity": "sha512-odmlBYrPQQUfJWzV6MmYZ1nfXzrGsUGvv+LWuimO0r1usix5YoYyAPLzdMQm8NvLa1w+O+a2e0shLX/DadFcow==",
+     "shasum": "b29098f18ccec117334233a0b2a3b7374a265dd3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH+JUFaMBNCB8dSGm8ppRLO4tgSKMfBcwg6QhFqZUl1bAiACDe5lrDuFUpxt42IoHb5cnLIoXagD+BMEQsmTlSXiXg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.4.0.tgz",
+     "unpackedSize": 181490
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "8a9553cfbb35cb082ce7099d609b86ee9e880731",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.4.0"
+   },
+   "1.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.5.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.5.0_1779723535135_0.5260048973730862"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 73,
+     "integrity": "sha512-YNEUiSip3ABsRNv+bZI0+Pt19NH6vZ6KELkib3dwUXCIbd7JIjecP/BKmWX448nAVhzKcx55eltMDChM1wnG0w==",
+     "shasum": "54caadfebcc7f83c9d19f045fc9f02a1f1e9ea4b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEOIlr1S9c4sAebYJ8XyoD2DANFFtVYcoC+5CHWA7s7MAiEA68ReUdY3H3iEh8rSI5OvGX9lUvcMx37M9qy5zHI26Kk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.5.0.tgz",
+     "unpackedSize": 198853
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "fe1d60c2dfbad4f081af85dfeeecbc3ef7ef03dd",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.5.0"
+   },
+   "1.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.6.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.6.0_1779770093506_0.27868294228131774"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 73,
+     "integrity": "sha512-yq9IoAMba8+pzPGnx7SVJwJMrCnCe4WLXQHIllvvLSEWfJHFCyN+X7t3wQgPJyTAKul18HpVj7KKeMWETneKMg==",
+     "shasum": "29659e9593fec47d3795a8067378ce7aa574bf66",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHvT1LupnjFjHIV93R7EE9BaQGrCjVjdJ/pCc7W3XDbnAiBKQQ54v9tJAAVPNod6lkYAYN/IFhPcnTJ5KijQc8pqgQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.6.0.tgz",
+     "unpackedSize": 200933
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "d28225a6320d94fcc898bdf1c660e03f76611811",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.6.0"
+   },
+   "1.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@k08200/mcp-probe@1.8.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_1.8.0_1779968553299_0.8124368912536948"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2a7e509c9d6a]",
+     "name": "k08200"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "k08200"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/k08200/mcp-probe/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "chalk": "^5.3.0",
+     "commander": "^12.1.0",
+     "ora": "^8.1.0"
+    },
+    "description": "Quality checker for MCP servers \u2014 validates protocol handshake, discovery, tool-call dry-runs, and latency",
+    "devDependencies": {
+     "@emnapi/core": "^1.10.0",
+     "@emnapi/runtime": "^1.10.0",
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 92,
+     "integrity": "sha512-apwVS5HU4HJJ3v9znGBnKzvIAZEd0gxyh705q4n6Enh1iHzTtYFsEmTYtztJTP8UnS5NTnxNwRmFbw3iCmX9JA==",
+     "shasum": "eb2e428b4018ec3f8e38a3322dd25460efa78000",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD3Gxs3AD4Ous7nO9NgJE+d2fvzzOXsmKKDKSM8rCaUxQIge/vOIcVlc/fauGA54oVpaV1Lf3Q9EFAIHyJYn3vv0LA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@k08200/mcp-probe/-/mcp-probe-1.8.0.tgz",
+     "unpackedSize": 227626
+    },
+    "engines": {
+     "node": ">=20.19.0"
+    },
+    "gitHead": "7867959a82ea83d3794c03153d1d9e7b011efff2",
+    "homepage": "https://github.com/k08200/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-client",
+     "ai",
+     "agent",
+     "agentic",
+     "llm",
+     "cli",
+     "ci",
+     "github-actions",
+     "testing",
+     "validation",
+     "readiness",
+     "healthcheck",
+     "inspector",
+     "checker"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2a7e509c9d6a]",
+      "name": "k08200"
+     }
+    ],
+    "name": "@k08200/mcp-probe",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/k08200/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/cli.ts",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "1.8.0"
+   }
+  }
+ },
+ "name": "@k08200/mcp-probe",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@k08200%2Fmcp-probe"
+}

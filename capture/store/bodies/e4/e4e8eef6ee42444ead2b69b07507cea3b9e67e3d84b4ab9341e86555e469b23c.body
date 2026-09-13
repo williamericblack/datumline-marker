@@ -1,0 +1,395 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.15.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:57ab3a3009d4]",
+    "name": "askjo"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.13.0",
+   "1.13.1",
+   "1.14.0",
+   "1.15.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@askjo/camofox-browser-mcp",
+  "_rev": "4-c891b58acd9a09d870aa058bc12db2b7",
+  "author": {
+   "email": "[redacted-email:c6957c3d3a03]",
+   "name": "Jo Inc"
+  },
+  "bugs": {
+   "url": "https://github.com/jo-inc/camofox-browser/issues"
+  },
+  "description": "Standalone stdio MCP server exposing the camofox-browser REST API as MCP tools (Claude Code, Codex, agy, Cursor, opencode). Proxies to an already-running camofox-browser REST server \u2014 does not itself require the browser binary, Playwright, or the core ser",
+  "dist-tags": {
+   "latest": "1.15.0"
+  },
+  "homepage": "https://github.com/jo-inc/camofox-browser/tree/master/mcp#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "camofox",
+   "camoufox",
+   "browser-automation",
+   "claude-code",
+   "codex",
+   "cursor",
+   "opencode"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:57ab3a3009d4]",
+    "name": "askjo"
+   }
+  ],
+  "name": "@askjo/camofox-browser-mcp",
+  "readme": "# camofox-browser MCP server\n\nA standalone [Model Context Protocol](https://modelcontextprotocol.io) server that exposes camofox-browser to any MCP-compatible host \u2014 Claude Code, Cursor, etc. \u2014 without requiring OpenClaw.\n\nIt mirrors the existing OpenClaw plugin **1:1**: same 11 tool names, identical JSON-Schema parameters, and the same REST routes. Whether an agent reaches camofox via OpenClaw or MCP, the behavior is identical.\n\nThe initial MCP server implementation was contributed by [@epicsagas](https://github.com/epicsagas).\n\n## Architecture\n\nThe MCP server is a thin stdio client over the camofox REST server. Two pieces:\n\n- **REST server** (`server.js`) \u2014 launches Camoufox, exposes the HTTP API on `:9377`. Run **once**, it stays up.\n- **MCP server** (`mcp/server.mjs`, exposed as the `camofox-browser-mcp` bin) \u2014 translates MCP tool calls into REST calls. Claude Code spawns one **per session**.\n\nRegistering the MCP server does **not** require being inside the camofox-browser checkout. The examples below work from any directory.\n\n`mcp/` is also an **independently installable package** (`@askjo/camofox-browser-mcp`, its own `package.json`). It depends on nothing but `@modelcontextprotocol/sdk` \u2014 no `camoufox-js`, `playwright-core`, `express`, or the ~300MB browser binary download that the core server pulls in. Tool names, JSON-Schema parameters, REST routes, and response shaping are defined in `mcp/lib/tool-contracts.mjs`, which ships inside the standalone package. The OpenClaw plugin (`plugin.ts`) imports the same canonical module, so the two hosts cannot drift. See **Option D** below if you only want the MCP adapter (e.g. pointing `CAMOFOX_BASE_URL` at a REST server running elsewhere).\n\n## 1. Start the REST server\n\nClone the repo and start the server (one-time binary download on first run):\n\n```bash\ngit clone https://github.com/jo-inc/camofox-browser && cd camofox-browser\nnpm install   # downloads Camoufox (~300MB) on first run\nnpm start     # \u2192 http://localhost:9377\n```\n\nThis stays running in the background. It does not need to be your cwd afterwards.\n\n## 2. Install the `camofox-browser-mcp` bin\n\nThe MCP server is the same for every host \u2014 what differs is only the config file you paste into. First, make the `camofox-browser-mcp` bin available on your PATH. Pick one:\n\n```bash\n# Option A \u2014 npm link (if you have the source checkout; picks up local edits)\ncd camofox-browser && npm link\n\n# Option B \u2014 global install (no source checkout needed)\nnpm install -g @askjo/camofox-browser\n\n# Option C \u2014 npx (no install; runs the published standalone adapter)\n#   Use this wherever a command is expected below.\nnpx -y @askjo/camofox-browser-mcp\n\n# Option D \u2014 MCP adapter only, no core server deps (lightest footprint)\n#   Skips camoufox-js/playwright-core/express and the browser binary download \u2014\n#   use this if a camofox-browser REST server is already running (locally or\n#   remotely) and you only need the stdio adapter.\ngit clone https://github.com/jo-inc/camofox-browser && cd camofox-browser/mcp\nnpm install   # installs only @modelcontextprotocol/sdk (~24MB, no postinstall)\nnpm link      # camofox-browser-mcp now resolves from any directory\n```\n\nVerify the bin resolves from any directory:\n\n```bash\nwhich camofox-browser-mcp   # \u2192 .../bin/camofox-browser-mcp\n```\n\n## 3. Register with your host\n\nAll five hosts speak standard MCP, so they all run the same `camofox-browser-mcp` bin. Pick your host's config snippet below.\n\n### Claude Code\n\n```bash\n# CLI (user scope = available in every project)\nclaude mcp add camofox-browser -s user -- camofox-browser-mcp\n```\n\nOr in `~/.claude.json` (user) / `.mcp.json` (project, checked in):\n\n```json\n{\n  \"mcpServers\": {\n    \"camofox-browser\": {\n      \"command\": \"camofox-browser-mcp\"\n    }\n  }\n}\n```\n\n### Codex CLI\n\n`~/.codex/config.toml` (user) or `.codex/config.toml` (project, trusted dirs only):\n\n```toml\n[mcp_servers.camofox-browser]\ncommand = \"camofox-browser-mcp\"\nenv = { CAMOFOX_BASE_URL = \"http://localhost:9377\" }\n```\n\n### Antigravity / agy\n\nGlobal `~/.gemini/config/mcp_config.json` or workspace `.agents/mcp_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"camofox-browser\": {\n      \"command\": \"camofox-browser-mcp\"\n    }\n  }\n}\n```\n\n### Cursor\n\nGlobal `~/.cursor/mcp.json` or project `.cursor/mcp.json` (checked in):\n\n```json\n{\n  \"mcpServers\": {\n    \"camofox-browser\": {\n      \"command\": \"camofox-browser-mcp\"\n    }\n  }\n}\n```\n\n(Or via UI: Settings \u2192 Cursor Settings \u2192 MCP \u2192 Add New MCP Server.)\n\n### opencode\n\n`opencode.json` in the project root, or global `~/.config/opencode/opencode.json`:\n\n```json\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"camofox-browser\": {\n      \"type\": \"local\",\n      \"command\": [\"camofox-browser-mcp\"]\n    }\n  }\n}\n```\n\n### Common: env vars and from-source fallback\n\nIf you need cookie import or a non-default REST URL, add env. Example for Claude Code:\n\n```bash\nclaude mcp add camofox-browser -s user \\\n  --env CAMOFOX_BASE_URL=http://localhost:9377 \\\n  --env CAMOFOX_API_KEY=<key> \\\n  -- camofox-browser-mcp\n```\n\nFor the other hosts, add the same keys to the `env` / `environment` field of that host's snippet.\n\n**From-source fallback** (only if you're inside the checkout and haven't linked the bin):\n\n```bash\n# Replace `camofox-browser-mcp` with `node /absolute/path/to/mcp/server.mjs`\nclaude mcp add camofox-browser -- node /Users/you/src/camofox-browser/mcp/server.mjs\n```\n\n> \u26a0\ufe0f Always prefer the `camofox-browser-mcp` bin (options A/B/C/D above). The `node ./mcp/server.mjs` form is **path-dependent** \u2014 relative paths break outside the checkout.\n\n## 4. Verify\n\n| Host | How to verify |\n|------|---------------|\n| Claude Code | `/mcp` \u2014 `camofox-browser` shows connected |\n| Codex CLI | `codex` then check MCP server list |\n| agy | `/mcp` overlay in the `agy` CLI |\n| Cursor | Settings \u2192 MCP \u2014 server shows green |\n| opencode | `opencode mcp list` |\n\nYou should see 11 tools: `camofox_create_tab`, `camofox_snapshot`, `camofox_click`, `camofox_type`, `camofox_navigate`, `camofox_scroll`, `camofox_screenshot`, `camofox_evaluate`, `camofox_list_tabs`, `camofox_close_tab`, `camofox_import_cookies`.\n\n## Tools\n\n| Tool | Purpose |\n|------|---------|\n| `camofox_create_tab` | Open a URL \u2192 returns `tabId` |\n| `camofox_snapshot` | Accessibility snapshot + element refs (`e1`, `e2`, ...) + screenshot |\n| `camofox_navigate` | Go to a URL **or** use a search macro (`@google_search`, `@reddit_search`, ...) |\n| `camofox_click` | Click by element ref (`e1`) or CSS selector |\n| `camofox_type` | Type text into a ref/selector, optional `pressEnter` |\n| `camofox_scroll` | Scroll by pixels (unreliable on lazy-load pages \u2014 prefer `camofox_evaluate`) |\n| `camofox_screenshot` | Standalone screenshot |\n| `camofox_evaluate` | Run JS in page context \u2014 extract data, call page APIs, scroll via `window.scrollTo` |\n| `camofox_list_tabs` | List open tabs in this session |\n| `camofox_close_tab` | Close a tab |\n| `camofox_import_cookies` | Import a Netscape cookie file (needs `CAMOFOX_API_KEY`) |\n\n## Workflow\n\nEvery interaction follows the same shape \u2014 **snapshot before you act**:\n\n1. `create_tab({ url })` \u2192 `tabId`\n2. `snapshot({ tabId })` \u2192 element refs (`e1`, `e2`, ...)\n3. `click`/`type` using those refs\n4. `snapshot` again to read the new state\n5. `close_tab` when done\n\nElement refs are unambiguous and preferred over CSS selectors \u2014 a selector that matches multiple elements returns `422 strict mode violation`, in which case re-snapshot and click by ref.\n\n## Environment variables\n\n| Var | Default | Purpose |\n|-----|---------|---------|\n| `CAMOFOX_BASE_URL` | `http://localhost:9377` | REST server URL |\n| `CAMOFOX_USER_ID` | `mcp-<random>` | Session isolation (one MCP server = one camofox session) |\n| `CAMOFOX_SESSION_KEY` | `default` | Tab partition within the user |\n| `CAMOFOX_ACCESS_KEY` | _(unset)_ | Global bearer token gating the REST server (superkey). If set, forwarded as `Authorization: Bearer <key>` on **every** tool call automatically \u2014 must match the REST server's own `CAMOFOX_ACCESS_KEY`. Without this, a globally-authenticated REST server rejects all tool calls except cookie import. |\n| `CAMOFOX_API_KEY` | _(unset)_ | Self-chosen secret gating cookie import. Optional on localhost; required on remote/production and must match the REST server's `CAMOFOX_API_KEY`. Only affects `camofox_import_cookies`. |\n\n## Troubleshooting\n\n- **`503 session_expired` / `tab create timed out`** \u2014 the REST server's browser session died (often after a prior failed call destabilized it). Restart `npm start`.\n- **`camofox_scroll` returns `{ok:true}` but the page doesn't move** \u2014 expected on lazy-load / virtual-scroll pages; the server's `mouse.wheel` no-ops there. Use `camofox_evaluate` with `window.scrollTo` / `scrollBy`.\n- **`422 strict mode violation ... resolved to N elements`** on `click` \u2014 CSS selector matched multiple elements. Re-snapshot and click by element ref.\n- **`403 Forbidden` on `camofox_import_cookies`** \u2014 key mismatch between REST server and MCP server, or hitting a remote server without `CAMOFOX_API_KEY`.\n- **`401`/`403` on every tool call, not just cookie import** \u2014 the REST server has `CAMOFOX_ACCESS_KEY` set. Set the same `CAMOFOX_ACCESS_KEY` in the MCP server's env (see table above) \u2014 it's forwarded automatically as `Authorization: Bearer` once set.\n\n## Testing (developer)\n\nTwo layers, covering different things:\n\n```bash\n# 1. `test:mcp` installs the standalone adapter's locked dependencies, then\n#    runs the in-repository and packed-tarball handshake tests. Neither needs\n#    a REST server.\nnpm run test:mcp\n\n# 2. Mock-HTTP contract tests \u2014 verifies the actual REST traffic each tool\n#    produces: routes, methods, request bodies, CAMOFOX_ACCESS_KEY/CAMOFOX_API_KEY\n#    auth headers, cookie parsing (Netscape file \u2192 `{ cookies }` body, never a\n#    path), screenshot decoding, and error handling. Mocked REST server \u2014 no\n#    live camofox-browser process needed. This is what makes the \"OpenClaw and\n#    MCP send identical requests\" claim verifiable, not just asserted.\nNODE_OPTIONS='--experimental-vm-modules' npx jest tests/unit/mcp-contracts.test.js\n```\n\nThe packed-tarball check installs the generated `@askjo/camofox-browser-mcp` tarball in an empty directory before its handshake. It catches imports that reach outside the standalone package.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp",
+   "type": "git",
+   "url": "git+https://github.com/jo-inc/camofox-browser.git"
+  },
+  "time": {
+   "1.13.0": "2026-08-02T02:39:11.493Z",
+   "1.13.1": "2026-08-02T04:20:22.858Z",
+   "1.14.0": "2026-08-19T20:33:28.554Z",
+   "1.15.0": "2026-09-10T18:42:26.531Z",
+   "created": "2026-08-02T02:39:11.149Z",
+   "modified": "2026-09-10T18:42:26.959Z"
+  },
+  "versions": {
+   "1.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@askjo/camofox-browser-mcp@1.13.0",
+    "_nodeVersion": "24.10.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/camofox-browser-mcp_1.13.0_1785638351351_0.2866487086067542"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:57ab3a3009d4]",
+     "name": "askjo"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "email": "[redacted-email:c6957c3d3a03]",
+     "name": "Jo Inc"
+    },
+    "bin": {
+     "camofox-browser-mcp": "server.mjs"
+    },
+    "bugs": {
+     "url": "https://github.com/jo-inc/camofox-browser/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0"
+    },
+    "description": "Standalone stdio MCP server exposing the camofox-browser REST API as MCP tools (Claude Code, Codex, agy, Cursor, opencode). Proxies to an already-running camofox-browser REST server \u2014 does not itself require the browser binary, Playwright, or the core ser",
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-g4YWKsjNWeCFeQ7cKp7869906RbsZu6msrSNWjqlNEKWqoolidJSrAO2Fx4nShb6J5JXokZmsQiSnLaK6jnvsA==",
+     "shasum": "b2da0b26b1382f392fdde3b71e4c1290016e61c9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC4rFUxDkD+bFUM9tn6R+Bv/2SqJ3seoKEZBBo6UVsaRAiALDlklcW2fmyNPaTCJ+6EH4++wDRG/Kw59KhxVcpwVgQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@askjo/camofox-browser-mcp/-/camofox-browser-mcp-1.13.0.tgz",
+     "unpackedSize": 38576
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "homepage": "https://github.com/jo-inc/camofox-browser/tree/master/mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "camofox",
+     "camoufox",
+     "browser-automation",
+     "claude-code",
+     "codex",
+     "cursor",
+     "opencode"
+    ],
+    "license": "MIT",
+    "main": "server.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:57ab3a3009d4]",
+      "name": "askjo"
+     }
+    ],
+    "name": "@askjo/camofox-browser-mcp",
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/jo-inc/camofox-browser.git"
+    },
+    "type": "module",
+    "version": "1.13.0"
+   },
+   "1.13.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@askjo/camofox-browser-mcp@1.13.1",
+    "_nodeVersion": "24.10.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/camofox-browser-mcp_1.13.1_1785644422465_0.9825278392718713"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:57ab3a3009d4]",
+     "name": "askjo"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "email": "[redacted-email:c6957c3d3a03]",
+     "name": "Jo Inc"
+    },
+    "bin": {
+     "camofox-browser-mcp": "server.mjs"
+    },
+    "bugs": {
+     "url": "https://github.com/jo-inc/camofox-browser/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0"
+    },
+    "description": "Standalone stdio MCP server exposing the camofox-browser REST API as MCP tools (Claude Code, Codex, agy, Cursor, opencode). Proxies to an already-running camofox-browser REST server \u2014 does not itself require the browser binary, Playwright, or the core ser",
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-T5QFPZ7jvxz+iyrrNom8NSxL0s71YGK7L9gd7MGNep/JxadXWYMn3fwdahfKR/Kem0HeoEDlL2EFXnV0SwhmqQ==",
+     "shasum": "f4c89b56619224997b7a7a545e8bd326c12559eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDcGVkiTXJNA8BN5yXd5JchyEXRWOZhf39PeJmufWgDFQIgALtLgfXonbwxt2CB3WlhDpz3/7fxxdaf3NosdMNaLy8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@askjo/camofox-browser-mcp/-/camofox-browser-mcp-1.13.1.tgz",
+     "unpackedSize": 38576
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "homepage": "https://github.com/jo-inc/camofox-browser/tree/master/mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "camofox",
+     "camoufox",
+     "browser-automation",
+     "claude-code",
+     "codex",
+     "cursor",
+     "opencode"
+    ],
+    "license": "MIT",
+    "main": "server.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:57ab3a3009d4]",
+      "name": "askjo"
+     }
+    ],
+    "name": "@askjo/camofox-browser-mcp",
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/jo-inc/camofox-browser.git"
+    },
+    "type": "module",
+    "version": "1.13.1"
+   },
+   "1.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@askjo/camofox-browser-mcp@1.14.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/camofox-browser-mcp_1.14.0_1787171608398_0.9909494554123583"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7c4eb7b9-2c8b-4565-93b9-70965905ecf7"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "email": "[redacted-email:c6957c3d3a03]",
+     "name": "Jo Inc"
+    },
+    "bin": {
+     "camofox-browser-mcp": "server.mjs"
+    },
+    "bugs": {
+     "url": "https://github.com/jo-inc/camofox-browser/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0"
+    },
+    "description": "Standalone stdio MCP server exposing the camofox-browser REST API as MCP tools (Claude Code, Codex, agy, Cursor, opencode). Proxies to an already-running camofox-browser REST server \u2014 does not itself require the browser binary, Playwright, or the core ser",
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@askjo%2fcamofox-browser-mcp@1.14.0"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-ig+mv+b2NljbhbhPUu7g1WSc3cRBefiuHAvCYt8+5ApXF7Nql+wcJ9XJq2MBnoT2bYYuVgxsHm0QH+bC5O5Rkg==",
+     "shasum": "9d72525a8163d31500443f89d5e1c97beed75036",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCkpOv0oqqv7XJId/1U7gp2Cz8gxmFZ5hXX+bb9Tbr7vgIgdcDWSgbVWZ1rWvx6Rp9pFyyMsve1IVm/XeQUqD6YqJQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@askjo/camofox-browser-mcp/-/camofox-browser-mcp-1.14.0.tgz",
+     "unpackedSize": 38616
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "e5a36f5cd0332fde6597de474329a308a53a0716",
+    "homepage": "https://github.com/jo-inc/camofox-browser/tree/master/mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "camofox",
+     "camoufox",
+     "browser-automation",
+     "claude-code",
+     "codex",
+     "cursor",
+     "opencode"
+    ],
+    "license": "MIT",
+    "main": "server.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:57ab3a3009d4]",
+      "name": "askjo"
+     }
+    ],
+    "name": "@askjo/camofox-browser-mcp",
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/jo-inc/camofox-browser.git"
+    },
+    "type": "module",
+    "version": "1.14.0"
+   },
+   "1.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@askjo/camofox-browser-mcp@1.15.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/camofox-browser-mcp_1.15.0_1789065746343_0.611575625366672"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7c4eb7b9-2c8b-4565-93b9-70965905ecf7"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "email": "[redacted-email:c6957c3d3a03]",
+     "name": "Jo Inc"
+    },
+    "bin": {
+     "camofox-browser-mcp": "server.mjs"
+    },
+    "bugs": {
+     "url": "https://github.com/jo-inc/camofox-browser/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0"
+    },
+    "description": "Standalone stdio MCP server exposing the camofox-browser REST API as MCP tools (Claude Code, Codex, agy, Cursor, opencode). Proxies to an already-running camofox-browser REST server \u2014 does not itself require the browser binary, Playwright, or the core ser",
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@askjo%2fcamofox-browser-mcp@1.15.0"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-iga35a3B+9LQCh/YYaFbF49at7fwsYm42HmdcVdNXFlS7O6npiM67+SCd6I96bg5oell2o6qebdoeF+bVdxWZg==",
+     "shasum": "df2e8c30a677bc60ddb0bf57175f264389e54e8c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC1ZO7SFHMb0WearuBncDKeJ9dJo5MzsGwdpAPeC5n+XwIgan+hpDkI28u+eJrHvtUzi1Xq4SwDrOXnU6RO/er/UIQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@askjo/camofox-browser-mcp/-/camofox-browser-mcp-1.15.0.tgz",
+     "unpackedSize": 39185
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "771b610a7b5994759c138b912741de58b0edd588",
+    "homepage": "https://github.com/jo-inc/camofox-browser/tree/master/mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "camofox",
+     "camoufox",
+     "browser-automation",
+     "claude-code",
+     "codex",
+     "cursor",
+     "opencode"
+    ],
+    "license": "MIT",
+    "main": "server.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:57ab3a3009d4]",
+      "name": "askjo"
+     }
+    ],
+    "name": "@askjo/camofox-browser-mcp",
+    "overrides": {
+     "fast-uri": "3.1.7",
+     "hono": "4.13.5",
+     "qs": "6.16.0"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/jo-inc/camofox-browser.git"
+    },
+    "type": "module",
+    "version": "1.15.0"
+   }
+  }
+ },
+ "name": "@askjo/camofox-browser-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@askjo%2Fcamofox-browser-mcp"
+}

@@ -1,0 +1,2077 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.21.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a7be89d39aeb]",
+    "name": "mneia6"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.14.0",
+   "0.14.1",
+   "0.16.0",
+   "0.17.0",
+   "0.18.0",
+   "0.19.0",
+   "0.2.0",
+   "0.20.0",
+   "0.21.0",
+   "0.21.1",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0",
+   "0.7.1",
+   "0.8.0",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mneia/mcp-server",
+  "_rev": "24-4812b27537896a3763d7e302db246bba",
+  "bugs": {
+   "url": "https://github.com/skadri1601/Mneia/issues"
+  },
+  "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+  "dist-tags": {
+   "latest": "0.21.1"
+  },
+  "homepage": "https://mneia.dev",
+  "keywords": [
+   "mneia",
+   "mcp",
+   "model-context-protocol",
+   "ai-agents",
+   "context",
+   "checkpoint"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a7be89d39aeb]",
+    "name": "mneia6"
+   }
+  ],
+  "name": "@mneia/mcp-server",
+  "readme": "# @mneia/mcp-server\n\nThe [Mneia](https://mneia.dev) MCP server - shared project memory and handoff for teams working with\nAI agents, exposed as MCP tools to Claude Code, Cursor, Codex, and any other MCP client.\n\nYour agent forgets between sessions. Your teammates never knew in the first place. Mneia captures\nwhat a session decided, and gives the next session - or the next person - the part of it that\nmatters.\n\n## Install\n\nInstall both customer clients once. Node 20.11 or newer.\n\n```\nnpm install -g @mneia/cli @mneia/mcp-server\nmneia login\nmneia init\nmneia mcp install\n```\n\nThe last command detects installed MCP clients and writes each client\u2019s native format. Target one\nexplicitly when an agent is doing the setup:\n\n```\nmneia mcp install --client codex --yes\nmneia mcp list --client codex\n```\n\nSupported client ids include `codex`, `claude-code`, `claude-desktop`, `cursor`, `gemini-cli`,\n`vscode`, and `windsurf`. Complete copyable agent prompts and manual fallbacks live in the\n[client setup docs](https://mneia.dev/docs/integrations#mcp-clients).\n\nConfirm the client picked it up - in Claude Code, `/mcp` should list `mneia` as connected with twelve\ntools. Then ask the agent to rehydrate; on a fresh project it will say there is nothing stored yet\nrather than erroring, which is how you tell \"connected and empty\" from \"not connected\".\n\nThe server speaks MCP over stdio. Run it from a client, not by hand - `mneia-mcp --help` and\n`mneia-mcp --version` are the only things it does interactively.\n\n## Tools\n\n| Tool | When the agent should call it |\n|---|---|\n| `mneia_rehydrate` | Once at the start of every session, and again whenever the task changes. Loads the minimal high-signal slice: active constraints, decisions and their reasons, open questions, and what was recently superseded so it is not re-proposed. |\n| `mneia_checkpoint` | At a task or day boundary. Records a batch of extracted items as one atomic checkpoint. |\n| `mneia_assert` | The moment a single decision, constraint, or open question is settled mid-session. |\n| `mneia_search` | When you already know what you are looking for - not as a substitute for rehydrate. |\n| `mneia_retire` | An item was never right, or has stopped being true, and nothing replaces it. A correction, not a deletion: the row stays and the reason is recorded. Only a human actor may retire. |\n| `mneia_handoff_create` | Work is stopping and somebody else will resume it. Freezes a receivable artifact; the rendered markdown is fixed at that moment, the item links stay live. |\n| `mneia_handoff_receive` | Resuming work somebody handed over. Call it before rehydrating - the handoff says what the sender thought mattered, the slice says what the store thinks matters now. |\n| `mneia_handoff_inbox` | Checking whether work was handed to the current actor before starting. |\n| `mneia_team` | Resolving the names and ids a handoff can be addressed to. |\n| `mneia_sessions` | Seeing which client sessions have worked in the bound repository. |\n| `mneia_review_queue` | Surfacing items that still require a human decision. |\n| `mneia_review_confirm` | Relaying one decision a person gave on a queued item, after they were asked. |\n\nTwo rules are enforced by the server, not left to the agent:\n\n- **A load-bearing item, or one that supersedes an existing item, is never written automatically.**\n  It comes back in a pending queue that the client must surface to a human verbatim. Auto-confirming\n  it would erase the disagreement the human needs to settle.\n- **An agent never overwrites something a human confirmed.** Provenance is read from the store, not\n  from the tool call.\n\n## Configuration\n\n| Variable | Purpose |\n|---|---|\n| `MNEIA_TOKEN` | Mneia API token from `mneia login`. Set it in the MCP client's server config. |\n| `MNEIA_API_URL` | API endpoint. Defaults to `https://app.mneia.dev`. |\n| `MNEIA_HOME` | Absolute path to the directory holding the credentials and the local binding. Defaults to `~/.mneia`. `@mneia/cli` honours it too, so a login written under it is found here. |\n| `MNEIA_CREDENTIALS_PATH` | Absolute path to the credentials file, instead of `<MNEIA_HOME>/credentials`. |\n| `MNEIA_TELEMETRY` | Set to `off` to opt out of usage events. |\n\n## Privacy\n\nMneia is hosted. Your context is stored in the service, and access to it is enforced by controls -\nworkspace scope on every row, Postgres row-level security, retention, and residency - not by where\nthe bytes happen to sit. Usage events carry ids and timings, never your content, and\n`MNEIA_TELEMETRY=off` turns them off entirely.\n\nRead the [privacy policy](https://mneia.dev/privacy) for what is kept and for how long.\n\n## Stability\n\n`0.1.x`. Tool names are stable; their argument and return shapes will move before `1.0`.\n\n## See also\n\n- [`@mneia/cli`](https://www.npmjs.com/package/@mneia/cli) - login, init, MCP client setup, brief,\n  checkpoint, handoff, and project administration\n- [`@mneia/core`](https://www.npmjs.com/package/@mneia/core) - the library underneath both\n\nApache-2.0.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/skadri1601/Mneia.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-08T01:29:17.243Z",
+   "0.10.0": "2026-08-21T19:10:24.787Z",
+   "0.11.0": "2026-08-22T00:16:22.423Z",
+   "0.12.0": "2026-08-22T02:40:05.481Z",
+   "0.13.0": "2026-08-23T00:26:57.198Z",
+   "0.14.0": "2026-08-23T06:49:10.228Z",
+   "0.14.1": "2026-08-23T17:04:02.770Z",
+   "0.16.0": "2026-08-23T22:19:05.734Z",
+   "0.17.0": "2026-08-23T23:01:24.764Z",
+   "0.18.0": "2026-08-26T14:59:40.717Z",
+   "0.19.0": "2026-08-28T23:32:58.803Z",
+   "0.2.0": "2026-08-09T03:58:21.698Z",
+   "0.20.0": "2026-08-29T03:22:33.374Z",
+   "0.21.0": "2026-08-29T04:10:26.367Z",
+   "0.21.1": "2026-08-29T05:07:08.522Z",
+   "0.3.0": "2026-08-18T02:41:52.293Z",
+   "0.4.0": "2026-08-18T03:20:40.045Z",
+   "0.5.0": "2026-08-18T05:23:29.438Z",
+   "0.6.0": "2026-08-19T04:22:19.805Z",
+   "0.6.1": "2026-08-19T04:37:11.836Z",
+   "0.7.0": "2026-08-20T01:21:33.236Z",
+   "0.7.1": "2026-08-20T02:18:23.360Z",
+   "0.8.0": "2026-08-21T04:28:42.102Z",
+   "0.9.0": "2026-08-21T18:23:48.700Z",
+   "created": "2026-08-08T01:29:16.952Z",
+   "modified": "2026-08-29T05:07:08.744Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_from": "file:mneia-mcp-server-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.1.0",
+    "_integrity": "sha512-1H+W/f0VxebY2aC16MIZAj/w8LqtOnGCZBbw9wyvin+xT8Ksh3R+b7zWhM/87E003joMuYrRYjsH59RM4U2g9Q==",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1786152557101_0.13769907181470065"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/ca6b241709c316110dbe0d96dbc6c5ae/mneia-mcp-server-0.1.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.1.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-1H+W/f0VxebY2aC16MIZAj/w8LqtOnGCZBbw9wyvin+xT8Ksh3R+b7zWhM/87E003joMuYrRYjsH59RM4U2g9Q==",
+     "shasum": "c33825db393d13ddd6bcd67f4a4d36011971bf74",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFJB4oGJ47RKM2tKylSy4EPdFIHCLUMQqGc8kcz+MQ/rAiEA3Rm7hYlde7/LUiEjxfRj5uf72UPXm2QYsVq1ifBko6I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 232758
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.10.0": {
+    "_from": "file:mneia-mcp-server-0.10.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.10.0",
+    "_integrity": "sha512-THuWb9qi2xkGnbyn1ESu+WPjO5kZwjqXntjWCtF2JqbN5hAfIPfXww/ho5FQhU9rpT8Rayx9LVHJ1Se4v/Ll5g==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1787339424619_0.8184222798077962"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/363d0af4581b0cfc88bccceab2311e5f/mneia-mcp-server-0.10.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.10.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 92,
+     "integrity": "sha512-THuWb9qi2xkGnbyn1ESu+WPjO5kZwjqXntjWCtF2JqbN5hAfIPfXww/ho5FQhU9rpT8Rayx9LVHJ1Se4v/Ll5g==",
+     "shasum": "1972a1a5bcb19a3fd4f9ac6b6aebc4369660d695",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC0SJQRX6zNO2fUjnNCjcC834jcRH4NVw7/pIpyrHuj5gIhAPKv3SeZJZFNIzHA+sHNhBERtGtQKEtqI9A2PGsiiyC5"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 339806
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_from": "file:mneia-mcp-server-0.11.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.11.0",
+    "_integrity": "sha512-7uEDYHnsuScQx6In7R2cQmvS2WtwVPWk3+bLrNMIGLALVBwmc6EEiWDrUDbLn/6HvT4MCBRflcNgwHKzD+42Sw==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1787357782231_0.5834759068612314"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/7a3f5e2a25ed810d6dd978f4526ede76/mneia-mcp-server-0.11.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.11.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-7uEDYHnsuScQx6In7R2cQmvS2WtwVPWk3+bLrNMIGLALVBwmc6EEiWDrUDbLn/6HvT4MCBRflcNgwHKzD+42Sw==",
+     "shasum": "1112d6f621d0feea90f77ae339c555c3a5811f52",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFVOi7y3rNNMzctJpRuD4U+ewL5arGk5MstyUA6RcndpAiBa2BFytr6Vfta9EcTTVR6CUWnEnXeb16XXmDKcKF/57Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 358241
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_from": "file:mneia-mcp-server-0.12.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.12.0",
+    "_integrity": "sha512-5MUi4J0VNwx9P68zxQgVS46OjkmzDepchxXUldrEqP3bKbbxgr7Mbh+Q629Skr/uvFGQsbOugKqrVagkSDB+9g==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.0_1787366405313_0.20158674119600994"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/00dc8fde89f0fb8dc00497d6e9209d6d/mneia-mcp-server-0.12.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.12.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-5MUi4J0VNwx9P68zxQgVS46OjkmzDepchxXUldrEqP3bKbbxgr7Mbh+Q629Skr/uvFGQsbOugKqrVagkSDB+9g==",
+     "shasum": "1fd8834142f39b710630a1336324a5b05b3bd9c7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIECl6OyFnHLSnl9F5n7zjgduaRKn+ZvXamKl6Hx1X+XiAiAsBDKXBvWto+a0cu9Gi+dCTMNudWOeVxTVYNYbaoOrSA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.12.0.tgz",
+     "unpackedSize": 358241
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_from": "file:mneia-mcp-server-0.13.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.13.0",
+    "_integrity": "sha512-snOBuKWBK+AWGgOHhNXi4Qqr0q+pMPut5iwBL6lmnF7s8aKJtICA0jM47E0lJyJfCS8B47ruzrvC9Fs8RH7KEg==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1787444817063_0.8490650823071535"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/545c54397600b92a5c376a0cbd8173e1/mneia-mcp-server-0.13.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.13.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-snOBuKWBK+AWGgOHhNXi4Qqr0q+pMPut5iwBL6lmnF7s8aKJtICA0jM47E0lJyJfCS8B47ruzrvC9Fs8RH7KEg==",
+     "shasum": "d68a3620c2b40e11d190dad93db2d3e736c2b173",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGh+EcD2MS96BKxgCRwyi54AwqJjp4pHFLohge2tPm4VAiEAoQH+I1NRbR8mMzLkDDqCgndx2/7XqZVIvxX9gs/8h+M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 358241
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.13.0"
+   },
+   "0.14.0": {
+    "_from": "file:mneia-mcp-server-0.14.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.14.0",
+    "_integrity": "sha512-51SvcB8IBT+Sgw6VmnRlXecGDpdxRI1C3zs5ZvTGFNMYmWGwqA2I7mfGotJoYsbp9yMrwLC0EANkNSsKYPjZ4g==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.0_1787467750088_0.919982286763056"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/3761c73c1ae9f9a770ae667944ff0d41/mneia-mcp-server-0.14.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.14.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 96,
+     "integrity": "sha512-51SvcB8IBT+Sgw6VmnRlXecGDpdxRI1C3zs5ZvTGFNMYmWGwqA2I7mfGotJoYsbp9yMrwLC0EANkNSsKYPjZ4g==",
+     "shasum": "a34bc14942b64ba42ddbf4f709d7bce8b800af0b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCycB8rqzTnsAkQH4fzb5Ei46s07Rq9OWpf2BG/9/OEyQIhAMt6KAXhFQ0uJw2pTCLAVqDaTzs2+DEYKBnXqCx06Po5"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.14.0.tgz",
+     "unpackedSize": 359032
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.14.0"
+   },
+   "0.14.1": {
+    "_from": "file:mneia-mcp-server-0.14.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.14.1",
+    "_integrity": "sha512-Uu+o5oZ/jdkWZV0HdpyFWN8O4BT40f/CyEt1XzgyjQ9gHhpL1+HL+rNzC2jqUgqHWZY0nT3GzeKHjI2whpccAw==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.1_1787504642607_0.9283748395930789"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/51b75bc14e7d77ce10756ae5e4790eb8/mneia-mcp-server-0.14.1.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.14.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 100,
+     "integrity": "sha512-Uu+o5oZ/jdkWZV0HdpyFWN8O4BT40f/CyEt1XzgyjQ9gHhpL1+HL+rNzC2jqUgqHWZY0nT3GzeKHjI2whpccAw==",
+     "shasum": "c78be6d2cdf9be185f4acf5be2ff8873155634c3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF8vjSw7ytU52LooKQgNCQRnZr4ozkXlMSIOzAKCzquhAiAFlMqU+dQ8mUpGjQyK+/HPouOLvfR2omyKkXxqINCchQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.14.1.tgz",
+     "unpackedSize": 362843
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.14.1"
+   },
+   "0.16.0": {
+    "_from": "file:mneia-mcp-server-0.16.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.16.0",
+    "_integrity": "sha512-964cfzsG3Y/PVzyV+If1XDgxSYutSZv29p346ux0kKLEvD9d3lR3c4fMdy407MV5RDV0R8HZqk+2wjXPDU9bsA==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.16.0_1787523545604_0.4274879799084206"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/720b012c93a7bb293e56b5f63122bb0c/mneia-mcp-server-0.16.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.16.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 100,
+     "integrity": "sha512-964cfzsG3Y/PVzyV+If1XDgxSYutSZv29p346ux0kKLEvD9d3lR3c4fMdy407MV5RDV0R8HZqk+2wjXPDU9bsA==",
+     "shasum": "c6b78cb2fe57f32c76b140dbca9885d68afe24e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF5fl2mdtcsG7XPMQwYB2bzAyC95ZWMmaMXLH84DB7XuAiEAvIdBeFRX94lTCwLdfghBRGvWXMWFs6Tnv5KMF/y4hZw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.16.0.tgz",
+     "unpackedSize": 366207
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.16.0"
+   },
+   "0.17.0": {
+    "_from": "file:mneia-mcp-server-0.17.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.17.0",
+    "_integrity": "sha512-Q0KaXj7Oj3A72Wufvn5cXrN8dYh6dLWzruSPwe1xwvdjkhWDEYHvq9hKwITJvYrwcmy4FzU9he91sJnx/jd3vQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.0_1787526084573_0.14246711316826643"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/2484f812f6578b2cc08c9068e18a90ae/mneia-mcp-server-0.17.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.17.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 104,
+     "integrity": "sha512-Q0KaXj7Oj3A72Wufvn5cXrN8dYh6dLWzruSPwe1xwvdjkhWDEYHvq9hKwITJvYrwcmy4FzU9he91sJnx/jd3vQ==",
+     "shasum": "be02d61a7231511e43db7aa29cede4324dbcbff6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIALoVCTrsVutLCGrMvwy+76RiEn5NEUdSXJxNOHNpaxpAiEAzGyZqV92Qxnf3CdaaRVkuMqhzDRBmzcDWnTVvWNferc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.17.0.tgz",
+     "unpackedSize": 377860
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.17.0"
+   },
+   "0.18.0": {
+    "_from": "file:mneia-mcp-server-0.18.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.18.0",
+    "_integrity": "sha512-szn7C2c2YJUViGEPUv/+YloLiMV69/RKdhGkFu2YJoa+bgI1pU9/MjWJ4XlyHZNlj0GSs3Y2EGMwazGvM1/1zQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.18.0_1787756380552_0.8980662712639442"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/051a8541560c2c2e2ec6334a9e895582/mneia-mcp-server-0.18.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.18.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 104,
+     "integrity": "sha512-szn7C2c2YJUViGEPUv/+YloLiMV69/RKdhGkFu2YJoa+bgI1pU9/MjWJ4XlyHZNlj0GSs3Y2EGMwazGvM1/1zQ==",
+     "shasum": "f8584b3aa2ebc8df55ceb74a93147216348d7781",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDd7j7wMvi2ZeklTC4NlYeRyL1jLsKxrC6szg9MHYcotgIgf2md/L9kjpEk+K2jutBTjQJqeBjLcp06cdyaNTMxTdU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.18.0.tgz",
+     "unpackedSize": 377860
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.18.0"
+   },
+   "0.19.0": {
+    "_from": "file:mneia-mcp-server-0.19.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.19.0",
+    "_integrity": "sha512-zrBJE8y2Gq4wSkfRFSPmm6AxFEPHaORlL8pOqiErXAbIc52DV6XIq5YwFJhNuf61BIh3SYt2hux4ha+hzNrljA==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.19.0_1787959978649_0.9562445116886642"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/8f808858da04d9818eca69386b415a2f/mneia-mcp-server-0.19.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.19.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 108,
+     "integrity": "sha512-zrBJE8y2Gq4wSkfRFSPmm6AxFEPHaORlL8pOqiErXAbIc52DV6XIq5YwFJhNuf61BIh3SYt2hux4ha+hzNrljA==",
+     "shasum": "be3427f8852ccbb7bfa1cd4f53f6decc5c010e63",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCkShdRUtddwKAVSeuwQpQ7o3grP3Obb3QlW/URU+pS3wIgT3skhtzVKHcAVspt8Jc1saeDIDI/Xw31RZOOyu9AcAo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.19.0.tgz",
+     "unpackedSize": 407749
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.19.0"
+   },
+   "0.2.0": {
+    "_from": "file:mneia-mcp-server-0.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.2.0",
+    "_integrity": "sha512-ZsMBnMX3M1AJElOVOAP4T6Ui76rDMvYktfHKRtjJqv5TaTZ1IkDJyWRrFL3nRTGmbCIdTqsU1j1FNEJDThGATw==",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1786247901427_0.05508090734107807"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/55dccf2518f74b4919a5b3592ecb47b7/mneia-mcp-server-0.2.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.2.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-ZsMBnMX3M1AJElOVOAP4T6Ui76rDMvYktfHKRtjJqv5TaTZ1IkDJyWRrFL3nRTGmbCIdTqsU1j1FNEJDThGATw==",
+     "shasum": "5b8c492daf9f977bdb4188516f479ccaae3efa3f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGr6Ys7lAsaUuVHQHzDXiuCJc2cm0nYMgYlFOzc77trEAiBLzJNW/nX4mGw/8deBSXKJD571+gMG6Q5tYti8u1vzBA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 236351
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.20.0": {
+    "_from": "file:mneia-mcp-server-0.20.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.20.0",
+    "_integrity": "sha512-1FjHXQYeaIIOtwzkwS6uMQ60FPh8XnyVVygWM60/Fd+duLXT2+jcKGn0zrNF8uTQMjEvqwVuiZyTTPZUsqBzhw==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.20.0_1787973753255_0.010819162128809623"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/c7bd26427396b323cd8973ce8de60746/mneia-mcp-server-0.20.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.20.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 108,
+     "integrity": "sha512-1FjHXQYeaIIOtwzkwS6uMQ60FPh8XnyVVygWM60/Fd+duLXT2+jcKGn0zrNF8uTQMjEvqwVuiZyTTPZUsqBzhw==",
+     "shasum": "6d8e3b0620cd35cdf19d51c128bc6a925bd21ea1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDVRR4XIiKUZuwo5NUJ6os63qhDGQgkxS5somGx5GqfuQIgbd3REXjwBYY/hP+894Bb+5RFfc/6Iq3AyPVSTU9xosM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.20.0.tgz",
+     "unpackedSize": 407749
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.20.0"
+   },
+   "0.21.0": {
+    "_from": "file:mneia-mcp-server-0.21.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.21.0",
+    "_integrity": "sha512-FgDaslmFIMbYeFnrUGa/lJmMSchiaERNBAqsdGO+5SgHaq4HvBHjkhIS+XRSxdVIAgPGhbV6pJOmhV8Lk2E1UA==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.21.0_1787976626213_0.7540272955617588"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/775d1e7ee2b6a73300d9c6bdd3b9effb/mneia-mcp-server-0.21.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.21.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 112,
+     "integrity": "sha512-FgDaslmFIMbYeFnrUGa/lJmMSchiaERNBAqsdGO+5SgHaq4HvBHjkhIS+XRSxdVIAgPGhbV6pJOmhV8Lk2E1UA==",
+     "shasum": "23fb123d07e633a65d6f545b7dea688e423ef328",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDXjDZE1NBdCHvDq8Coe6/XcIcXUXbiutNSvjL3ax8m3AiAc8NQckjUl/xsnHQHBtf3CbXW2jWExCDLDCr9XSBe+zg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.21.0.tgz",
+     "unpackedSize": 418984
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.21.0"
+   },
+   "0.21.1": {
+    "_from": "file:mneia-mcp-server-0.21.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.21.1",
+    "_integrity": "sha512-FQPRSSCdYuLn9R06e+GmKflk1jiVFhoYyjmewsQB23GWSOMZMrdkBHMoE6nRQXdyTTjC2RBGzMDkw3fEklMFeQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.21.1_1787980028379_0.342379200878024"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/0469ff166399674bc98ce1f747706aa6/mneia-mcp-server-0.21.1.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.21.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 112,
+     "integrity": "sha512-FQPRSSCdYuLn9R06e+GmKflk1jiVFhoYyjmewsQB23GWSOMZMrdkBHMoE6nRQXdyTTjC2RBGzMDkw3fEklMFeQ==",
+     "shasum": "e47d30397127fc81d4a7ced959e5ae8ce6ee135c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIADviEWpMfeWOyFnVC6bXHS7cP/lyG0kpBRe1uDFnC3qAiEAq7xC1GtJR1n1gktHJLzpyN473Rg3uDFrWHVXVL5VqG0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.21.1.tgz",
+     "unpackedSize": 423163
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.21.1"
+   },
+   "0.3.0": {
+    "_from": "file:mneia-mcp-server-0.3.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.3.0",
+    "_integrity": "sha512-1YwxudplRDhSlRoq2PuP7Sna5v/mrYe2Elbjh3ZokoYpwNuM3weWtbCHZlW0PBWJTu8q8MFaFi6ocxxXW3bg0Q==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1787020912170_0.8428314637247853"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/7685c0613647a1895f82bdf075e098a0/mneia-mcp-server-0.3.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 68,
+     "integrity": "sha512-1YwxudplRDhSlRoq2PuP7Sna5v/mrYe2Elbjh3ZokoYpwNuM3weWtbCHZlW0PBWJTu8q8MFaFi6ocxxXW3bg0Q==",
+     "shasum": "f86e2d28c21a5034421a7f6d554bb1c088d5d414",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDojq3dWuzdoiUVeOUf78PaUynW7KDM55rSPEDuMuYYmgIgcASus1cuYRCAfGvjhpte/iAJihoUw4nhir2ExYYPjKA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 252141
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_from": "file:mneia-mcp-server-0.4.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.4.0",
+    "_integrity": "sha512-b5cUvxPPwtvRS8SQ6EnFVHHPuHEHYaW7kZC1soZCPvXU7Nc2IGbgu1LDyuilSndFtKcgdwdHtZDFYObgzFcl9Q==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1787023239916_0.03158198900531928"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/cb3842ec5ae053f93a986cc9d63198cf/mneia-mcp-server-0.4.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.4.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 68,
+     "integrity": "sha512-b5cUvxPPwtvRS8SQ6EnFVHHPuHEHYaW7kZC1soZCPvXU7Nc2IGbgu1LDyuilSndFtKcgdwdHtZDFYObgzFcl9Q==",
+     "shasum": "dd00b52174e40b0a362872ce1d4d0a1431614d57",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDXA7Q+Qeg5ZQMjntceBV+g/uXZaDStJlQowEPFjyikRgIhAOSiCk1YvHM70D3uCTM3v6xJk2h8z0/a7qHnzzPy+rmF"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 252141
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_from": "file:mneia-mcp-server-0.5.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.5.0",
+    "_integrity": "sha512-pADcgKAwSvueQLFGOmHs1H2/nDZhQ8HRbTsjhtnjFQueIoeoXh/Jv2fcMLX0Y7WQNQ0yQsfICt2TJYv9aZg9pA==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1787030609283_0.1886788458134374"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/da5ed6e762edc23db4fc2ed1bb3f7d07/mneia-mcp-server-0.5.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.5.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 68,
+     "integrity": "sha512-pADcgKAwSvueQLFGOmHs1H2/nDZhQ8HRbTsjhtnjFQueIoeoXh/Jv2fcMLX0Y7WQNQ0yQsfICt2TJYv9aZg9pA==",
+     "shasum": "b46380e5afd07cca69236ac951473c2b37111797",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBr2HzEKBY+oRSKbo3hxc00OgdSrlwVwhEKrszya54BWAiEA3FM+k/kAkpgcwIXxdlXckT0TrvY+ENGDM+P3a156rrM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 252141
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_from": "file:mneia-mcp-server-0.6.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.6.0",
+    "_integrity": "sha512-tOtpF/3XgsSO8sKvBmVlUGeXafp2JGVD0ERBdx7w1go3MUwN4UIoDRGpfPY8KHhX6dV7WUow7NKbofzWauVWlQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1787113339661_0.4567711609582603"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/7b67f129cca84a1334920b435fb2a5ef/mneia-mcp-server-0.6.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 72,
+     "integrity": "sha512-tOtpF/3XgsSO8sKvBmVlUGeXafp2JGVD0ERBdx7w1go3MUwN4UIoDRGpfPY8KHhX6dV7WUow7NKbofzWauVWlQ==",
+     "shasum": "7a3044d544211166aaea23a8e21235710ed7ac23",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDRsTjxtysQzUaaGeIgyafERp51Jl7ogwMt8x24wthP3AiEAlOssjVp0BTXfS2K7BpLXSfeV7mzCHNfynQc+cH1pbew="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 269211
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_from": "file:mneia-mcp-server-0.6.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.6.1",
+    "_integrity": "sha512-dcfb2RLYTLcoXV9B4LVQEOi/8XBEPACxh3WqlmHTp/0UpY/bxWwT2M+qTTW09uKRHpn7ExmZRKLWmUCP5x7yHQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1787114231663_0.0011466491989000627"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/8358cf3542b49429f64b35cd8a74d4ed/mneia-mcp-server-0.6.1.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.6.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 72,
+     "integrity": "sha512-dcfb2RLYTLcoXV9B4LVQEOi/8XBEPACxh3WqlmHTp/0UpY/bxWwT2M+qTTW09uKRHpn7ExmZRKLWmUCP5x7yHQ==",
+     "shasum": "28acd2071adf328442ba5cd3ade161de3f6d9cf7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGum5tJOjwKB2iiNb832dg2VIsmcH0+ekN6WYPK7HyfKAiEAxI2LJ4RR4Ga8NU/jIL96MiOX4Qhc4ePoPxONdKTb1Ik="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 269211
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_from": "file:mneia-mcp-server-0.7.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.7.0",
+    "_integrity": "sha512-tAsV0LupfI7oSJW17fHEFywHfOYPivryFgsRWqJBfB9kwR7VMeSGrXAhq8v9s5c9YR63Xu3unHe6aBijvbxo4w==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1787188893093_0.792917642067438"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/07856a8338744971cc38ab176df4dd5d/mneia-mcp-server-0.7.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.7.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 76,
+     "integrity": "sha512-tAsV0LupfI7oSJW17fHEFywHfOYPivryFgsRWqJBfB9kwR7VMeSGrXAhq8v9s5c9YR63Xu3unHe6aBijvbxo4w==",
+     "shasum": "dfc2bd8eba452f2c2a16e910944153f6e7eb5df3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDp2n1F1ykRvFHlImcSyY8X3obb4Tf8UjzqjDOKXhvP9AIhAJRsuVTaHn6hytyONVhFHY6PyZO6m0hjXT5IgrnZApeu"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 278554
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_from": "file:mneia-mcp-server-0.7.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.7.1",
+    "_integrity": "sha512-IpnkXOVX/8iMo2BB5pDK2JDR8wXT3DxoO+ZKB7OQtZyY481z4OzPp74pjxNMitXSDl/vQzS6f1szL7Flvv2t0g==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.1_1787192303233_0.619637295967957"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/774caa161cfc0b5169e1fd01c6fbc319/mneia-mcp-server-0.7.1.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.7.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 80,
+     "integrity": "sha512-IpnkXOVX/8iMo2BB5pDK2JDR8wXT3DxoO+ZKB7OQtZyY481z4OzPp74pjxNMitXSDl/vQzS6f1szL7Flvv2t0g==",
+     "shasum": "ea027b2ca33bd052119024cbcbfa39deb2440fe8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDdrnCwxNpRQ+RqMfPFe+J2Wi2+nPC0cMrr5v3RDzCrOgIhAL723IJtxBQ9J9NanFL575txQYnVsmNIKX2cGUYVe1Pk"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.7.1.tgz",
+     "unpackedSize": 279295
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.1"
+   },
+   "0.8.0": {
+    "_from": "file:mneia-mcp-server-0.8.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.8.0",
+    "_integrity": "sha512-6FKrTZYUzNTP+trV6+pEePRObx+4XB0ihEVKUAV681002BQ5NZwFkuZsQbpkeg+Mtjkk3t0nmnTpimDUtvs57w==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1787286521954_0.838024578849689"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/1596967c9dec49108828f7e4d723cbc6/mneia-mcp-server-0.8.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.8.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 80,
+     "integrity": "sha512-6FKrTZYUzNTP+trV6+pEePRObx+4XB0ihEVKUAV681002BQ5NZwFkuZsQbpkeg+Mtjkk3t0nmnTpimDUtvs57w==",
+     "shasum": "89a5ada7756b7126a8dc81a76b5ac1dc3169ef60",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFSYxkTH7OQwtSgEbFWkQopnqT+mM9rOgK/UQcXA+Yx3AiBkNNM8R9fouGplOSKwzayQx0Dk7vYR830Ehzdh0u8ZbQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 279879
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_from": "file:mneia-mcp-server-0.9.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mneia/mcp-server@0.9.0",
+    "_integrity": "sha512-zSiV3xlPjYTD1oG9fOpWeG3XltWhzCmM0mCEeXKlkDpSmDjyC/xzDKd/7UiVJBXT9T3pDxW9HqSBL3ffQkDeVw==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1787336628554_0.7991595251681816"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a7be89d39aeb]",
+     "name": "mneia6"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/d317814b260e62bf6abe7a078b247b46/mneia-mcp-server-0.9.0.tgz",
+    "bin": {
+     "mneia-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/skadri1601/Mneia/issues"
+    },
+    "dependencies": {
+     "@mneia/core": "^0.9.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "pg": "^8.22.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing Mneia to Claude Code, Cursor, Codex, and any MCP client.",
+    "devDependencies": {
+     "@types/pg": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 92,
+     "integrity": "sha512-zSiV3xlPjYTD1oG9fOpWeG3XltWhzCmM0mCEeXKlkDpSmDjyC/xzDKd/7UiVJBXT9T3pDxW9HqSBL3ffQkDeVw==",
+     "shasum": "da610eeb3fa9bee79ed81da85463056150a542ed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCONjZaEx22flxiP79qTfoo73RN4illLuwGUP6WPaApGgIhAIB3p5f6K3MrQPqu8sVP7cpfYhTkiac9Tyf+/MfrsfV/"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mneia/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 339804
+    },
+    "engines": {
+     "node": ">=20.11"
+    },
+    "homepage": "https://mneia.dev",
+    "keywords": [
+     "mneia",
+     "mcp",
+     "model-context-protocol",
+     "ai-agents",
+     "context",
+     "checkpoint"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a7be89d39aeb]",
+      "name": "mneia6"
+     }
+    ],
+    "name": "@mneia/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/skadri1601/Mneia.git"
+    },
+    "scripts": {
+     "build": "tsc --build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@mneia/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mneia%2Fmcp-server"
+}

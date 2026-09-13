@@ -1,0 +1,525 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.3.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@ni-c/google-search-console-mcp",
+  "_rev": "7-8d73bbe4dd449efbe019415c6907cdc1",
+  "author": {
+   "name": "Willi Thiel"
+  },
+  "bugs": {
+   "url": "https://github.com/ni-c/google-search-console-mcp/issues"
+  },
+  "description": "MCP server for Google Search Console: manage properties and sitemaps, query search analytics, inspect URLs",
+  "dist-tags": {
+   "latest": "0.3.0"
+  },
+  "homepage": "https://google-search-console-mcp.ni-c.de",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "google-search-console",
+   "search-console",
+   "seo",
+   "sitemap",
+   "site-verification",
+   "indexing-api"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "name": "@ni-c/google-search-console-mcp",
+  "readme": "# google-search-console-mcp\n\n<!-- badges: start -->\n\n[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/google-search-console-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/google-search-console-mcp/actions/workflows/ci.yml)\n[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ni-c/google-search-console-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/ni-c/google-search-console-mcp)\n<a href=\"https://socket.dev/npm/package/@ni-c/google-search-console-mcp\"><img src=\"https://socket.dev/api/badge/npm/package/@ni-c/google-search-console-mcp\" alt=\"Socket supply-chain report\" height=\"20\"></a>\n[![Glama score](https://glama.ai/mcp/servers/ni-c/google-search-console-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ni-c/google-search-console-mcp)\n<br>\n[![npm version](https://img.shields.io/npm/v/%40ni-c%2Fgoogle-search-console-mcp)](https://www.npmjs.com/package/@ni-c/google-search-console-mcp)\n[![container image](https://img.shields.io/badge/ghcr.io-ni--c%2Fgoogle--search--console--mcp-4f46e5?logo=docker&logoColor=white)](https://github.com/ni-c/google-search-console-mcp/pkgs/container/google-search-console-mcp)\n[![HTTP via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-4f46e5?logo=modelcontextprotocol&logoColor=white)](https://mcp-hub.ni-c.de)\n<br>\n[![docs](https://img.shields.io/badge/docs-google--search--console--mcp.ni--c.de-4f46e5?logo=readthedocs&logoColor=white)](https://google-search-console-mcp.ni-c.de)\n[![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)\n<!-- badges: end -->\n\nA [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for\n[Google Search Console](https://search.google.com/search-console/about), the\nservice that tells you how Google sees your site \u2014 this reads it and sets it up.\n\nLets MCP clients like Claude Code, Claude Desktop or Codex create a property and\nprove ownership of it, submit and refresh sitemaps, ask what any URL's index\nstatus is, and query the whole Performance report \u2014 with the irreversible\noperations put to a person first and the write tools switchable off\nentirely.\n\n21 tools is the ceiling, not the floor: `GSC_ALLOW_TOOLS=essential` registers a\ncurated five instead, and a model picks the right tool far more reliably from\nfive than from 21 \u2014 see\n[choosing which tools load](#choosing-which-tools-load).\n\n<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://google-search-console-mcp.ni-c.de/architecture-dark.svg\">\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"https://google-search-console-mcp.ni-c.de/architecture-light.svg\">\n  <img src=\"https://google-search-console-mcp.ni-c.de/architecture.svg\" alt=\"An MCP client talks to google-search-console-mcp over stdio; the server calls the Search Console, Site Verification and Indexing APIs over HTTPS.\" width=\"800\">\n</picture>\n\n![Listing the tools, narrowing them to the essential preset, and the startup abort a mistyped tool name produces](https://google-search-console-mcp.ni-c.de/demo.gif)\n\n## What makes it different\n\n**It can actually create a working property.** Getting one takes four steps in a\nfixed order \u2014 obtain a verification token, place it in DNS or on the page,\nverify ownership, add the property \u2014 and nothing in Google's APIs enforces that\norder. Calling `sites.add` first _succeeds_ and leaves a property that appears in\nevery listing and answers 403 for every piece of data, which looks like a\npermissions bug and is not. `setup_site` reports which step is missing and hands\nover the exact DNS record to paste. Servers that expose `sites.add` alone can\nonly add properties somebody already verified by hand.\n\n**Three APIs, not one.** Search Console v1 is ten methods and does not include\nownership. Site Verification is a separate service with its own scope, its own\nhost and an incompatible way of naming the same site \u2014\n`sc-domain:example.com` there is `{type: INET_DOMAIN, identifier: example.com}`,\nand passing the property spelling straight through is accepted and verifies a\ndomain literally called `sc-domain:example.com`. The Indexing API is a third.\nAll three are covered, and the translation between them is in\n`src/site-identity.ts`.\n\n**The numbers are right.** Search analytics come back as a table with totals\nwhere CTR is computed from the totals rather than averaged across rows, and\naverage position is weighted by impressions. Unweighted, a thousand rare queries\nranking 80th drag a property's real average of 12 up into the nineties. The\nresult also says plainly that the rows do not sum to the property total when the\nquery dimension is used \u2014 Google withholds rare queries for anonymity, commonly a\nthird or more of all impressions, and a total printed without that caveat is a\nnumber people will quote.\n\n**It knows where these APIs are sharp.** The trailing slash on\n`https://example.com/` is mandatory and its absence is a 403; a domain property\nand a URL-prefix property for the same site are different properties with\ndifferent data, so a bare hostname is refused rather than guessed at; days are\ncounted in **Pacific Time**, so a `last7days` computed in UTC asks for a day\nGoogle has no data for; the `hour` dimension silently returns nothing without\n`dataState: HOURLY_ALL`; Google omits empty arrays entirely, so a fresh\ncredential's property list arrives as `{}`; and the Indexing API returns 200 for\nany owned URL while only acting on JobPosting and BroadcastEvent pages.\n\n## Requirements\n\n- Node.js 22 or newer (or the container image)\n- A Google credential \u2014 a service account key, an OAuth2 refresh token, or\n  application default credentials\n- The APIs you intend to use enabled in a Google Cloud project: **Search\n  Console API**, and separately **Site Verification API** and **Indexing API**\n\n## Configuration\n\nThe server starts without credentials and lists its tools; every call then fails\nwith setup instructions rather than a Google error. That is deliberate, so\nregistries and sandbox inspectors can introspect it.\n\n| Variable                         | Description                                                                                                    |\n| -------------------------------- | -------------------------------------------------------------------------------------------------------------- |\n| `GSC_SERVICE_ACCOUNT_KEY`        | Service account key as raw JSON, or base64-encoded JSON                                                        |\n| `GSC_SERVICE_ACCOUNT_KEY_FILE`   | Path to a service account key file. Alternative to the above \u2014 setting both is an error                        |\n| `GSC_CLIENT_ID`                  | OAuth2 client id                                                                                               |\n| `GSC_CLIENT_SECRET`              | OAuth2 client secret                                                                                           |\n| `GSC_REFRESH_TOKEN`              | OAuth2 refresh token. All three OAuth2 variables are required together                                         |\n| `GOOGLE_APPLICATION_CREDENTIALS` | Application default credentials, used when no `GSC_` credential is set                                         |\n| `GSC_SITE_URL`                   | Default property, e.g. `sc-domain:example.com` or `https://example.com/`. Makes `site_url` optional everywhere |\n| `GSC_ALLOWED_SITES`              | Comma-separated properties this server may touch at all; anything else is refused                              |\n| `GSC_READ_ONLY`                  | `true` (or `1`/`yes`) registers only the twelve read tools                                                     |\n| `GSC_ALLOW_TOOLS`                | Comma-separated tool names, a `list_*` prefix, or `essential`                                                  |\n| `GSC_DENY_TOOLS`                 | Same shape, subtracted from whatever the allow list left                                                       |\n| `ELICITATION`                    | `false` replaces the approval dialog with the two-call token. **Not prefixed**                                 |\n\nCredentials are tried in that order \u2014 explicit beats ambient. A **partial** OAuth\ntriple is a startup error rather than a reason to fall through to application\ndefault credentials, because that fallback would quietly run the server as\nwhatever account the machine is logged into.\n\n### Which credential\n\nA **service account** is the recommended one: it sees only the properties you\nexplicitly add it to, and revoking it does not touch anyone's Google account.\nAdd its `client_email` under Settings \u2192 Users and permissions in Search Console,\nor give it ownership with `verify_site`. Note that the Indexing API requires\n**owner**, not full user.\n\nAn **OAuth2 refresh token** acts as the person who consented and sees everything\nthey see. Its scopes were fixed at consent time and cannot be widened later.\n\n### Choosing which tools load\n\nEvery visible tool costs context on every request, and a model picks the right\none far more reliably from five than from 21. Two variables narrow the list:\n\n```sh\nGSC_ALLOW_TOOLS=essential          # the curated five\nGSC_ALLOW_TOOLS='list_*,get_site'  # exact names, or one trailing *\nGSC_DENY_TOOLS='delete_*'          # subtracted from whatever allow left\n```\n\n`essential` is `list_sites`, `get_site`, `list_sitemaps`,\n`query_search_analytics` and `inspect_url` \u2014 everything needed to look at a\nproperty, and nothing that changes it.\n\nAn entry that matches no tool **stops the server** with the list of real names.\nAn ignored typo would otherwise leave a tool missing from `tools/list` with\nnothing pointing at the cause, and nobody traces an absence back to an\nenvironment variable.\n\nIf you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de) is\nthe other answer \u2014 its `/hub` endpoint replaces every server's tools with six\nmeta-tools.\n\nNarrowing the list also narrows the credential: the OAuth scopes this server\nrequests are derived from the tools that are actually registered, so a server\ndenied the Indexing tools never asks for the Indexing scope.\n\n## Installation\n\n### Claude Code\n\n```sh\nclaude mcp add google-search-console -- npx -y @ni-c/google-search-console-mcp\n```\n\n### Claude Desktop\n\n```json\n{\n  \"mcpServers\": {\n    \"google-search-console\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/google-search-console-mcp\"],\n      \"env\": {\n        \"GSC_SERVICE_ACCOUNT_KEY_FILE\": \"/path/to/key.json\",\n        \"GSC_SITE_URL\": \"sc-domain:example.com\"\n      }\n    }\n  }\n}\n```\n\n### Codex\n\n```toml\n[mcp_servers.google-search-console]\ncommand = \"npx\"\nargs = [\"-y\", \"@ni-c/google-search-console-mcp\"]\n\n[mcp_servers.google-search-console.env]\nGSC_SERVICE_ACCOUNT_KEY_FILE = \"/path/to/key.json\"\nGSC_SITE_URL = \"sc-domain:example.com\"\n```\n\n### Docker\n\n```sh\ndocker run --rm -i \\\n  -v /path/to/key.json:/key.json:ro \\\n  -e GSC_SERVICE_ACCOUNT_KEY_FILE=/key.json \\\n  -e GSC_SITE_URL=sc-domain:example.com \\\n  ghcr.io/ni-c/google-search-console-mcp\n```\n\n### Through mcp-hub\n\nA client that cannot spawn a local process \u2014 ChatGPT connectors, Claude on the web,\nCursor, LibreChat \u2014 reaches google-search-console-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one\ncontainer serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login\nbehind a single password and long-lived tokens for the clients that cannot do OAuth. Its\n`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of\nthem without N\u00d7tool schemas in the model's context, and it speaks both protocol revisions\n\u2014 a question this server asks travels through it to the person at the far end.\n\nIts `/config/mcp.json` uses Claude Code's format, so the entry is the one you already\nhave:\n\n```json\n{\n  \"mcpServers\": {\n    \"google-search-console\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/google-search-console-mcp\"],\n      \"env\": {\n        \"GSC_SERVICE_ACCOUNT_KEY\": \"\u2026\",\n        \"GSC_SITE_URL\": \"sc-domain:example.com\"\n      }\n    }\n  }\n}\n```\n\n`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not\nthe same thing as `*_ALLOW_TOOLS` in `env` \u2014 the difference, and the mistake it invites,\nare in the [client guide](https://google-search-console-mcp.ni-c.de/guide/clients#through-mcp-hub).\n\n## Tools\n\n`site_url` is optional on every tool that takes it when `GSC_SITE_URL` is set.\n\nEvery tool declares an `outputSchema` and answers with `structuredContent`\nalongside the text block, so a client can use the result without parsing prose.\n`query_search_analytics` keeps its rendered table in the text block and puts the\nrows themselves in the structured half; six tools that answered with a sentence\nnow answer with fields too.\n\nEvery tool that reports Google's data carries `untrusted: true` and\n`source: \"search-console\"` as fields. _\"It is only search data\"_ is exactly the\nwrong intuition: a search query is a string a member of the public typed into\nGoogle, and a page title comes from the crawled site. Six tools are without the\nmarker, because their answer is a property this server was given and a fact it\nestablished: `add_site`, `delete_site`, `submit_sitemap`, `submit_sitemaps`,\n`delete_sitemap` and `unverify_site`.\n\n### Properties and ownership\n\n| Tool                     | What it does                                                                                                           |\n| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |\n| `setup_site`             | Reports which of the four setup steps a property is missing, with the DNS record or meta tag to place. Changes nothing |\n| `list_sites`             | Every property this credential can see, with its permission level                                                      |\n| `get_site`               | One property \u2014 the way to settle which of the two spellings exists                                                     |\n| `add_site`               | Adds a property. Does **not** verify ownership                                                                         |\n| `delete_site` \ud83d\udc64         | Removes a property and its history                                                                                     |\n| `list_verified_sites`    | Sites this credential has proven ownership of, with all owners                                                         |\n| `get_verified_site`      | One of them by its opaque resource id                                                                                  |\n| `get_verification_token` | The token, and exactly where to put it. Claims nothing                                                                 |\n| `verify_site`            | Checks for the placed token and records ownership                                                                      |\n| `unverify_site` \ud83d\udc64       | Gives up ownership                                                                                                     |\n| `update_site_owners`     | Replaces the owner list. `method: \"patch\"` uses PATCH, which behaves identically                                       |\n\n### Sitemaps\n\n| Tool                | What it does                                                   |\n| ------------------- | -------------------------------------------------------------- |\n| `list_sitemaps`     | Submitted sitemaps, with download times, URL counts and errors |\n| `get_sitemap`       | One sitemap \u2014 where a submission's errors actually appear      |\n| `submit_sitemap`    | Submits or refreshes one. There is no separate update call     |\n| `submit_sitemaps`   | Up to 50 in one call, with per-entry results                   |\n| `delete_sitemap` \ud83d\udc64 | Removes one                                                    |\n\n### Search analytics and indexing\n\n| Tool                     | What it does                                                                                                       |\n| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |\n| `query_search_analytics` | The Performance report: clicks, impressions, CTR and position by any dimensions, with filters and relative periods |\n| `inspect_url`            | What Google knows about one URL \u2014 index status, canonicals, crawl time, rich results                               |\n| `inspect_urls`           | Up to 20 URLs, condensed to verdicts                                                                               |\n| `get_indexing_status`    | Indexing API notification history for a URL                                                                        |\n| `request_indexing`       | Notifies Google a URL changed. Only acts on JobPosting and BroadcastEvent pages                                    |\n\n## Not exposed, on purpose\n\n`urlTestingTools.mobileFriendlyTest` is still in Google's discovery document and\nthe service behind it was switched off in December 2023. A tool for it could only\never return an error, so there is not one.\n\n## Safety\n\n**Four operations ask a person.** `delete_site`, `delete_sitemap`,\n`unverify_site` and `update_site_owners` raise a real dialog through MCP\nelicitation where the client supports it \u2014 one the model cannot answer on its\nbehalf. Where it does not, they refuse the first call and return a short-lived\ntoken bound to those exact arguments, and say so rather than implying somebody\napproved. Either way the approval is bound to the property, so one issued for one\ncannot be replayed against another. `update_site_owners` is in that list because\nthe list it takes is the complete owner list afterwards \u2014 one well-formed call\nremoves everyone else, and nothing here can put them back.\n`ELICITATION=false` takes the fallback path deliberately; it never removes the\nguard. See\n[Asking a person](https://google-search-console-mcp.ni-c.de/guide/approval).\n\n**Everything from the APIs is marked untrusted.** Search queries are strings the\npublic typed into Google; page titles and crawl diagnostics come from whoever\nruns the crawled site. Someone who wants a model to act on their instructions can\nput them in a page title and wait to be crawled. The two sentences of a\nconfirmation prompt are built only from values the server derived; a sitemap URL\nor an owner list is quoted below them as data.\n\n**The allowlist has no exemptions.** `GSC_ALLOWED_SITES` is enforced wherever a\ntool names a property, and separately on the two shapes that do not name one: the\nIndexing API tools match the page URL against the list the way Search Console\nscopes a property, and the verification tools resolve their opaque resource id to\na property before acting on it. Both listings filter to the allowlist and say how\nmany entries they withheld.\n\n**Read-only goes below the tool layer.** `GSC_READ_ONLY=true` does not register\nthe write tools _and_ requests `webmasters.readonly` instead of `webmasters`, so\na write is impossible even if a tool tried.\n\n**Credentials never leak into output.** They are deleted from the environment\nafter start-up, never sent to a redirect target, and a rejected value is\ndescribed rather than echoed \u2014 including when it is a key pasted into\n`GSC_ALLOW_TOOLS`, `GSC_SITE_URL` or `ELICITATION` by mistake, and including the\naccess token itself, which is checked before it becomes a header.\n\n**What Google sends is held to a shape.** The status of a response is decided\nbefore its body is read, every field a result promises is checked at the\nboundary \u2014 a row that is not an object is dropped, a `null` site block is not a\nsite, an empty `200` is an empty record \u2014 and text is stripped of control\ncharacters on the way out. Results are budgeted in both channels, caller strings\nhave ceilings, and a batch call stops after two minutes and says how far it got.\nSee [Security](https://google-search-console-mcp.ni-c.de/guide/security).\n\n## Documentation\n\nThe full guide, tool reference and security notes live at\n**[google-search-console-mcp.ni-c.de](https://google-search-console-mcp.ni-c.de)** (source in [`docs/`](docs/)).\n\n## Development\n\n```sh\nnpm install\nnpm test            # no network \u2014 every test runs against a stubbed fetch\nnpm run lint\nnpm run build\n```\n\nSee [CONTRIBUTING.md](CONTRIBUTING.md).\n\n## Releasing\n\nUpdate `CHANGELOG.md`, bump the version in `package.json` and `server.json`, then\npush a signed tag:\n\n```sh\ngit tag -s v0.1.0 -m 'v0.1.0' && git push origin main v0.1.0\n```\n\n`release.yml` runs the suite, publishes to npm with provenance through a trusted\npublisher, pushes the multi-arch image to GHCR and updates the MCP registry entry.\n\n## Contributing\n\nIssues, discussions and pull requests are welcome \u2014 see\n[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use\n[private reporting](https://github.com/ni-c/google-search-console-mcp/security/advisories/new)\nrather than a public issue; the policy is in [SECURITY.md](SECURITY.md).\n\n## License\n\n[MIT](LICENSE) \u00a9 Willi Thiel\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ni-c/google-search-console-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-29T13:42:38.822Z",
+   "0.1.0-rc.1": "2026-08-29T13:36:56.456Z",
+   "0.1.1": "2026-08-30T19:17:48.243Z",
+   "0.2.0": "2026-09-03T14:20:31.293Z",
+   "0.3.0": "2026-09-07T17:53:24.969Z",
+   "created": "2026-08-29T13:36:56.119Z",
+   "modified": "2026-09-07T17:53:25.261Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/google-search-console-mcp@0.1.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/google-search-console-mcp_0.1.0_1788010958685_0.66608076798416"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:acf0d942-32ba-4973-ba14-e89d4d385c3e"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "google-search-console-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/google-search-console-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "google-auth-library": "^11.0.2",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Google Search Console: manage properties and sitemaps, query search analytics, inspect URLs",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@resvg/resvg-js": "^2.6.2",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "eslint": "^10.9.1",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fgoogle-search-console-mcp@0.1.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-4NrRrpFnMcLt840Dba2B4fpujkZwn1+o9+7bmKGeBfToPCn1FBfdkQTv1cHPOSIjgN6ePeVVLxxPKA32Vp5r8g==",
+     "shasum": "71376672b9f71aae3584f0ce6b7b4177b14dd324",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDaMPLpQbHXrChmV9K0M5tkPnTE4M84II1TtSdt5UEZrgIgRQ/QXio+CliArc1oycdih4Iwh2hjzeTKirBaEBrgJ+M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/google-search-console-mcp/-/google-search-console-mcp-0.1.0.tgz",
+     "unpackedSize": 216720
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "b2654e8ef00600787fc215465f1ef79891d2712d",
+    "homepage": "https://google-search-console-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "google-search-console",
+     "search-console",
+     "seo",
+     "sitemap",
+     "site-verification",
+     "indexing-api"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/google-search-console-mcp",
+    "name": "@ni-c/google-search-console-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/google-search-console-mcp.git"
+    },
+    "scripts": {
+     "assets": "node scripts/gen-assets.mjs",
+     "assets:check": "node scripts/gen-assets.mjs --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "eslint . && prettier --check .",
+     "prepublishOnly": "npm run lint && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/google-search-console-mcp@0.1.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/google-search-console-mcp_0.1.1_1788117468100_0.9660715277204788"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:acf0d942-32ba-4973-ba14-e89d4d385c3e"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "google-search-console-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/google-search-console-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "google-auth-library": "^11.0.2",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Google Search Console: manage properties and sitemaps, query search analytics, inspect URLs",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@resvg/resvg-js": "^2.6.2",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "eslint": "^10.9.1",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fgoogle-search-console-mcp@0.1.1"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-/4cf7luP82ZTV6yuHR0x6RWHULTMzSQ7NXRVXJ8zxOzWEOgbqSCRM2v5B3/gurw70TCRZBFuAdMzHklEWqKKAQ==",
+     "shasum": "356c2e287e1c84d4f70b8c3c7d4a8e145f2c7b6a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFw1tKQgXuHhjCLwKI5nFYKc4Lpk7Oz0uO5fUky2xmerAiA9V1foygiVDKBitbN4GrHkF+WBHQRRIN//7VdWIFVsDQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/google-search-console-mcp/-/google-search-console-mcp-0.1.1.tgz",
+     "unpackedSize": 217218
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "9924e3fe08ec6ef0c8b99cf4ccca4e0b06c41775",
+    "homepage": "https://google-search-console-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "google-search-console",
+     "search-console",
+     "seo",
+     "sitemap",
+     "site-verification",
+     "indexing-api"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/google-search-console-mcp",
+    "name": "@ni-c/google-search-console-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/google-search-console-mcp.git"
+    },
+    "scripts": {
+     "assets": "node scripts/gen-assets.mjs",
+     "assets:check": "node scripts/gen-assets.mjs --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "eslint . && prettier --check .",
+     "prepublishOnly": "npm run lint && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/google-search-console-mcp@0.2.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/google-search-console-mcp_0.2.0_1788445231087_0.5043596563650286"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:acf0d942-32ba-4973-ba14-e89d4d385c3e"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "google-search-console-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/google-search-console-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "google-auth-library": "^11.0.2",
+     "mcp-approval": "^0.8.0",
+     "mcp-tool-allowlist": "^0.2.1",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Google Search Console: manage properties and sitemaps, query search analytics, inspect URLs",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fgoogle-search-console-mcp@0.2.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-XW3UfJQEByocDGjrn3OBHuec5278KyHBspUoe+zAw7zZoQtHRu5jy6Dt7j8VQZdeL7y0YMjFr9ksQXHK5XyQHg==",
+     "shasum": "f72419bc793ad09a3598d722517e21e317db1c03",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDLaxn5dDBfBenkixuTfhKIyFCcVQL+TP+F/dCJPD3A2AiB/c0hd5HvqKT7DQAvqgmE3sHh3gfzNAN2isD1i2RwRZg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/google-search-console-mcp/-/google-search-console-mcp-0.2.0.tgz",
+     "unpackedSize": 239737
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "00084ad62d533f7b8c0c9955cb80775cb5cbe316",
+    "homepage": "https://google-search-console-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "google-search-console",
+     "search-console",
+     "seo",
+     "sitemap",
+     "site-verification",
+     "indexing-api"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/google-search-console-mcp",
+    "name": "@ni-c/google-search-console-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/google-search-console-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/google-search-console-mcp@0.3.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/google-search-console-mcp_0.3.0_1788803604815_0.038814202794977604"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:acf0d942-32ba-4973-ba14-e89d4d385c3e"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "google-search-console-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/google-search-console-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "google-auth-library": "^11.0.2",
+     "mcp-approval": "^0.8.2",
+     "mcp-tool-allowlist": "^0.2.1",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Google Search Console: manage properties and sitemaps, query search analytics, inspect URLs",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "5.0.0",
+     "fast-check": "^4.9.0",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.3.0/svg-asset-set-0.3.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fgoogle-search-console-mcp@0.3.0"
+     },
+     "fileCount": 53,
+     "integrity": "sha512-tTzC4WzhETL8ciXC5MWy4W411RAI9xQPVh0y+LjIys1RvD4l4xZtgGLrRuo+WcTHHahMHP7b7gUKgIox5my9cQ==",
+     "shasum": "19c6e02aa02a15a1904f458685c3a11c5a0a781a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA7dr/R8+EdEWqz93Smo6lmzkIItWEfI5rRKWIw8amAbAiEAyQvBnKcNyFN3ICAE06akAHB5949hrGJvyrL723YxYH0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/google-search-console-mcp/-/google-search-console-mcp-0.3.0.tgz",
+     "unpackedSize": 284330
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "ccb0f9aaf931fcfc70774546506ac4f3965e2156",
+    "homepage": "https://google-search-console-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "google-search-console",
+     "search-console",
+     "seo",
+     "sitemap",
+     "site-verification",
+     "indexing-api"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/google-search-console-mcp",
+    "name": "@ni-c/google-search-console-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/google-search-console-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   }
+  }
+ },
+ "name": "@ni-c/google-search-console-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ni-c%2Fgoogle-search-console-mcp"
+}

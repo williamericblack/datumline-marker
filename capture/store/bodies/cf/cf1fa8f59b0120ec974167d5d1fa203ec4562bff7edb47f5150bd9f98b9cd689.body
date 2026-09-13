@@ -1,0 +1,388 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:00c37473cd77]",
+    "name": "beeeeen"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@beeeeen/mcp-probe",
+  "_rev": "3-6a6e61734fd6380e1aa4f15ff08f870e",
+  "author": {
+   "email": "[redacted-email:61575fbce88f]",
+   "name": "Ben Yang"
+  },
+  "bugs": {
+   "url": "https://github.com/Beeeeen/mcp-probe/issues"
+  },
+  "description": "Conformance and robustness test suite for Model Context Protocol (MCP) servers. Runs in CI, zero dependencies. Catches stdout pollution, broken tool schemas, and bad JSON-RPC error handling before your agent does.",
+  "dist-tags": {
+   "latest": "0.1.2"
+  },
+  "homepage": "https://github.com/Beeeeen/mcp-probe#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "mcp-server",
+   "mcp-test",
+   "mcp-testing",
+   "mcp-lint",
+   "mcp-validator",
+   "conformance",
+   "testing",
+   "ci",
+   "json-rpc",
+   "claude",
+   "anthropic",
+   "agent",
+   "llm",
+   "tools"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:00c37473cd77]",
+    "name": "beeeeen"
+   }
+  ],
+  "name": "@beeeeen/mcp-probe",
+  "readme": "# mcp-probe\n\n**Conformance and robustness tests for MCP servers. Built to run in CI.**\n\n[![CI](https://github.com/Beeeeen/mcp-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/Beeeeen/mcp-probe/actions/workflows/ci.yml)\n[![npm](https://img.shields.io/npm/v/%40beeeeen%2Fmcp-probe.svg)](https://www.npmjs.com/package/@beeeeen/mcp-probe)\n[![node](https://img.shields.io/node/v/%40beeeeen%2Fmcp-probe.svg)](https://www.npmjs.com/package/@beeeeen/mcp-probe)\n[![license](https://img.shields.io/npm/l/%40beeeeen%2Fmcp-probe.svg)](./LICENSE)\n\n```bash\nnpx @beeeeen/mcp-probe -- node build/index.js\n```\n\nNo install, no config, no dependencies. Point it at a server, get a verdict.\n\n---\n\n## Why this exists\n\nThe official [Inspector](https://github.com/modelcontextprotocol/inspector) is a **visual** tool -- you click through it by hand. The official [conformance suite](https://github.com/modelcontextprotocol/conformance) runs in CI, but it tests servers **over HTTP only**, and it checks the spec, not quality.\n\nMost published MCP servers are **stdio** processes launched by the host -- and stdio is where the deadliest failure mode lives, one no HTTP-based test can even observe:\n\n```js\nconsole.log('Server started')   // <- stdout IS the protocol channel.\n```\n\nThat one line corrupts the JSON-RPC stream. The host cannot parse it, so it disconnects \u2014 or worse, silently drops every message after it. No stack trace, no error, no log. The server \"just doesn't work in Claude Desktop\" and you spend an afternoon on it.\n\nEvery MCP client library discards bytes it cannot parse, which is why nothing reports this. **mcp-probe keeps the discarded bytes and shows them to you.**\n\nThat is one check out of 16, across roughly 30 distinct findings \u2014 all of them things that have shipped in real, published servers. Beyond spec conformance, mcp-probe also grades what the spec cannot: whether a model can actually *use* the server -- description quality, schemas whose `required` fields exist, argument validation that runs before side effects, and the token weight of the tool list.\n\n---\n\n## What it finds\n\nRun against a server with the usual set of mistakes:\n\n```\n  mcp-probe  bad-fixture\n  node server.js  |  protocol 2025-06-18\n\n  protocol conformance\n    WARN  initialize returns serverInfo.version\n          \"bad-fixture\" reports no version.\n    PASS  Declared \"tools\" capability answers tools/list            5 tools\n    FAIL  Declared \"resources\" capability answers resources/list\n          resources/list returned no \"resources\" array.\n    FAIL  Unknown method returns -32601\n          Server answered a method that does not exist with a success result.\n\n  tool schemas\n    FAIL  Tool name is host-compatible (search files)\n          \"search files\" contains characters hosts reject.\n    FAIL  Tool names are unique (dup)\n          \"dup\" is listed 2 times.\n    FAIL  Tool has a description (mystery)\n          No description.\n    FAIL  required fields exist in properties (search files)\n          required lists \"directory\", which is not in properties.\n    PASS  Tool list does not dominate the context window            ~189 tokens across 5 tools\n\n  robustness\n    FAIL  Calling a tool that does not exist is rejected\n          An unknown tool name returned a success result.\n    FAIL  Missing required arguments are rejected (delete_everything)\n          Ran with none of its 1 required argument and reported success.\n\n  transport hygiene\n    FAIL  stdout carries only JSON-RPC\n          1 non-JSON line written to stdout.\n\n  ----------------------------------------------------------------\n  11 failed  |  8 warnings  |  9 passed  |  1 skipped   0.42s\n```\n\nEvery failure comes with the offending payload and an explanation of what breaks:\n\n```\n  FAIL  stdout carries only JSON-RPC\n        hygiene.stdout_purity  https://modelcontextprotocol.io/specification/2025-06-18/basic/transports\n        1 non-JSON line written to stdout.\n        stdout is the protocol channel for stdio transport. Every one of these\n        lines corrupts the stream:\n\n          > bad-server starting up...\n\n        Fix: send all human-readable output to stderr (console.error, or a\n        logger configured with stderr as its sink).\n```\n\n---\n\n## Usage\n\n```bash\n# stdio server\nnpx @beeeeen/mcp-probe -- node build/index.js\nnpx @beeeeen/mcp-probe -- npx -y @modelcontextprotocol/server-filesystem /tmp\n\n# streamable HTTP\nnpx @beeeeen/mcp-probe --url http://localhost:3000/mcp\n\n# a server you already have configured\nnpx @beeeeen/mcp-probe --config ~/.claude.json --server github\n```\n\n`--config` reads both the `mcpServers` shape (Claude Desktop, Claude Code, Cursor) and the `servers` shape (VS Code), so you can probe a server without retyping how it launches.\n\nmcp-probe's own flags come first; everything after `--` is the server's command line, untouched.\n\n| flag | |\n|---|---|\n| `--strict` | treat warnings as failures |\n| `--json` / `--json-out <file>` | machine-readable report |\n| `--junit <file>` | JUnit XML for CI test reporting |\n| `--only` / `--skip` | select checks by id or group |\n| `--verbose` | expand the explanation for warnings |\n| `--timeout <ms>` | per-request timeout (default 10000) |\n| `--call-tools` | invoke tools \u2014 see [Safety](#safety) |\n\nExit codes: `0` clean \u00b7 `1` findings \u00b7 `2` could not run.\n\n---\n\n## In CI\n\n```yaml\n- uses: Beeeeen/mcp-probe@v0\n  with:\n    command: node build/index.js\n    strict: true\n```\n\nFailures become inline annotations, and a table lands in the job summary. Outputs `failures`, `warnings` and `report` for later steps.\n\nOr without the action:\n\n```yaml\n- run: npx @beeeeen/mcp-probe --junit results.xml -- node build/index.js\n```\n\n---\n\n## What gets checked\n\n**Protocol conformance** \u2014 the handshake returns a usable `protocolVersion` and `serverInfo`; declared capabilities are actually implemented *and return the right shape*; unknown methods produce `-32601` rather than a crash or a fake success; `ping` answers; an older `protocolVersion` does not take the process down.\n\n**Tool schemas** \u2014 names are unique and host-compatible; descriptions exist and are not `TODO`; `inputSchema` is a real JSON Schema rooted at `type: object`; `required` never names a field that is missing from `properties`; parameters carry descriptions; and the whole tool list is measured in tokens, because it is re-sent on *every* request and nothing else tells you what that costs.\n\n**Robustness** \u2014 unknown tool names are rejected; omitting required arguments does not silently execute the tool anyway; wrongly typed arguments are not coerced into a wrong answer; malformed JSON-RPC on the wire does not wedge or kill the read loop; tool results are not large enough to evict the conversation.\n\n**Transport hygiene** \u2014 stdout carries only JSON-RPC; stderr has no unhandled exceptions; the process is still alive at the end.\n\nEvery check has a stable dotted id (`schema.input_schema.orphan_required`), so `--skip` and `--only` work at any granularity, and a finding you have decided to live with can be silenced precisely.\n\n---\n\n## Safety\n\n**mcp-probe does not invoke your tools unless you ask it to.**\n\nThe default run only ever calls tools with *invalid* arguments \u2014 missing required fields, wrong types. A correct server rejects those at validation, before any side effect, and that rejection is exactly what is being measured. A server that performs work anyway is the bug being reported.\n\nTo measure real responses, opt in explicitly:\n\n```bash\nnpx @beeeeen/mcp-probe --safe-tool list_directory -- node server.js   # just this one\nnpx @beeeeen/mcp-probe --call-tools -- node server.js                 # all of them\n```\n\nThere is a `delete_everything` tool in the test fixtures for a reason.\n\n---\n\n## Programmatic use\n\n```ts\nimport { run, exitCodeFor } from 'mcp-probe'\n\nconst report = await run(\n  { kind: 'stdio', command: 'node', args: ['build/index.js'] },\n  { strict: true },\n)\n\nfor (const r of report.results.filter((r) => r.status === 'fail')) {\n  console.error(`${r.id}: ${r.message}`)\n}\nprocess.exit(exitCodeFor(report, true))\n```\n\nThe check list is exported too, so you can run a subset or add your own:\n\n```ts\nimport { allChecks, selectChecks } from 'mcp-probe'\n```\n\n---\n\n## Design notes\n\n**No runtime dependencies, and no MCP SDK.** The JSON-RPC layer is hand-rolled on purpose. Client libraries normalise responses and throw away what they cannot parse \u2014 which is precisely the evidence a conformance tester needs. mcp-probe reads the raw bytes so it can report what the SDK would have hidden.\n\n**A broken server is a result, not an exception.** A server that will not start, will not handshake, or dies mid-run produces a report saying so. CI can always render something.\n\n**Findings explain themselves.** Each one carries the payload that triggered it, a link to the relevant part of the spec, and a sentence on what actually breaks. A finding you cannot act on is noise.\n\n---\n\n## Contributing\n\nNew checks are welcome, especially ones drawn from a bug you actually hit. A check is one object in `src/checks/`, and the bar is:\n\n- it must be **actionable** \u2014 the message says what to change\n- it must not **false-positive** on the reference servers (`@modelcontextprotocol/server-everything` and `server-filesystem` are probed in CI)\n- add the defect to `fixtures/bad-server.js` and assert on it in `test/probe.test.js`\n\n```bash\nnpm install && npm run build && npm test\n```\n\n## See also\n\nThe rest of the toolchain, built on the same zero-dependency MCP client:\n\n- [**mcp-wtf**](https://github.com/Beeeeen/mcp-wtf) -- your MCP server won't connect; find out why in 10 seconds.\n- [**context-xray**](https://github.com/Beeeeen/context-xray) -- what every configured MCP server costs you in context-window tokens on every request.\n\nmcp-wtf answers \"why won't it connect\", context-xray answers \"what is it costing me\", mcp-probe answers \"will it break my users\".\n\n## Newsletter\n\n**[Agent Receipts](https://receipts.yangjiawei.com)** -- weekly, first-hand numbers from building and shipping tools like this one: what I measured, what broke, and what I got wrong. [Subscribe](https://receipts.yangjiawei.com/subscribe).\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/Beeeeen/mcp-probe.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-26T15:48:15.854Z",
+   "0.1.1": "2026-08-29T08:48:57.764Z",
+   "0.1.2": "2026-08-29T20:55:29.700Z",
+   "created": "2026-08-26T15:48:15.506Z",
+   "modified": "2026-08-29T20:55:29.998Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@beeeeen/mcp-probe@0.1.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_0.1.0_1787759295714_0.6587897737318822"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:00c37473cd77]",
+     "name": "beeeeen"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:61575fbce88f]",
+     "name": "Ben Yang"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Beeeeen/mcp-probe/issues"
+    },
+    "description": "Conformance and robustness test suite for Model Context Protocol (MCP) servers. Runs in CI, zero dependencies. Catches stdout pollution, broken tool schemas, and bad JSON-RPC error handling before your agent does.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 37,
+     "integrity": "sha512-rZ6U/aG6U72XFScFiR4UmiH80IW97iV2A5pt65y1MS7PI1gjKFR9eqr8PYwtYNHovwHjBizdGyci+JfTq1p9OA==",
+     "shasum": "28406dc92875a97121f5a14d2d8a8facee940726",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICFy3PhjxN6v40GO3ppdQwWwggZcwX3Dc9SLTulTtSgtAiBplzATezuNs12U69kjcaVkL+iDnmiPQIp/u4+f2LZsVw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beeeeen/mcp-probe/-/mcp-probe-0.1.0.tgz",
+     "unpackedSize": 113291
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9d263b30877ea0d43a0b7b8042df54f09cf00d16",
+    "homepage": "https://github.com/Beeeeen/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-test",
+     "mcp-testing",
+     "mcp-lint",
+     "mcp-validator",
+     "conformance",
+     "testing",
+     "ci",
+     "json-rpc",
+     "claude",
+     "anthropic",
+     "agent",
+     "llm",
+     "tools"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:00c37473cd77]",
+      "name": "beeeeen"
+     }
+    ],
+    "name": "@beeeeen/mcp-probe",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Beeeeen/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepublishOnly": "npm run build",
+     "test": "npm run build && node --test"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@beeeeen/mcp-probe@0.1.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_0.1.1_1787993337329_0.9973843301972565"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:d32414ee-ccad-4de1-b63f-78ab1409a3f2"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:61575fbce88f]",
+     "name": "Ben Yang"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Beeeeen/mcp-probe/issues"
+    },
+    "description": "Conformance and robustness test suite for Model Context Protocol (MCP) servers. Runs in CI, zero dependencies. Catches stdout pollution, broken tool schemas, and bad JSON-RPC error handling before your agent does.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beeeeen%2fmcp-probe@0.1.1"
+     },
+     "fileCount": 37,
+     "integrity": "sha512-/3AIcPBcSMMetg+AL6X2d4zK/Ld+uFMbT+GLuYwI1RLpnvrxCkY03PLOYi942CpoQhXkulgAf2BroZPPnRk1mg==",
+     "shasum": "72b3994fdde29d2519501837b4d3c1da6b476627",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH5DJvWgzNd/PuZyclye986GAlnkVbglUbMCRWXWvvlFAiEAsvPTkLj6e6gsKVOlDAwbeK4MGa1pl30giUTC3ABZJjY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beeeeen/mcp-probe/-/mcp-probe-0.1.1.tgz",
+     "unpackedSize": 113291
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "67b951c504399394d4be74e53bae263595862ed8",
+    "homepage": "https://github.com/Beeeeen/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-test",
+     "mcp-testing",
+     "mcp-lint",
+     "mcp-validator",
+     "conformance",
+     "testing",
+     "ci",
+     "json-rpc",
+     "claude",
+     "anthropic",
+     "agent",
+     "llm",
+     "tools"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:00c37473cd77]",
+      "name": "beeeeen"
+     }
+    ],
+    "name": "@beeeeen/mcp-probe",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Beeeeen/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepublishOnly": "npm run build",
+     "test": "npm run build && node --test"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@beeeeen/mcp-probe@0.1.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-probe_0.1.2_1788036929546_0.5210750369077985"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:d32414ee-ccad-4de1-b63f-78ab1409a3f2"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:61575fbce88f]",
+     "name": "Ben Yang"
+    },
+    "bin": {
+     "mcp-probe": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Beeeeen/mcp-probe/issues"
+    },
+    "description": "Conformance and robustness test suite for Model Context Protocol (MCP) servers. Runs in CI, zero dependencies. Catches stdout pollution, broken tool schemas, and bad JSON-RPC error handling before your agent does.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beeeeen%2fmcp-probe@0.1.2"
+     },
+     "fileCount": 37,
+     "integrity": "sha512-5DhCkUen6sOLtnZVaBhD3OzKInOEIbJJb/UkIjD1cRnOjTaLtyPofuVa6k4gmNueOtl6nhS4Apt9X09N+tQc5A==",
+     "shasum": "6deedd58096c2b011775c41c46c9c8f0f9d1f6db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD7mAaBVD/0UwiOl+tysZ4apcYIq1iiVAIv6WDAfGCl/gIhAM7AaOIdWQ9duJh2M2Pw5H9jBlgF77JC88vlKr0OG2UL"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beeeeen/mcp-probe/-/mcp-probe-0.1.2.tgz",
+     "unpackedSize": 113546
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "ef449f6e537e405f1a33b3669468aa7bf3a3001e",
+    "homepage": "https://github.com/Beeeeen/mcp-probe#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "mcp-server",
+     "mcp-test",
+     "mcp-testing",
+     "mcp-lint",
+     "mcp-validator",
+     "conformance",
+     "testing",
+     "ci",
+     "json-rpc",
+     "claude",
+     "anthropic",
+     "agent",
+     "llm",
+     "tools"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:00c37473cd77]",
+      "name": "beeeeen"
+     }
+    ],
+    "name": "@beeeeen/mcp-probe",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Beeeeen/mcp-probe.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepublishOnly": "npm run build",
+     "test": "npm run build && node --test"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.2"
+   }
+  }
+ },
+ "name": "@beeeeen/mcp-probe",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@beeeeen%2Fmcp-probe"
+}

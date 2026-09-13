@@ -1,0 +1,326 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.6.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a99fb531d411]",
+    "name": "cadlens"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.1",
+   "0.1.2",
+   "0.6.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@cadlens/mcp-server",
+  "_rev": "3-10c06d1de8c504df5c3f151038c9d866",
+  "bugs": {
+   "url": "https://github.com/cadlens-co/cadlens-mcp/issues"
+  },
+  "description": "Model Context Protocol server that wraps the CADLens REST API.",
+  "dist-tags": {
+   "latest": "0.6.0"
+  },
+  "homepage": "https://cadlens.co",
+  "keywords": [
+   "mcp",
+   "mcp-server",
+   "model-context-protocol",
+   "ai-agents",
+   "cad",
+   "dwg",
+   "dxf",
+   "cad-parser",
+   "cad-api",
+   "engineering-api",
+   "aec",
+   "cadlens"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a99fb531d411]",
+    "name": "cadlens"
+   }
+  ],
+  "name": "@cadlens/mcp-server",
+  "readme": "# cadlens-mcp\n\n[![npm version](https://badge.fury.io/js/@cadlens%2Fmcp-server.svg)](https://www.npmjs.com/package/@cadlens/mcp-server)\n[![GitHub](https://img.shields.io/badge/GitHub-cadlens--co%2Fcadlens--mcp-blue?logo=github)](https://github.com/cadlens-co/cadlens-mcp)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server that wraps the [Cadlens CAD parsing API](https://cadlens.co) so MCP-aware LLM clients (Claude Desktop, Claude Code, Cursor, Zed, Windsurf) can parse CAD files (`.dwg`, `.dxf`, `.dwf`, `.dwfx`, `.dgn` V7, `.pdf`, max 100 MB) and reason over the extracted entity, layer, and metadata payloads.\n\n[Cadlens](https://cadlens.co) converts CAD drawings into structured JSON without requiring AutoCAD or any desktop software \u2014 learn more at [cadlens.co](https://cadlens.co).\n\n## Install\n\nGet an API key from the [Cadlens dashboard](https://cadlens.co) first \u2014 keys start with `cadl_` and are created in the dashboard for free.\n\n### Claude Desktop / Cursor / Windsurf\n\nAdd to your MCP client config (e.g. `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):\n\n```json\n{\n  \"mcpServers\": {\n    \"cadlens\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@cadlens/mcp-server\"],\n      \"env\": {\n        \"CADLENS_API_KEY\": \"cadl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n      }\n    }\n  }\n}\n```\n\n### Claude Code CLI\n\n```bash\nclaude mcp add cadlens \\\n  --env CADLENS_API_KEY=cadl_xxx \\\n  -- npx -y @cadlens/mcp-server\n```\n\n---\n\n## Development (build from source)\n\n```bash\nnpm install\nnpm run build\n\nexport CADLENS_API_KEY=\"cadl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nnode dist/index.js\n```\n\n## Tools\n\n| Tool | What it does |\n|---|---|\n| `cadlens_parse_file` | Upload a local CAD file, poll until parsed (5 min budget), return summary. |\n| `cadlens_parse_url` | Download a CAD file from a URL, then parse it like `parse_file`. |\n| `cadlens_get_job` | Cheap status check (`PENDING` / `PROCESSING` / `COMPLETED` / `FAILED`). |\n| `cadlens_get_result` | Fetch parsed content. `mode`: `summary` (default), `entities_by_type`, `entities_on_layer`, `full`. |\n| `cadlens_refresh_image_url` | Re-fetch the 1h presigned PNG URL without re-downloading the full result. |\n| `cadlens_list_jobs` | The 100 most recent jobs for the configured API key. |\n| `cadlens_delete_job` | Delete a job and its S3 artifacts. Irreversible. |\n\n## Configuration\n\n| Env var | Required | Default | Notes |\n|---|---|---|---|\n| `CADLENS_API_KEY` | yes | \u2014 | Created in the CADLens dashboard. |\n| `CADLENS_API_BASE` | no | `https://api.cadlens.co/v1` | Set to `http://localhost:3001/v1` for local dev. |\n| `WEBHOOK_PORT` | no | `0` (random) | Port for the in-process webhook receiver. |\n| `WEBHOOK_PUBLIC_URL` | no | unset | Set to a tunnel URL (ngrok/cloudflared) to let CADLens hit the local receiver. When set, parse calls auto-register the webhook and the poller short-circuits on receipt. |\n| `REQUEST_TIMEOUT_MS` | no | `30000` | Per-HTTP-request timeout for CADLens calls. |\n\n## Webhook short-circuit (optional)\n\nIf `WEBHOOK_PUBLIC_URL` is set, `parse_file` / `parse_url` register a per-process webhook URL alongside the upload. The webhook handler updates an in-memory job-state cache; the poller checks that cache before each HTTP GET and returns early when `COMPLETED` / `FAILED` arrives. This trims worst-case latency by up to one full poll tick (~1 s) without changing the tool surface.\n\nExample tunnel setup:\n\n```bash\ncloudflared tunnel --url http://localhost:8787 &\nexport WEBHOOK_PORT=8787\nexport WEBHOOK_PUBLIC_URL=\"https://<your-tunnel>.trycloudflare.com\"\n```\n\n## Development\n\n```bash\nnpm run typecheck\nnpm run lint\nnpm test\nnpm run smoke   # tools/list smoke test against built binary\n```\n\n## Project-scoped Claude agents\n\nThis repo ships five agents under `.claude/agents/`:\n\n- `cadlens-api-debugger` \u2014 diagnoses unexplained CADLens 4xx/5xx using `mcp-server-reference.md`.\n- `mcp-tool-tester` \u2014 drives JSON-RPC against the built server to validate tool responses.\n- `mcp-tool-implementer` \u2014 scaffolds new tools following the existing `src/tools/*` pattern.\n- `cad-drawing-summarizer` \u2014 uses the MCP tools to summarize a CAD file in natural language.\n- `cad-layer-inspector` \u2014 drills into a single layer of a parsed drawing.\n\n## Links\n\n- [Cadlens official website](https://cadlens.co)\n- [Cadlens API documentation](https://cadlens.co/docs)\n- [Cadlens pricing](https://cadlens.co/pricing)\n- [DWG parser for AI agents](https://cadlens.co)\n- [npm package](https://www.npmjs.com/package/@cadlens/mcp-server)\n- [GitHub repository](https://github.com/cadlens-co/cadlens-mcp)\n\n---\n\n## GitHub Topics\n\nAdd these topics to this repo for discovery:\n`mcp` `mcp-server` `model-context-protocol` `ai-agents` `claude` `cad` `dwg` `dxf` `cad-api` `llm-tools` `engineering-api`\n\n---\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/cadlens-co/cadlens-mcp.git"
+  },
+  "time": {
+   "0.1.1": "2026-06-04T01:54:10.078Z",
+   "0.1.2": "2026-06-05T02:18:38.743Z",
+   "0.6.0": "2026-08-11T03:30:41.857Z",
+   "created": "2026-06-04T01:54:09.775Z",
+   "modified": "2026-08-11T03:30:42.012Z"
+  },
+  "versions": {
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cadlens/mcp-server@0.1.1",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1780538049944_0.5282070639463896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a99fb531d411]",
+     "name": "cadlens"
+    },
+    "_npmVersion": "11.13.0",
+    "bin": {
+     "cadlens-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "Model Context Protocol server that wraps the CADLens REST API.",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "@typescript-eslint/eslint-plugin": "^7.0.0",
+     "@typescript-eslint/parser": "^7.0.0",
+     "eslint": "^8.57.0",
+     "prettier": "^3.2.0",
+     "typescript": "^5.4.0",
+     "undici": "^8.2.0",
+     "vitest": "^1.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-WAvhy8S+RCgigIaPBgA0tw8g16EpVyhT0SQfaJkjC7Jp1RQBAuJ81/PMiG2GPd4tLTf0EsXQLe344FcqaY15zA==",
+     "shasum": "bd4f9fa594436ba08aff70727a7c0242ab56ec28",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBmt13SOqrFmCTzm6ILaQoJGkEBUhRrnzHRMvtBeIkEzAiB4Y/6FqqloM8J1XivAX5gPVyTmtrDhpftbk3HwysHt8w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cadlens/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 59230
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2503453575c34d9d5195cca80f027d7707f20793",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a99fb531d411]",
+      "name": "cadlens"
+     }
+    ],
+    "mcpName": "io.github.cadlens-co/cadlens-mcp",
+    "name": "@cadlens/mcp-server",
+    "scripts": {
+     "build": "tsc && chmod +x dist/index.js",
+     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+     "lint": "eslint . --ext .ts",
+     "prepublishOnly": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@cadlens/mcp-server@0.1.2",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.2_1780625918593_0.9896807019212792"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a99fb531d411]",
+     "name": "cadlens"
+    },
+    "_npmVersion": "11.13.0",
+    "bin": {
+     "cadlens-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/cadlens-co/cadlens-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "Model Context Protocol server that wraps the CADLens REST API.",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "@typescript-eslint/eslint-plugin": "^7.0.0",
+     "@typescript-eslint/parser": "^7.0.0",
+     "eslint": "^8.57.0",
+     "prettier": "^3.2.0",
+     "typescript": "^5.4.0",
+     "undici": "^6.21.0",
+     "vitest": "^1.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-qBV2qJPujtMs22DnhPEF0ay/G5hNBPwAUk7/mJxKVM1zkdQdL+9c/ljpjxEmQ21Ey9TYdZh+ntOZtF0C68M6Fw==",
+     "shasum": "74ab66395c6dcede7879b77c4a2fa1ea1f355917",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF4f0gbiCwapvEPTr8D9CDeZDPGhBEy4RbQWCmYhRPPpAiEAhOQGbbBIV44yewKFmg9MR4iwTAmTkGI6HUEcM0Heqh4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cadlens/mcp-server/-/mcp-server-0.1.2.tgz",
+     "unpackedSize": 60677
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "8444b1e7cedc7faac7ee8bce69ceac6554e4425b",
+    "homepage": "https://cadlens.co",
+    "keywords": [
+     "mcp",
+     "mcp-server",
+     "model-context-protocol",
+     "ai-agents",
+     "cad",
+     "dwg",
+     "dxf",
+     "cad-parser",
+     "cad-api",
+     "engineering-api",
+     "aec",
+     "cadlens"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a99fb531d411]",
+      "name": "cadlens"
+     }
+    ],
+    "mcpName": "io.github.cadlens-co/cadlens-mcp",
+    "name": "@cadlens/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cadlens-co/cadlens-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc && chmod +x dist/index.js",
+     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+     "lint": "eslint . --ext .ts",
+     "prepublishOnly": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cadlens/mcp-server@0.6.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1786419041727_0.7512581623648942"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:a99fb531d411]",
+     "name": "cadlens"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "cadlens-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/cadlens-co/cadlens-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "Model Context Protocol server that wraps the CADLens REST API.",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "@typescript-eslint/eslint-plugin": "^7.0.0",
+     "@typescript-eslint/parser": "^7.0.0",
+     "eslint": "^8.57.0",
+     "prettier": "^3.2.0",
+     "typescript": "^5.4.0",
+     "undici": "^6.21.0",
+     "vitest": "^1.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-buXo+EA2RVUdnD+81ba2ZgDKsl1LcHxQHNhhJxaYRPuKsulkfCQoLWYJ73UWwnjl1hRkxUVyICB+TjnG3tf6Vg==",
+     "shasum": "bbe6f4e067a9c7a487dce7fc92ece2567fba4935",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICNDPSeBOcgTTfiyU+/x+s3NxVZrfNCX1fHqOpqm8qfbAiBtbdummluEMjclAvu6KEorqJfL1QgJJREPVgRMX/NiFw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cadlens/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 63542
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "0bb71e1149c123450808b22c490894659477f48a",
+    "homepage": "https://cadlens.co",
+    "keywords": [
+     "mcp",
+     "mcp-server",
+     "model-context-protocol",
+     "ai-agents",
+     "cad",
+     "dwg",
+     "dxf",
+     "cad-parser",
+     "cad-api",
+     "engineering-api",
+     "aec",
+     "cadlens"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a99fb531d411]",
+      "name": "cadlens"
+     }
+    ],
+    "mcpName": "io.github.cadlens-co/cadlens-mcp",
+    "name": "@cadlens/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cadlens-co/cadlens-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc && chmod +x dist/index.js",
+     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+     "lint": "eslint . --ext .ts",
+     "prepublishOnly": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   }
+  }
+ },
+ "name": "@cadlens/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@cadlens%2Fmcp-server"
+}

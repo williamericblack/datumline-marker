@@ -1,0 +1,1272 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.10.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0bfbd83cbfe0]",
+    "name": "sathvikcheela"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.10.0",
+   "0.3.0",
+   "0.3.1",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.7.1",
+   "0.8.0",
+   "0.8.1",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@fyrlabs/mcp-nexus",
+  "_rev": "11-5043dbc9c2655f6daa5cb9f69693f0a9",
+  "bugs": {
+   "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+  },
+  "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+  "dist-tags": {
+   "latest": "0.10.0"
+  },
+  "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "router",
+   "gateway",
+   "ai",
+   "agent",
+   "llm",
+   "tool-discovery",
+   "context-window",
+   "local-first"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0bfbd83cbfe0]",
+    "name": "sathvikcheela"
+   }
+  ],
+  "name": "@fyrlabs/mcp-nexus",
+  "readme": "# MCP Nexus\n\n[![CI](https://github.com/fyrlabs/mcp-nexus/actions/workflows/ci.yml/badge.svg)](https://github.com/fyrlabs/mcp-nexus/actions/workflows/ci.yml)\n[![npm version](https://img.shields.io/npm/v/@fyrlabs/mcp-nexus.svg)](https://www.npmjs.com/package/@fyrlabs/mcp-nexus)\n[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)\n\n**MCP Nexus is a local-first intelligent router for the Model Context Protocol.**\nYour AI harness connects to one MCP endpoint \u2014 Nexus \u2014 while Nexus manages all of your real MCP servers behind the scenes: indexing their tools, discovering capabilities on demand, starting servers lazily, executing routed calls, and learning from local usage to rank results better over time.\n\n```text\nBefore                                With MCP Nexus\n\nAI Harness                            AI Harness\n  \u251c\u2500\u2500 GitHub MCP   (30 tools)           \u2514\u2500\u2500 mcp-nexus (4 control tools)\n  \u251c\u2500\u2500 Jira MCP      (25 tools)              \u251c\u2500\u2500 search_capabilities\n  \u251c\u2500\u2500 Slack MCP     (20 tools)              \u251c\u2500\u2500\u2500\u2500 describe_capabilities\n  \u251c\u2500\u2500 Figma MCP     (18 tools)              \u251c\u2500\u2500\u2500\u2500 execute_capability\n  ...                                   \u2514\u2500\u2500\u2500\u2500 search_servers\n  ~90+ tool schemas in context                  \u2502\n                                     (everything else stays indexed\n                                      on disk until actually needed)\n```\n\n## Why\n\nEvery connected MCP server contributes tool schemas to the model's context. Ten servers later you are burning tens of thousands of tokens on definitions the model rarely uses, and tool-selection quality degrades.\n\nNexus flips the model: instead of pushing every downstream schema into context, it keeps a lightweight capability index on disk and serves a tiny control plane. The agent discovers capabilities when needed (`search_capabilities`), inspects exact schemas only for what it selected (`describe_capabilities`), and executes through Nexus (`execute_capability`). All state (config, index, analytics, learned sequences) lives locally in `.mcp-nexus/`.\n\n### How much this helps depends on your harness\n\nSome harnesses now defer tool definitions themselves, so it is worth being precise about what Nexus adds on top.\n\n| Harness | Without Nexus | What Nexus adds |\n| --- | --- | --- |\n| **GitHub Copilot / VS Code** | Hard cap of 128 tools per request. Past it, agent mode refuses to run until you manually turn tools off. | Downstream tool count stops mattering: the harness sees 4 tools regardless of how many servers you run. |\n| **Claude Code** (tool search on by default) | Tool definitions are deferred, but every tool *name* plus each server's instructions still load at session start, and every configured server is connected in the background. | Names collapse to 4. Servers stay unspawned until something actually calls them. |\n| **Cursor, Windsurf, older models, Bedrock / Azure / proxied setups** | Every schema loads upfront. | The full reduction below. |\n\nOn a synthetic 20-server, 400-tool ecosystem (`npm run bench`), the schemas total roughly 52,000 tokens against 544 for the Nexus control plane. That number is the upfront-loading case; where the harness already defers definitions, the saving is smaller but the lazy process startup and the tool-count ceiling still apply.\n\nContext is not the only reason to use it. Nexus also gives you lazy server startup, per-capability policies, health quarantine, and local usage learning, none of which a harness provides.\n\n## Quick start\n\n```bash\n# 1. Scaffold a project config\nnpx @fyrlabs/mcp-nexus init\n\n# 2. Add downstream MCP servers (anything runnable over stdio)\nnpx @fyrlabs/mcp-nexus add github -- npx -y @modelcontextprotocol/server-github\n#    or import an existing config:\nnpx @fyrlabs/mcp-nexus import --from claude\n\n# 3. Point your harness at Nexus (see docs/harness-setup.md)\n```\n\nHarness configuration (Claude Code, Cursor, Codex, and other MCP clients):\n\n```json\n{\n  \"mcpServers\": {\n    \"mcp-nexus\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@fyrlabs/mcp-nexus\"]\n    }\n  }\n}\n```\n\nNexus finds `project-mcp.json` automatically by walking up from the working directory, or pass `--config ./path/to/nexus.json`.\n\nThen, from the agent's point of view:\n\n```text\nsearch_capabilities  { \"query\": \"find comments people left on my PR\" }\n\u2192 github.review_comments.list  score=0.94 ...\n\ndescribe_capabilities { \"capabilityIds\": [\"github.review_comments.list\"] }\n\u2192 exact input schema\n\nexecute_capability   { \"capabilityId\": \"github.review_comments.list\",\n                       \"arguments\":  { ... } }\n\u2192 forwarded verbatim to the right server, started on demand\n```\n\n## What gets exposed vs. what stays hidden\n\n| | Exposed to the model | Kept local |\n|---|---|---|\n| Control-plane tools | 4 fixed tools | \u2014 |\n| Capability metadata | Only on search (small records: id, title, description, risk, score) | Full index in SQLite |\n| Tool input schemas | Only for described capabilities | Persisted at index time |\n| Usage analytics | \u2014 | Local events + aggregates |\n| Secrets | Never (redacted from logs and CLI output) | Resolved in-process, passed to the downstream server env |\n\n## Highlights\n\n- **Local-first.** No cloud service, no account, no telemetry. Delete `.mcp-nexus/` and all learned state is gone.\n- **Lazy execution lifecycle.** After the one-time background index, servers start only when a task needs them, stop after tiered idle timeouts (hot / warm / cold), and are never stopped mid-call. A server that keeps failing to start is quarantined for a short, growing window instead of costing a startup timeout on every call.\n- **Hybrid search.** BM25 lexical ranking over weighted fields, exact id/tool matching, alias expansion (`pr \u2192 pull request`, configurable), plus optional semantic search: point `routing.semantic` at any OpenAI-compatible embeddings endpoint (cloud, or fully-local via Ollama) \u2014 embeddings are batched, cached in SQLite, and the system falls back to lexical automatically when the endpoint is down (a circuit breaker opens after two consecutive failures and suppresses calls for 60s before probing again). Search queries are sent to that endpoint too \u2014 see [Privacy](#privacy).\n- **Risk policies and optional tool promotion.** Deny or flag capabilities by risk class, and (opt-in, `routing.promotion: \"session\"`) expose discovered tools directly as `nexus__<server>__<tool>` after discovery (argument schemas are reconstructed from the downstream JSON schema; exotic keywords are simplified). Risk classes come from a keyword heuristic over each tool's own name and description, so treat policies as a workflow guardrail against accidents, not as a security boundary against a hostile server. See [risk classification](docs/configuration.md#risk-classification).\n- **Adaptive ranking with explanations.** Every result carries its signal breakdown; pinned capabilities outrank learned popularity; blocked capabilities are never suggested.\n- **Sequence prediction.** Repeated tool transitions are learned locally and used to boost likely-next capabilities \u2014 prediction never auto-executes.\n- **Zero native dependencies.** Storage uses Node's built-in `node:sqlite`; installing this package never compiles anything.\n- **Context reduction, measured.** `npm run bench` builds a synthetic ecosystem and measures the real numbers: at 2,000 capabilities the full downstream schema payload is ~130k tokens versus ~540 tokens for the Nexus control plane (\u224899.6% estimated reduction), with index-level search p95 at 0.05ms against the spec's 50ms budget (full router path adds policy and stats lookups).\n- **Harness-agnostic.** Anything that speaks MCP stdio can sit in front of Nexus.\n\n## Requirements\n\n- Node.js **>= 22.13** (24 LTS recommended; `node:sqlite` must be available unflagged)\n\n## Documentation\n\n- [Configuration reference](docs/configuration.md) \u2014 every field, resolution order, env substitution\n- [CLI reference](docs/cli.md) \u2014 all commands and flags\n- [Architecture](docs/architecture.md) \u2014 modules, scoring model, storage schema\n- [Harness setup](docs/harness-setup.md) \u2014 Claude Code, Cursor, Codex, generic MCP clients\n- [`examples/project-mcp.json`](examples/project-mcp.json) \u2014 annotated starter config\n- [Control plane reference](docs/mcp/) \u2014 the 4 tools and the status resource, with full input schemas, generated from the running server by [`@fyrlabs/mcp-docs`](https://www.npmjs.com/package/@fyrlabs/mcp-docs) and drift-checked in CI\n\n## Development\n\n```bash\ngit clone https://github.com/fyrlabs/mcp-nexus && cd mcp-nexus\nnpm install\nnpm run build       # tsc -> dist/\nnpm run test        # vitest (unit + integration, mirrors src/ structure under src/tests/)\nnpm run typecheck   # strict tsc, no emit\nnpm run lint        # eslint\n```\n\nIntegration tests spin up the real `@modelcontextprotocol/server-everything` package as a downstream stdio server and route executions through a full runtime \u2014 they skip automatically if the package cannot be resolved.\n\nSee [AGENTS.md](AGENTS.md) for contribution conventions (commits, versioning, structure).\n\n## Privacy\n\nNexus stores configuration caches, indexes, and analytics in `.mcp-nexus/` (or your XDG data dir). Raw tool arguments are never persisted. With the default settings (`routing.semantic.provider: \"null\"`) the router makes no network requests at all.\n\nSemantic search is the one feature that sends data off the machine, and only if you turn it on. Pointing `routing.semantic` at an OpenAI-compatible endpoint sends two kinds of text there:\n\n- **Capability text** (titles, descriptions, keywords) at index time, once per tool.\n- **Your search query** on every search, to embed it for comparison. Queries are written by the agent from your conversation, so treat them as conversation content.\n\nTool arguments, tool results, secrets, and analytics are never sent. If the query text matters to you, use `provider: \"hash\"` (fully local, no network) or point `baseUrl` at a local [Ollama](https://ollama.com) instance.\n\n## License\n\n[Apache-2.0](LICENSE)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+  },
+  "time": {
+   "0.10.0": "2026-08-25T13:17:54.554Z",
+   "0.3.0": "2026-08-23T15:53:58.914Z",
+   "0.3.1": "2026-08-23T16:07:23.927Z",
+   "0.4.0": "2026-08-23T16:44:07.078Z",
+   "0.5.0": "2026-08-23T18:11:14.450Z",
+   "0.6.0": "2026-08-24T00:23:34.391Z",
+   "0.7.0": "2026-08-24T02:02:57.780Z",
+   "0.7.1": "2026-08-24T02:37:13.836Z",
+   "0.8.0": "2026-08-24T04:38:34.802Z",
+   "0.8.1": "2026-08-24T13:33:38.452Z",
+   "0.9.0": "2026-08-25T01:52:12.252Z",
+   "created": "2026-08-23T15:53:58.546Z",
+   "modified": "2026-08-25T13:17:54.850Z"
+  },
+  "versions": {
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.10.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.10.0_1787663874413_0.26628400288575227"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.10.0"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-VYpICuRbwuk2dtaNK2a8UisxCnGSTSBHF3Jvu5o63P9W51kZeZXTyWj8RUYpjpAcFHJqGCtrKN1V39VkJgY2yQ==",
+     "shasum": "753b8f0b213cea913732a928d07ff6c604338229",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC8ODEFmifdFTS2SLaGszpWaZcGhzafcpGPx6lf/LL+5gIhAMwmy4hAFH3MQRO+IaW0BxvWAgHYu2kWPiXHqeFlL+TO"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.10.0.tgz",
+     "unpackedSize": 528143
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "49c6eb141e66dbc941f7a72dc355069f30611818",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.3.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.3.0_1787500438769_0.2588478745773528"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.3.0"
+     },
+     "fileCount": 220,
+     "integrity": "sha512-uUzh/8Nij7BWDC5UM73wlHwRO6PyoVI4AJQPms7uV9Ph+wqJwFFz0mmZ+dZCLxTn7TaPZkJ++K5MYSuRGI+Z4A==",
+     "shasum": "adaf3a3f6474851c8e9a132d85d6e1a282c8d175",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEKulUeXqUecv0/2xE9uqywWCccglgdnsf5CfjXjH1JkAiEA09SBIkcmxSsINYtwZn9bg2JVbp0TVI5NIrS9wVD/Xq4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.3.0.tgz",
+     "unpackedSize": 410722
+    },
+    "engines": {
+     "node": ">=22.5.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "997ae4f99e6b2d95dea40f0043619b3a4458ad8f",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.3.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.3.1_1787501243742_0.8290578589847193"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.3.1"
+     },
+     "fileCount": 220,
+     "integrity": "sha512-Q5oOeC34GZW68AiyaC3SrMwWYhy0YsZyDXoUljeNTQlCBnbgOzVH9z1PflGYmGkp43FzGO85ZwUNoByQUeRWOw==",
+     "shasum": "135f39393fb6ac3feeb3a2b3fa2f117bbc5b60df",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCN/kzR1ML7NEZl9rBpTQure/ekIZQQZfkIGUsczNPq0QIgBj1Jh+k/N/doi9ID+u1JWYx63TfI/SPtQN80N6lVyr0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.3.1.tgz",
+     "unpackedSize": 414332
+    },
+    "engines": {
+     "node": ">=22.5.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "bc5015bff8d3fd3caa33cc33a60da480fef8368f",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.4.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.4.0_1787503446942_0.48003180932365064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.4.0"
+     },
+     "fileCount": 224,
+     "integrity": "sha512-6XbhEdpkgUBeqRaILcBcrMnHvlNSTElCR3wT0tHDNCFLivZ5Okn1HZDOnmO+EiV2jXEJ5i4+cNZqmDS0F3f9dA==",
+     "shasum": "fc501b7974068ac934f5b472d5c7c89b241dc189",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCs0BwWsmfjZaA3PaeBtD7GAcra2rulrYngMvWQX9R1MAIgDsIb2orXcq9DHUIJTaeN+lcXxt6WrntVLz+uExwmQMM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.4.0.tgz",
+     "unpackedSize": 420572
+    },
+    "engines": {
+     "node": ">=22.5.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "daa5d7f28a6ce666e27be561b7bd8f7a2c466f8e",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.5.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.5.0_1787508674281_0.39201235134987433"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.5.0"
+     },
+     "fileCount": 232,
+     "integrity": "sha512-ACP7cX+QhTUOoKEqRdEy0mZAwusr/8UQDqh5IJEi8vjbQ4kJVhz/FdzTjyclkaCm9Tg0Nd6uvCCC27xIrUHhLw==",
+     "shasum": "fbe2cceaa89b7e739277c1f44b57f10cb0311951",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDdZ4juTw6lMuYr59Ju15c8TQQtAjZgWv3pzXAhDVFpBAIgDTmxm/5Iwt9N0BG+SovuYV9ZGAeZAF7rUtFm0tuUbSE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.5.0.tgz",
+     "unpackedSize": 452724
+    },
+    "engines": {
+     "node": ">=22.5.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "e8ea7983db5616f9064a3b16904d4d85fde330d5",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.6.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.6.0_1787531014240_0.9090075976763277"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.6.0"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-e1WJoxk92af/VMK9lzaO1kCy36OsTuidpP0p2/RaENbvjvpk61ft7CNEws+DNr6THef8iTnEH/4xA3rsGEwv3Q==",
+     "shasum": "94ae4164632b39a205b5650a5f27b668ff4a2f92",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD+FZJGoc6cP+oSVg30ZqpkOCQCHSLsjLHKmyPiQvuT7AIhAIob0NBTULs8ri81btJHSxOzVAHuwb4QNqfGo2FFpeIE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.6.0.tgz",
+     "unpackedSize": 474294
+    },
+    "engines": {
+     "node": ">=22.5.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "ce8d35f14a6fd6038af57f68afeb8d26dfb93711",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.7.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.7.0_1787536977636_0.5720615902849353"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.7.0"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-zpcPM4CUycHJuDz4NLR4ijji3BfYv1vFtWDRsMYDc56TvkmQuh2gaXTj+tbhxS4utxbdbOcwo6svHaJgvXmGYg==",
+     "shasum": "14b890960d472885cc108aa484f9b6eb06db54ef",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDU42ZFe68hNIUGFttjquhSVtBqRa3piQbtj+ef9KW0ZAIgRLRV9N563XDdp6uwm3rYK3HobiGzyXJcrHFhBSeWF1A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.7.0.tgz",
+     "unpackedSize": 490399
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "5c9dd1a6db40eb74107541bb7807a730ee821b4b",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.7.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.7.1_1787539033696_0.24414406219088947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.7.1"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-U0GslcNaToBbXonGcLit/FlFiIjMYCcPsQWI6OzO1YCQ1EeQtARja2jiREdai/IINzTQbx68FXZNKPJVP3uLVA==",
+     "shasum": "d28ae1d3aed88286baef6d30f05bc247c00bc83e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEr8jt/i+6zgV328SxJoCDbq86pKZ8W4G8YUDT6SC/zmAiA2jYT+Z0JcO7LUnzRM4/wzpX4QWncAH2Fo+mXPCKbDbA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.7.1.tgz",
+     "unpackedSize": 491228
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "b592f30088327b36386890628560aa0102ed9655",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.1"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.8.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.8.0_1787546314567_0.6030832792670215"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.8.0"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-IldhWg7Wgz3XW/QgnlJyhjJnV+hJbOl0t1FJslFAwqfv2wka66rRDpjljGXCAcIjvbYlP5g7oBaGKTog+6DjGg==",
+     "shasum": "28601d41ad805dafb6f9e7c0c85b81ed87dc8cb0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDB2yeWF8caZkTiF4qvWARGBRhMumk/UQ/oyOlPx0EfBgIgQLvlmVYiosKl+3xuhxUp9n4KyJ93HpSyJlJSGmUAqig="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.8.0.tgz",
+     "unpackedSize": 509929
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "84a3e0aefc1db3635ab21dda1e7c9da4928de8de",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.8.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.8.1_1787578418312_0.17639162004195064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.8.1"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-6zUhKIAeRNP+7T/R+4Lc2nLnmy6HMa59vTOIz/S70xmgSo4kzbsF1uH00nH1fKKYG9tlM8mbCxYSGxZb2K6RSg==",
+     "shasum": "f4110054a0733d6cc999725a42dae11986d5e30e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC4nV4RneOBZeQIxbF3XY5O7kJ4++iiXiAEVvQsUGgePwIgF2BilEC/nNyvfGQZf6cHayb7MK9IS4UK90ygOtcV3co="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.8.1.tgz",
+     "unpackedSize": 512549
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "11023ed197cfeb635b8c55e1ba3a04b55b29dcc6",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.1"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@fyrlabs/mcp-nexus@0.9.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-nexus_0.9.0_1787622732099_0.7212929851379641"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0bfbd83cbfe0]",
+     "name": "sathvikcheela"
+    },
+    "_npmVersion": "10.9.8",
+    "allowScripts": {
+     "esbuild@0.28.2": true
+    },
+    "bin": {
+     "mcp-nexus": "dist/cli/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/fyrlabs/mcp-nexus/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "commander": "^14.0.3",
+     "zod": "^4.4.3"
+    },
+    "description": "Local-first intelligent MCP router: one endpoint, many MCP servers, capabilities discovered on demand.",
+    "devDependencies": {
+     "@eslint/js": "^9.39.2",
+     "@modelcontextprotocol/server-everything": "^2026.8.18",
+     "@types/node": "^26.0.0",
+     "eslint": "^9.39.2",
+     "typescript": "^5.9.3",
+     "typescript-eslint": "^8.51.0",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@fyrlabs%2fmcp-nexus@0.9.0"
+     },
+     "fileCount": 236,
+     "integrity": "sha512-9yNpnOjoouh65ohifzipisMB4WvtGyS7nh0/4qrClQBiKWWnE8aVttakzonUZK4euICsPFgMoL9Dsz/TM98x/Q==",
+     "shasum": "924b5953acbc757fae16e36adc94455ac134358c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICeLyfktD/XvmXILwhBl+QajxJSVdygotUf4bmU7zVQpAiEAtquyhHYShHRRo5akU0GS718wLAZrrwuZN1fuNNc4X64="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@fyrlabs/mcp-nexus/-/mcp-nexus-0.9.0.tgz",
+     "unpackedSize": 522451
+    },
+    "engines": {
+     "node": ">=22.13.0"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "90ebd10a233717c5d6191b12f645153ce65d7037",
+    "homepage": "https://github.com/fyrlabs/mcp-nexus#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "router",
+     "gateway",
+     "ai",
+     "agent",
+     "llm",
+     "tool-discovery",
+     "context-window",
+     "local-first"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0bfbd83cbfe0]",
+      "name": "sathvikcheela"
+     }
+    ],
+    "name": "@fyrlabs/mcp-nexus",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/fyrlabs/mcp-nexus.git"
+    },
+    "scripts": {
+     "bench": "npm run build --silent && node scripts/benchmark.mjs",
+     "build": "tsc -p tsconfig.build.json",
+     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+     "lint": "eslint src",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@fyrlabs/mcp-nexus",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@fyrlabs%2Fmcp-nexus"
+}

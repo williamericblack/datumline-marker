@@ -1,0 +1,134 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92a8c838a1a1]",
+    "name": "seanflyyy"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@lightsage/mcp-tracker",
+  "_rev": "1-750b4efe3d0c6bbd5a3e5a39dabba180",
+  "description": "Track MCP tool calls from AI agents. Works with @modelcontextprotocol/sdk, FastMCP, and custom servers.",
+  "dist-tags": {
+   "latest": "0.1.0"
+  },
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "ai",
+   "analytics",
+   "agent",
+   "tool-tracking",
+   "lightsage"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92a8c838a1a1]",
+    "name": "seanflyyy"
+   }
+  ],
+  "name": "@lightsage/mcp-tracker",
+  "readme": "# @lightsage/mcp-tracker\n\nTrack MCP tool calls from AI agents. Works with `@modelcontextprotocol/sdk`, FastMCP, and custom servers.\n\n## Installation\n\n```bash\nnpm install @lightsage/mcp-tracker\n```\n\n## Quick Start\n\n### AI Wizard\n\nThe fastest way to get set up:\n\n```bash\nnpx @lightsage/wizard mcp-analytics\n```\n\n### MCP SDK (Low-level Server)\n\n```typescript\nimport { Server } from \"@modelcontextprotocol/sdk/server/index.js\";\nimport { Lightsage } from \"@lightsage/mcp-tracker\";\n\nconst server = new Server({ name: \"my-mcp-server\", version: \"1.0.0\" });\n\nconst lightsage = new Lightsage(\"sap_your_api_key\");\nconst analytics = lightsage.instrument(server);\n\n// Register your tools as usual...\n```\n\n### McpServer (High-level Wrapper)\n\n```typescript\nimport { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\nimport { Lightsage } from \"@lightsage/mcp-tracker\";\n\nconst server = new McpServer({ name: \"my-mcp-server\", version: \"1.0.0\" });\n\nconst lightsage = new Lightsage(\"sap_your_api_key\");\nlightsage.instrument(server);\n\n// Tools registered after instrument() are also tracked\nserver.tool(\"search_docs\", { query: z.string() }, async ({ query }) => {\n  return { content: [{ type: \"text\", text: \"Results...\" }] };\n});\n```\n\n### Next.js (mcp-handler)\n\n```typescript\nimport { createMcpHandler } from \"mcp-handler\";\nimport { Lightsage } from \"@lightsage/mcp-tracker\";\n\nconst lightsage = new Lightsage(process.env.LIGHTSAGE_API_KEY);\n\nconst handler = createMcpHandler(\n  (server) => {\n    lightsage.instrument(server);\n    server.tool(\"search_docs\", { query: z.string() }, async ({ query }) => {\n      return { content: [{ type: \"text\", text: \"Results...\" }] };\n    });\n  },\n  {},\n  { basePath: \"/api/mcp\" }\n);\n\nexport { handler as GET, handler as POST };\n```\n\n### NestJS (@rekog/mcp-nest)\n\n```typescript\nimport { Module } from \"@nestjs/common\";\nimport { McpModule } from \"@rekog/mcp-nest\";\nimport { Lightsage, instrumentMutator } from \"@lightsage/mcp-tracker\";\n\nconst lightsage = new Lightsage(process.env.LIGHTSAGE_API_KEY);\n\n@Module({\n  imports: [\n    McpModule.forRoot({\n      name: \"my-mcp-server\",\n      version: \"1.0.0\",\n      serverMutator: instrumentMutator(lightsage),\n    }),\n  ],\n})\nexport class AppModule {}\n```\n\n### Custom Server (No MCP SDK)\n\n```typescript\nimport { LightsageMCP } from \"@lightsage/mcp-tracker\";\n\nconst lightsage = new LightsageMCP(\"sap_your_api_key\");\n\n// Manually capture tool calls\nlightsage.captureToolCall({\n  toolName: \"search_docs\",\n  parameters: { query: \"authentication\" },\n  response: { content: [{ type: \"text\", text: \"...\" }] },\n  durationMs: 142,\n  isError: false,\n  distinctId: \"user_123\",\n  sessionId: \"session_abc\",\n});\n\n// Capture the initialize handshake\nlightsage.captureInitialize({\n  clientName: \"claude-code\",\n  clientVersion: \"1.2.3\",\n  distinctId: \"user_123\",\n});\n```\n\n## Configuration\n\n```typescript\nconst lightsage = new Lightsage({\n  apiKey: \"sap_...\",\n  endpoint: \"https://ls.lightsage.com/api/v1/mcp-analytics/track\", // optional\n  enableExceptionAutocapture: true, // default: true\n  enableContext: true, // inject context argument for intent capture\n  enableConversationId: false, // inject conversation_id argument\n  reportMissing: false, // register get_more_tools virtual tool\n});\n```\n\n### Environment Variables\n\n```bash\nLIGHTSAGE_API_KEY=sap_...\n# or\nLIGHTSAGE_MCP_KEY=sap_...\n```\n\n## What Gets Tracked\n\n| Event | Description |\n|-------|-------------|\n| `$mcp_tool_call` | Tool name, arguments, result, latency, errors |\n| `$mcp_initialize` | Client name, version, session start |\n| `$mcp_tools_list` | Discovery events, available tools |\n| `$exception` | Auto-captured errors with stack traces |\n| `$mcp_missing_capability` | Tools agents asked for that don't exist |\n\n### Tool Call Event\n\n```typescript\ninterface ToolCallEvent {\n  toolName: string;\n  toolDescription?: string;\n  parameters?: Record<string, unknown>;\n  response?: unknown;\n  durationMs: number;\n  isError: boolean;\n  errorMessage?: string;\n  errorType?: string;\n  distinctId?: string;\n  sessionId?: string;\n  clientName?: string;\n  clientVersion?: string;\n  intent?: string;\n  conversationId?: string;\n}\n```\n\n## Graceful Shutdown\n\n```typescript\nprocess.on(\"SIGTERM\", async () => {\n  await lightsage.flush();\n  lightsage.shutdown();\n  process.exit(0);\n});\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-08-18T19:02:07.502Z",
+   "created": "2026-08-18T19:02:07.187Z",
+   "modified": "2026-08-18T19:02:07.725Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@lightsage/mcp-tracker@0.1.0",
+    "_nodeVersion": "24.3.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-tracker_0.1.0_1787079727365_0.007871330553891775"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92a8c838a1a1]",
+     "name": "seanflyyy"
+    },
+    "_npmVersion": "11.6.0",
+    "description": "Track MCP tool calls from AI agents. Works with @modelcontextprotocol/sdk, FastMCP, and custom servers.",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsup": "^8.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-Um14m5kdIBgj81c92bR63UmMCqIMGY03l45Cyonl+gvPak3DWosj6y3RZ/tfmROyIqF8rMbSE50AuHXe7lWUQg==",
+     "shasum": "5299048c8024e3f32f89fb5579be1b474124f189",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCfzo5uIxVgZAc9d+NmBYBmx6Tpjx0PErRgVje9PYlsOwIhALO1GI8P7Opg9Fmt2uh/H4xYL+owM+tWrU4e1KYzg8MA"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@lightsage/mcp-tracker/-/mcp-tracker-0.1.0.tgz",
+     "unpackedSize": 34717
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "analytics",
+     "agent",
+     "tool-tracking",
+     "lightsage"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92a8c838a1a1]",
+      "name": "seanflyyy"
+     }
+    ],
+    "module": "dist/index.mjs",
+    "name": "@lightsage/mcp-tracker",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=0.5.0"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+     "prepack": "npm run build",
+     "test": "npm run build && node --test tests/*.test.mjs"
+    },
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   }
+  }
+ },
+ "name": "@lightsage/mcp-tracker",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@lightsage%2Fmcp-tracker"
+}

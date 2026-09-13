@@ -1,0 +1,195 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d2a4e7101127]",
+    "name": "nemery_twilio"
+   },
+   {
+    "email": "[redacted-email:0fa82b973e41]",
+    "name": "btjfsu"
+   },
+   {
+    "email": "[redacted-email:3c4633260dec]",
+    "name": "mkimbell"
+   },
+   {
+    "email": "[redacted-email:26c876a50c76]",
+    "name": "l0aded"
+   },
+   {
+    "email": "[redacted-email:05c83da6f55c]",
+    "name": "jpyles"
+   },
+   {
+    "email": "[redacted-email:56719b85bd80]",
+    "name": "deshartman"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@gtmi/twilio-gtmi-mcp",
+  "_rev": "1-0b207e7cca044001db87cab6a70a8d01",
+  "bugs": {
+   "url": "https://github.com/twilio-demos/twilio-gtmi-mcp/issues"
+  },
+  "description": "Standalone MCP server exposing Twilio messaging, voice, verify, lookups, and SendGrid email APIs as tools.",
+  "dist-tags": {
+   "latest": "0.1.1"
+  },
+  "homepage": "https://github.com/twilio-demos/twilio-gtmi-mcp#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d2a4e7101127]",
+    "name": "nemery_twilio"
+   },
+   {
+    "email": "[redacted-email:0fa82b973e41]",
+    "name": "btjfsu"
+   },
+   {
+    "email": "[redacted-email:3c4633260dec]",
+    "name": "mkimbell"
+   },
+   {
+    "email": "[redacted-email:26c876a50c76]",
+    "name": "l0aded"
+   },
+   {
+    "email": "[redacted-email:05c83da6f55c]",
+    "name": "jpyles"
+   },
+   {
+    "email": "[redacted-email:56719b85bd80]",
+    "name": "deshartman"
+   }
+  ],
+  "name": "@gtmi/twilio-gtmi-mcp",
+  "readme": "# @gtmi/twilio-gtmi-mcp\n\nStandalone MCP server exposing Twilio messaging, voice, verify, lookups, and\nSendGrid email APIs as tools. Stdio transport \u2014 works in Claude Desktop,\nCursor, Goose, or anything else that speaks MCP.\n\nBuilt on the **MCP v2 SDK** (`@modelcontextprotocol/server`): it serves the\ncurrent spec **`2026-07-28`** and stays backward-compatible with `2025-11-25`\nhandshake hosts. See [MCP protocol](#mcp-protocol).\n\n## MCP protocol\n\nServed on the **MCP v2 SDK** (`@modelcontextprotocol/server` 2.0.0) via\n`serveStdio`, which selects the protocol era **per connection** from the\nclient's opening message \u2014 no config decides it:\n\n- **`2026-07-28`** (current spec) for modern stateless clients \u2014 `server/discover`\n  plus per-request `_meta` version negotiation.\n- **`2025-11-25`** for 2025-era `initialize`-handshake hosts \u2014 Claude Desktop,\n  Cursor, and MCP Inspector today. The same binary answers both, so current\n  hosts connect and negotiate `2025-11-25` automatically, and pick up\n  `2026-07-28` once they ship a v2 client.\n\nThe stdio launch command is unchanged, so existing host config keeps working.\n\n## Architecture\n\nOne stdio subprocess exposes **tools**, **prompts**, and **resources** to the\nMCP client. Two independent credentials do two jobs: the **Auth Token** signs\nTwilio API calls, and the **API Key** authenticates the status-callback relay\nconnection. Status callbacks arrive over an **outbound** WebSocket to a relay \u2014\nno ngrok, no inbound port. The numbered edges trace one callback round-trip.\n\n```mermaid\nflowchart TB\n  Client[\"MCP client<br/>Claude Desktop \u00b7 Cursor \u00b7 Code\"]\n\n  subgraph MCP[\"@gtmi/twilio-gtmi-mcp \u00b7 one stdio subprocess\"]\n    Tools[\"Tools<br/>messages_create \u00b7 calls_create \u00b7 agent_pay_*<br/>verify_* \u00b7 lookups_* \u00b7 email_*\"]\n    Prompts[\"Prompts<br/>*_overview \u00b7 agent_pay_* guidance\"]\n    Resources[\"Resources<br/>catalogs \u00b7 twilio://status-callbacks/recent \u00b7 /{sid}\"]\n    SC[\"status-callback.ts<br/>getDefaultStatusCallback() \u00b7 onStatusCallback()<br/>waitForStatus() \u00b7 ring buffer (last 100)\"]\n  end\n\n  Relay[\"Callback relay<br/>callback-relay.fly.dev<br/>or MCP_CALLBACK_RELAY_HOST\"]\n  Twilio[\"Twilio<br/>messaging \u00b7 voice \u00b7 payments\"]\n\n  Client -->|\"stdio JSON-RPC: tools/call \u00b7 prompts/get \u00b7 resources/read\"| MCP\n  SC -->|\"1 \u00b7 WSS connect \u00b7 auth SID + API_KEY + API_SECRET\"| Relay\n  Relay -->|\"1 \u00b7 hello { publicUrl }\"| SC\n  Tools -->|\"2 \u00b7 API call \u00b7 auth SID + AUTH_TOKEN \u00b7 statusCallback = publicUrl\"| Twilio\n  Twilio -->|\"3 \u00b7 POST status update to publicUrl\"| Relay\n  Relay -->|\"4 \u00b7 push callback frame over the open WSS\"| SC\n  SC -->|\"5 \u00b7 onCallback fans out to listeners: ring buffer + waitForStatus\"| Resources\n  Resources -->|\"6 \u00b7 resources/read\"| Client\n  Prompts -.->|\"guide the LLM to read status between agent_pay_* steps\"| Client\n```\n\n## Tools\n\nTool names have no `twilio_` / `sendgrid_` prefix; the MCP server is named\n`twilio` so the host's qualifier already disambiguates (`twilio.messages_create`).\n\n### Messaging\n\n| Tool | Description | Cost |\n|---|---|---|\n| `messages_create({channel, to, from?, messagingServiceSid?, body?, contentSid?, ...})` | Send via SMS / WhatsApp / RCS | **incurs charges** |\n| `messages_fetch({sid})` | Look up a message by SID | free |\n| `messaging_services_fetch({sid})` | Inspect a Messaging Service's sender pool + flags | free |\n| `content_templates_fetch({sid})` | Inspect a Content template (HXxxxx) | free |\n\n### Voice\n\n| Tool | Description | Cost |\n|---|---|---|\n| `calls_create({to, from, twiml?, url?})` | Place an outbound voice call | **incurs charges** |\n| `calls_fetch({sid})` | Look up a call by SID | free |\n| `voice_say({...})` | Compose a `<Say>` TwiML fragment | free |\n| `voice_play({...})` | Compose a `<Play>` TwiML fragment | free |\n| `voice_dial({...})` | Compose a `<Dial>` TwiML fragment | free |\n| `voice_pay({...})` | Compose a `<Pay>` TwiML fragment for one-shot IVR card capture | **incurs charges on use** |\n| `voice_transcription_start({...})` | Begin real-time transcription on a live call | **incurs charges** |\n| `voice_transcription_stop({...})` | End real-time transcription | free |\n| `agent_pay_start({callSid, ...})` | Start a live-call `<Payments>` capture (LLM-driven) | **incurs charges** |\n| `agent_pay_capture_card({callSid, paymentSid})` | Advance the capture to PAN entry | free |\n| `agent_pay_capture_exp({callSid, paymentSid})` | Advance to expiration entry | free |\n| `agent_pay_capture_cvc({callSid, paymentSid})` | Advance to CVC entry | free |\n| `agent_pay_complete({callSid, paymentSid})` | Finalize (tokenize or charge) | **incurs charges on charge** |\n\nThe two payment paths \u2014 `voice_pay` (TwiML one-shot) and `agent_pay_*`\n(live-call LLM-driven) \u2014 coexist by design. See \"Agent-assisted payments\"\nbelow.\n\n### Verify\n\n| Tool | Description | Cost |\n|---|---|---|\n| `verify_send({to, channel, serviceSid})` | Send an OTP via Verify | **incurs charges** |\n| `verify_check({to, code, serviceSid})` | Validate the OTP | free |\n| `verify_services_fetch({sid})` | Inspect a Verify Service | free |\n\n### Lookups\n\n| Tool | Description | Cost |\n|---|---|---|\n| `lookups_fetch({phone_number})` | Twilio Lookup v2 \u2014 validate + format E.164 | free |\n\n### Email \u2014 SendGrid\n\n| Tool | Description | Cost |\n|---|---|---|\n| `email_send({to, from, subject?, text?, html?, templateId?, ...})` | Send an email | **incurs charges** |\n| `email_fetch({msgId})` | Fetch SendGrid delivery + event timeline (Pro+) | free |\n| `email_search({query?, ...})` | Search recent SendGrid messages (Pro+) | free |\n| `email_templates_fetch({templateId?, ...})` | Inspect SendGrid dynamic templates | free |\n\n## Prompts\n\nTwo flavours:\n\n- **`<service>_overview`** \u2014 zero-arg, returns an opinionated guide to \"when\n  to use which tool in this service\". An LLM that just connected can fetch\n  `prompts/get messaging_overview` and become productive without reading\n  every tool description.\n- **Per-flow prompts** \u2014 walk the LLM through a specific multi-step task\n  (templated WhatsApp sends, Messaging Service routing, OTP verification,\n  dynamic-template email, agent-assisted payment capture). These take args\n  for the concrete identifiers the flow will use (e.g. `to`, `from`,\n  `callSid`).\n\n| Prompt | When to fetch | Args |\n|---|---|---|\n| `messaging_overview` | LLM is about to send / look up a message | \u2014 |\n| `send_whatsapp_template` | Sending a templated WhatsApp message (HX template + variables) | `{to, contentSid?}` |\n| `send_via_messaging_service` | Sending through an MG SID (sender-pool routing, opt-out, A2P 10DLC) | `{to, messagingServiceSid?}` |\n| `send_rcs_with_fallback` | RCS message that should gracefully fall back to SMS | `{to}` |\n| `voice_overview` | LLM is composing TwiML or choosing between the two payment paths | \u2014 |\n| `place_call_with_inline_twiml` | Composing inline TwiML from `voice_*` fragments without a webhook | `{to, from}` |\n| `start_call_transcription` | Picking real-time STT over Media Streams / ConversationRelay | `{callSid?}` |\n| `verify_overview` | Before starting an OTP send / check flow | \u2014 |\n| `verify_otp_flow` | End-to-end OTP walkthrough (send \u2192 wait \u2192 check) | `{to, channel}` |\n| `lookups_overview` | Before validating a phone number | \u2014 |\n| `email_overview` | Before sending or searching SendGrid mail | \u2014 |\n| `send_email_with_dynamic_template` | Sending a `d-\u2026` dynamic-template email with Handlebars data | `{to, from, templateId?}` |\n| `agent_pay_start_capture` | Opening instructions for an agent-assisted payment capture | `{callSid}` |\n| `agent_pay_card_number` | After `agent_pay_capture_card` returns | `{callSid, paymentSid}` |\n| `agent_pay_expiration` | After `agent_pay_capture_exp` returns | `{callSid, paymentSid}` |\n| `agent_pay_security_code` | After `agent_pay_capture_cvc` returns | `{callSid, paymentSid}` |\n| `agent_pay_finish` | Before `agent_pay_complete` (read back masked state) | `{callSid, paymentSid}` |\n| `agent_pay_completion` | After `agent_pay_complete` succeeds | `{callSid, paymentSid, paymentToken?}` |\n| `agent_pay_error` | On any `errorType` from a payment status callback | `{callSid, paymentSid, errorType}` |\n\nOverview prompts register inside the same creds gates as their tools \u2014 if\nTwilio creds are absent, the messaging / voice / verify / lookups overviews\nand their per-flow siblings do not appear in `prompts/list`. `email_overview`\nand `send_email_with_dynamic_template` require SendGrid creds.\n\n## Resources\n\nRead-only MCP resources for catalog lookup (so the LLM doesn't have to\nguess SIDs) and for the in-flight status-callback stream.\n\n| URI | Returns |\n|---|---|\n| `twilio://content-templates` | Content templates (HX SIDs) on this account \u2014 variables, types, friendly names |\n| `twilio://messaging-services` | Messaging Services (MG SIDs) \u2014 sender-pool routing knobs, callback URLs |\n| `twilio://verify-services` | Verify Services (VA SIDs) \u2014 code length, channel settings |\n| `twilio://phone-numbers` | Phone numbers owned by the account \u2014 capability flags |\n| `twilio://status-callbacks/recent` | Last 100 webhook events received via the status-callback ingress, newest-first |\n| `twilio://status-callbacks/{sid}` | Same buffer filtered by `MessageSid` / `CallSid` / `PaymentSid` / etc. |\n| `sendgrid://templates` | SendGrid dynamic templates (`d-\u2026`) |\n| `sendgrid://verified-senders` | Verified sender addresses \u2014 what `email_send.from` is allowed to use |\n\nThe status-callback resources are populated by Twilio's webhook POSTs\nrouted through the callback relay \u2014 set `TWILIO_API_KEY` +\n`TWILIO_API_SECRET` to enable. Without them the resource registers but\nstays empty.\n\nTwilio resources require `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`;\nSendGrid resources require `SENDGRID_API_KEY`. Same all-or-nothing gating\nas tools / prompts.\n\n## Agent-assisted payments \u2014 walkthrough\n\n`agent_pay_*` uses Twilio's live-call `<Payments>` API (POST to\n`/2010-04-01/Accounts/{AccountSid}/Calls/{CallSid}/Payments.json`). Unlike\nthe TwiML `<Pay>` verb (which `voice_pay` emits and Twilio runs\nend-to-end as an IVR), `<Payments>` lets the LLM drive each capture step\nand react to status callbacks in between.\n\n**Flow (LLM driving a live call):**\n\n1. Fetch the `agent_pay_start_capture` prompt with the live call's\n   `CallSid`. Tell the caller what to expect.\n2. Call `agent_pay_start({callSid, chargeAmount?, paymentConnector?, ...})`.\n   The tool returns a `paymentSid`. Hold onto both `callSid` and\n   `paymentSid` \u2014 every subsequent step needs them.\n3. Call `agent_pay_capture_card({callSid, paymentSid})`. Fetch the\n   `agent_pay_card_number` prompt to guide your conversation while the\n   caller enters digits.\n4. Repeat for `agent_pay_capture_exp` (use `agent_pay_expiration` prompt)\n   and `agent_pay_capture_cvc` (use `agent_pay_security_code` prompt).\n5. Fetch `agent_pay_finish` to read back the masked state and confirm.\n6. Call `agent_pay_complete({callSid, paymentSid})`. The tool returns the\n   payment token / final status. Use the `agent_pay_completion` prompt to\n   close the flow politely.\n7. On any `errorType` arriving via the status-callback path, fetch\n   `agent_pay_error` for retry / escalation guidance.\n\n**Prerequisite.** The Twilio account needs a configured **Pay Connector**\n(Stripe, Braintree, etc.). Without one, `agent_pay_start` returns an error\nfrom the Twilio API. The same prerequisite applies to `voice_pay`.\n\n## Status callbacks (optional)\n\nTwilio's voice / messaging / payment APIs accept a `statusCallback` URL.\nThis package ships with an opt-in helper that publishes a public HTTPS URL\nvia [`@gtmi/mcp-status-callback`](https://github.com/twilio-demos/mcp-status-callback)\n(v2). The client opens an outbound WSS to a **callback relay**, which hands\nback a stable HTTPS URL and forwards Twilio's POSTs down that socket \u2014 no\nngrok, no inbound port. Every tool that takes `receiveStatusCallbacks: true`\nthen routes those POSTs back into the process, where they're forwarded to\nMCP listeners. Named mode (`subscriptionName: \"twilio-gtmi-mcp\"`) keeps the URL\nstable across restarts: `https://<relay>/callback/AC\u2026/named/twilio-gtmi-mcp`.\n\n**Prerequisites \u2014 these are not drop-in:**\n\n1. **A Twilio API Key.** The relay client authenticates with\n   `Basic(SK\u2026:secret)`, so provision an API Key and set `TWILIO_API_KEY`\n   (`SK\u2026`) + `TWILIO_API_SECRET` in addition to the existing\n   `TWILIO_ACCOUNT_SID`. The main Twilio client keeps using\n   `TWILIO_AUTH_TOKEN`; only the callback client needs the key.\n2. **A running relay.** Either point at the shared reference deploy\n   (default `callback-relay.fly.dev`) or self-host\n   `@twilio-demos/mcp-callback-relay` and set `MCP_CALLBACK_RELAY_HOST`\n   (host only, no scheme).\n\n> **Self-host the relay for payments.** `agent_pay_*` status callbacks\n> carry payment state (masked PAN, tokens, confirmation codes) that transits\n> the relay host in flight. Do **not** route those through a shared\n> third-party relay in production \u2014 self-host the relay and point\n> `MCP_CALLBACK_RELAY_HOST` at it.\n\nWithout `TWILIO_API_KEY` + `TWILIO_API_SECRET`, the callback URL is omitted\nfrom outbound requests \u2014 `agent_pay_*` still works for the Twilio-side\ncapture but no callback events arrive.\n\n## Creds gating\n\n| Group | Required env | Tools | Prompts | Resources |\n|---|---|---|---|---|\n| Twilio | `TWILIO_ACCOUNT_SID` + (`TWILIO_AUTH_TOKEN` **or** `TWILIO_CLIENT_ID` + `TWILIO_CLIENT_SECRET`) | 21 (messaging / voice / verify / lookups, including 5 agent-pay) | 17 (4 overviews + 6 per-flow + 7 agent-pay) | 6 (4 catalogs + 2 status-callback views) |\n| SendGrid | `SENDGRID_API_KEY` | 4 (email) | 2 (`email_overview`, `send_email_with_dynamic_template`) | 2 (`sendgrid://templates`, `sendgrid://verified-senders`) |\n\nWithin a group, missing keys are all-or-nothing \u2014 supplying\n`TWILIO_ACCOUNT_SID` alone (without a complete Auth Token or OAuth pair)\nregisters zero Twilio tools, prompts, and resources. See\n[Authentication modes](#authentication-modes) for the two ways to satisfy\nthe Twilio half.\n\n## Authentication modes\n\nThe main Twilio client supports two ways to authenticate \u2014 pick one:\n\n- **Auth Token (default).** `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` \u2014 HTTP\n  Basic on every request. This is the credential most Twilio accounts already\n  have.\n- **Account OAuth (opt-in, revocable).** `TWILIO_ACCOUNT_SID` +\n  `TWILIO_CLIENT_ID` + `TWILIO_CLIENT_SECRET` \u2014 a Client ID/Secret pair from a\n  Twilio **Account OAuth App**, exchanged for a short-lived access token via\n  client-credentials grant. The SDK fetches, caches, and refreshes the token\n  automatically. Prefer this when you want a credential that's independently\n  revocable without rotating the account's Auth Token.\n\n**If both are set, OAuth wins** \u2014 the server logs a one-line note to stderr\nand uses the OAuth credential.\n\nEither way authenticates Twilio API calls (`messages_create`, `calls_create`,\netc.). **Status callbacks are a separate credential in this release** \u2014 they\nstill require `TWILIO_API_KEY` + `TWILIO_API_SECRET` regardless of which mode\nthe main client uses (see [Status callbacks](#status-callbacks-optional)). A\nfuture release will let an OAuth credential drive callbacks too, removing the\nAPI Key requirement for OAuth users.\n\n## Setup\n\nThree ways to run this server. The tables below map field-for-field to\nthe **New 3rd Party MCP** (or equivalent) dialog in GUI-configured MCP\nhosts; a copy-paste MCP client JSON config is shown at the end. In every case,\nput your creds under **Extra env** \u2014 see [Env](#env) for the full list.\n\n### Option 1 \u2014 `npx` (recommended)\n\nAuto-installs on first run, always fetches the latest version.\n\n| Field | Value |\n|---|---|\n| Name | `twilio-mcp` |\n| Transport | `stdio (local subprocess)` |\n| Command | `npx` |\n| Arguments | `-y @gtmi/twilio-mcp` |\n| Working directory | *(empty)* |\n| Extra env | `TWILIO_ACCOUNT_SID=AC\u2026`, `TWILIO_AUTH_TOKEN=\u2026`, \u2026 |\n\nThe `-y` is **required, not optional**. Without it, `npx` prompts on\nstdin the first time it installs the package \u2014 but stdin *is* the MCP\ntransport, so the prompt corrupts the JSON-RPC stream and the host\nreports \"server failed to start\" with no clear reason. It looks\nunnecessary on a warm cache; it isn't.\n\n### Option 2 \u2014 Global install\n\nPins a specific version; updates are on you.\n\n```bash\nnpm install -g @gtmi/twilio-gtmi-mcp\n```\n\n| Field | Value |\n|---|---|\n| Name | `twilio-mcp` |\n| Transport | `stdio (local subprocess)` |\n| Command | `twilio-mcp` |\n| Arguments | *(empty)* |\n| Working directory | *(empty)* |\n| Extra env | `TWILIO_ACCOUNT_SID=AC\u2026`, `TWILIO_AUTH_TOKEN=\u2026`, \u2026 |\n\n### Option 3 \u2014 Local (from a checkout)\n\nTo run from a local checkout instead of the published package \u2014 for\ndevelopment or contributing. Two sub-options \u2014 pick whichever your host\ntolerates better.\n\n**3a. `npm link` \u2014 short command, needs one-time setup.**\n\n```bash\ncd /path/to/twilio-mcp\nnpm install      # also builds via the `prepare` script\nnpm link         # symlinks `twilio-mcp` onto your global PATH\n```\n\n| Field | Value |\n|---|---|\n| Command | `twilio-mcp` |\n| Arguments | *(empty)* |\n\n**3b. `node` + absolute path \u2014 no linking, robust across renames.**\n\n| Field | Value |\n|---|---|\n| Command | `node` |\n| Arguments | `/absolute/path/to/twilio-gtmi-mcp/dist/index.js` |\n\nCommon to both: `npm link` and pointing at `dist/index.js` both use the\ncompiled output \u2014 after editing `src/`, run `npm run build` and restart\nthe host so it respawns the server with the fresh `dist/`. Run `npm test`\nto check your change against the unit suite before rebuilding \u2014 see\n[Tests](#tests).\n\n**Troubleshooting stale symlinks.** After a package rename, the\n`twilio-mcp` binary can silently keep pointing at the old install\nlocation. The server still starts \u2014 it just runs old code from\n`node_modules/<old-scope>/twilio-mcp`. To diagnose:\n\n```bash\nls -la $(which twilio-mcp)   # shows the target the symlink resolves to\n```\n\nTo fix:\n\n```bash\nnpm unlink -g @old-scope/twilio-gtmi-mcp   # remove the stale symlink\ncd /path/to/twilio-gtmi-mcp\nnpm link                               # re-link under the current name\n```\n\nTo remove the symlink entirely later: `npm unlink -g @gtmi/twilio-gtmi-mcp`.\n\n### MCP client config (JSON)\n\nFor any host configured by a JSON file \u2014 Claude Desktop, Claude Code, Cursor,\nWindsurf, VS Code, Goose, etc. \u2014 add an entry under `mcpServers`. This uses the\npublished NPM via `npx` (Option 1): no install step, `npx` fetches\n`@gtmi/twilio-gtmi-mcp` on first run and its optional relay client automatically.\n\n**Minimal** \u2014 messaging / voice / verify / lookups (the only two required keys):\n\n```json\n{\n  \"mcpServers\": {\n    \"twilio\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@gtmi/twilio-gtmi-mcp\"],\n      \"env\": {\n        \"TWILIO_ACCOUNT_SID\": \"ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n        \"TWILIO_AUTH_TOKEN\": \"your_auth_token\"\n      }\n    }\n  }\n}\n```\n\n**Minimal, OAuth variant** \u2014 same tools, authenticated with an Account OAuth\nApp's Client ID/Secret instead of the Auth Token (see\n[Authentication modes](#authentication-modes)):\n\n```json\n{\n  \"mcpServers\": {\n    \"twilio\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@gtmi/twilio-gtmi-mcp\"],\n      \"env\": {\n        \"TWILIO_ACCOUNT_SID\": \"ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n        \"TWILIO_CLIENT_ID\": \"your_oauth_client_id\",\n        \"TWILIO_CLIENT_SECRET\": \"your_oauth_client_secret\"\n      }\n    }\n  }\n}\n```\n\nIf both `TWILIO_AUTH_TOKEN` and the OAuth pair are set, OAuth wins.\n\n**Full** \u2014 every optional feature switched on; keep only the lines you need.\nThe `TWILIO_API_KEY` + `TWILIO_API_SECRET` pair enables status callbacks\n(delivery status for messaging, lifecycle for voice, capture events for\n`agent_pay_*`); `SENDGRID_API_KEY` enables email; `MCP_CALLBACK_RELAY_HOST`\npoints callbacks at a relay you run instead of the default shared one. Delete\nany line you don't use, and either set the relay host to your own or drop it \u2014\nthe placeholder is not a real relay:\n\n```json\n{\n  \"mcpServers\": {\n    \"twilio\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@gtmi/twilio-gtmi-mcp\"],\n      \"env\": {\n        \"TWILIO_ACCOUNT_SID\": \"ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n        \"TWILIO_AUTH_TOKEN\": \"your_auth_token\",\n        \"TWILIO_API_KEY\": \"SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n        \"TWILIO_API_SECRET\": \"your_api_key_secret\",\n        \"SENDGRID_API_KEY\": \"SG.xxxxxxxxxxxxxxxxxxxxxx\",\n        \"MCP_CALLBACK_RELAY_HOST\": \"relay.yourdomain.com\"\n      }\n    }\n  }\n}\n```\n\nNotes:\n\n- **Two credentials, two jobs.** The main client's credential (`TWILIO_AUTH_TOKEN`,\n  or the `TWILIO_CLIENT_ID` + `TWILIO_CLIENT_SECRET` OAuth pair \u2014 see\n  [Authentication modes](#authentication-modes)) authenticates every Twilio\n  **API call** (send a message, place a call, run a payment); `TWILIO_API_KEY` +\n  `TWILIO_API_SECRET` authenticate the **status-callback relay** connection\n  (`Basic(SK:secret)`). These are deliberately separate: one of the main-client\n  credentials is required for *any* Twilio tool, the API Key pair is\n  needed *only* for callbacks \u2014 in this release, callbacks need the API Key\n  pair even if the main client is using OAuth.\n- **Required vs optional.** Only `TWILIO_ACCOUNT_SID` plus one of the two\n  main-client credentials are required. The `TWILIO_API_KEY` pair (callbacks)\n  and `SENDGRID_API_KEY` (email) are independent opt-ins \u2014 enable either, both,\n  or neither. See [Env](#env).\n- **Callbacks aren't just payments.** The relay carries delivery status for\n  messaging (`queued \u2192 sent \u2192 delivered`), lifecycle for voice\n  (`ringing \u2192 answered \u2192 completed`), and capture events for `agent_pay_*` \u2014\n  readable via `twilio://status-callbacks/*`. Any tool taking\n  `receiveStatusCallbacks: true` uses this path.\n- **Relay host (`MCP_CALLBACK_RELAY_HOST`).** Optional; omit it to use the\n  default shared relay `callback-relay.fly.dev`. Set it (host only, no scheme)\n  when you run your own relay \u2014 recommended specifically for `agent_pay_*`\n  **payment** callbacks, which carry masked PAN / tokens / confirmation codes\n  that shouldn't transit a shared relay. See [Status callbacks](#status-callbacks-optional).\n- **The `\"twilio\"` key is just a label** \u2014 the host qualifies tool names with it\n  (`twilio.messages_create`). Call it whatever you want.\n- **Pin a version** by using `@gtmi/twilio-mcp@0.1.0` in `args`; the bare name\n  always fetches the latest.\n- **Global-install alternative** (Option 2): set `\"command\": \"twilio-mcp\"` and\n  `\"args\": []` instead of the `npx` pair.\n\n## Env\n\n| Key | Required for | Notes |\n|---|---|---|\n| `TWILIO_ACCOUNT_SID` | Twilio tools | AccountSid (`AC\u2026`) |\n| `TWILIO_AUTH_TOKEN` | Twilio tools (default auth) | Auth Token from the Twilio Console |\n| `TWILIO_CLIENT_ID` | Twilio tools (OAuth alternative) | Client ID from a Twilio Account OAuth App |\n| `TWILIO_CLIENT_SECRET` | Twilio tools (OAuth alternative) | Client Secret paired with `TWILIO_CLIENT_ID` |\n| `SENDGRID_API_KEY` | SendGrid email tools | API key (prefix `SG.`) |\n| `TWILIO_API_KEY` | Status callbacks (optional) | API Key SID (`SK\u2026`); the relay client authenticates with `Basic(SK\u2026:secret)` |\n| `TWILIO_API_SECRET` | Status callbacks (optional) | API Key secret paired with `TWILIO_API_KEY` |\n| `MCP_CALLBACK_RELAY_HOST` | Status callbacks (optional) | Relay host override, no scheme. Defaults to `callback-relay.fly.dev`; self-host for payment callbacks |\n\n## Tests\n\n`npm test` runs the vitest unit suite (`test/`, mirroring `src/`'s structure \u2014 one file per\ntool/prompt/resource/client). These exercise handler logic directly via a fake MCP server\n(`test/helpers/fakeServer.ts`) with dependency-injected fake clients \u2014 no live Twilio/SendGrid\ncredentials or network calls involved, so they run anywhere.\n\n```bash\nnpm test              # run once\nnpm run test:watch    # watch mode\nnpm run test:coverage # with v8 coverage (no thresholds enforced)\n```\n\nUnit tests cover module logic; they don't cover the server's wiring (which tools register under\nwhich creds) or a real round-trip against Twilio/SendGrid \u2014 that's what MCP Inspector below is\nfor.\n\n## Testing with MCP Inspector\n\n[MCP Inspector](https://github.com/modelcontextprotocol/inspector) is the\nquickest way to exercise this server end-to-end against real credentials, without wiring it into\na chat host. It launches a local web UI that speaks MCP, lists every tool /\nprompt / resource the server advertises, and lets you invoke them with\nad-hoc args.\n\n```bash\nnpm run build\nnpx @modelcontextprotocol/inspector node dist/index.js\n```\n\nInspector reads env from your shell, so export creds first (or use a\n`.envrc` / direnv setup):\n\n```bash\nexport TWILIO_ACCOUNT_SID=ACxxx\nexport TWILIO_AUTH_TOKEN=xxx\nexport SENDGRID_API_KEY=SG.xxx\nexport TWILIO_API_KEY=SKxxx   # optional \u2014 enables the status-callback relay\nexport TWILIO_API_SECRET=xxx  # optional \u2014 paired with TWILIO_API_KEY\n# export MCP_CALLBACK_RELAY_HOST=my-relay.example.com  # optional; self-host for payment callbacks\nnpx @modelcontextprotocol/inspector node dist/index.js\n```\n\nIn the UI:\n\n- **Tools** tab \u2014 pick any tool, fill in the schema-driven form, hit Call.\n- **Prompts** tab \u2014 pick a prompt and supply its args; the rendered\n  `messages[]` are what the host would feed to the LLM. Required-arg\n  prompts (e.g. `send_via_messaging_service`) error with `-32602` until\n  you fill them in \u2014 that's a server-side Zod validation rejection.\n- **Resources** tab \u2014 read any URI listed. Templated URIs\n  (`twilio://status-callbacks/{sid}`) require you to substitute the\n  variable yourself in the URL field.\n\nInspector logs all JSON-RPC traffic, so it's also a useful debug surface\nwhen a host is reporting \"tool not found\" or similar \u2014 invoke the same\nendpoint via Inspector and compare.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/twilio-demos/twilio-gtmi-mcp.git"
+  },
+  "time": {
+   "0.1.1": "2026-08-26T22:44:21.762Z",
+   "created": "2026-08-26T22:44:21.426Z",
+   "modified": "2026-08-26T22:44:21.978Z"
+  },
+  "versions": {
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@gtmi/twilio-gtmi-mcp@0.1.1",
+    "_nodeVersion": "22.21.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/twilio-gtmi-mcp_0.1.1_1787784261600_0.8487180202597278"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:56719b85bd80]",
+     "name": "deshartman"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "twilio-gtmi-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/twilio-demos/twilio-gtmi-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@sendgrid/client": "^8.1.4",
+     "twilio": "^6.0.2",
+     "zod": "^4.4.3"
+    },
+    "description": "Standalone MCP server exposing Twilio messaging, voice, verify, lookups, and SendGrid email APIs as tools.",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.10",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 103,
+     "integrity": "sha512-DbqHajgoWeWe7Yl/UeeGx9i4pdOPjtYQqelsJN3StG/MkHxozcRMpmeE2zQV2DeOpyTs4KgBMxEd1wQN3ghKcA==",
+     "shasum": "8bf17f085856b72a1889644f3f1eb37969a31861",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFLMTOqakCNbMjuE4vOXfMqSBqV3MZzv+324nW5AdBSbAiEAo0vmPREQgdkQDIa6Ilz8rvGP5ca3yil7u5oPKIdPSh4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@gtmi/twilio-gtmi-mcp/-/twilio-gtmi-mcp-0.1.1.tgz",
+     "unpackedSize": 179578
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "b9dc8dcfbd6411abcf72d7fcd0b0d8fc747df38c",
+    "homepage": "https://github.com/twilio-demos/twilio-gtmi-mcp#readme",
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d2a4e7101127]",
+      "name": "nemery_twilio"
+     },
+     {
+      "email": "[redacted-email:0fa82b973e41]",
+      "name": "btjfsu"
+     },
+     {
+      "email": "[redacted-email:3c4633260dec]",
+      "name": "mkimbell"
+     },
+     {
+      "email": "[redacted-email:26c876a50c76]",
+      "name": "l0aded"
+     },
+     {
+      "email": "[redacted-email:05c83da6f55c]",
+      "name": "jpyles"
+     },
+     {
+      "email": "[redacted-email:56719b85bd80]",
+      "name": "deshartman"
+     }
+    ],
+    "name": "@gtmi/twilio-gtmi-mcp",
+    "optionalDependencies": {
+     "@gtmi/mcp-status-callback": "^2.0.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/twilio-demos/twilio-gtmi-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   }
+  }
+ },
+ "name": "@gtmi/twilio-gtmi-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@gtmi%2Ftwilio-gtmi-mcp"
+}

@@ -1,0 +1,806 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.5.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-unifi-network",
+  "_rev": "6-c33730f5db64aa2e4fd0fb3e40db567c",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+  },
+  "description": "Model Context Protocol server for the UniFi Network API",
+  "dist-tags": {
+   "latest": "0.5.1"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "networking",
+   "ubiquiti",
+   "unifi",
+   "unifi-network"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-unifi-network",
+  "readme": "# @mgcrea/mcp-unifi-network\n\n[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-unifi-network?style=for-the-badge)](https://www.npmjs.com/package/@mgcrea/mcp-unifi-network)\n[![build status](https://img.shields.io/github/actions/workflow/status/mgcrea/mcp-unifi-network/ci.yml?style=for-the-badge)](https://github.com/mgcrea/mcp-unifi-network/actions)\n\nModel Context Protocol server for the UniFi Network API \u2014 sites, devices, clients, hotspot\nvouchers, networks, WiFi and firewall configuration, plus an optional tier for the parts the\nofficial API does not cover. **Read-only by default:** the mutating tools are not registered at\nall until you opt in, so an agent cannot call them.\n\n## Features\n\n- Wraps the **official Network Integration API** (`X-API-KEY`, no cookie, no CSRF) as the\n  primary transport, with server-side filtering pushed down to the console.\n- Accepts a site as its **UUID, its legacy 8-character name, or its display name** and translates\n  \u2014 so the obvious guess works on the first call instead of returning a 400.\n- **Registers tools against the console's actual Network version.** This API had 7 endpoints in\n  9.0 and 44 in 10.3, so an older console is offered only what it can serve.\n- Optional **legacy controller tier** for what the official API lacks: blocking, unblocking and\n  reconnecting clients, events, alarms, health, port forwarding and adoption.\n- Native `fetch`, no HTTP client. Two runtime dependencies plus `undici` \u2014 see Security.\n\n## Security\n\n**Supply chain.** Three runtime dependencies: the MCP SDK, Zod, and `undici`. The last is a\ndeviation from the rest of this fleet, taken deliberately: local UniFi consoles ship self-signed\ncertificates, Node's native `fetch` ignores a `node:https` agent, and the only _scoped_ way to\nrelax verification is an undici dispatcher. The alternative,\n`NODE_TLS_REJECT_UNAUTHORIZED=0`, is process-global and would silently disable verification for\nevery other request the process makes. `undici` is the same engine Node's own `fetch` already runs.\n\n**TLS.** Verification is on by default, and `UNIFI_INSECURE_TLS` is refused in cloud mode where it\nwould be a pure downgrade. When it is on, the banner says `tls=INSECURE` on every start.\nVerifying instead takes two things together, and either alone achieves nothing: the certificate is\nself-signed, so `NODE_EXTRA_CA_CERTS` must point at it; **and** it is issued to `unifi.local` with\nno IP SAN, so `UNIFI_HOST` must be a host name that resolves to the console rather than its IP.\nSee `.env.example` for both commands.\n\n**Your credentials.** The API key and, if the legacy tier is enabled, the console password come\nfrom the environment or from `~/.config/unifi/config.json`, which is warned about if it is\ngroup-readable. The legacy session cookie is a full console-admin credential and is held **in\nmemory only** \u2014 never written to disk. Nothing is sent anywhere but your console.\n\n**Configuration never kills the server.** A contradictory setting is resolved to the safe option\nand reported through the startup banner and `unifi_auth_status`, rather than throwing \u2014 a server\nthat exits at startup appears in the client as a bare `Connection closed` with stderr swallowed,\ntaking its own explanation with it.\n\n**Blast radius.** With the defaults, this server can only read. Turning on `UNIFI_ALLOW_WRITES`\nadds: restart a device, power-cycle a PoE port, authorize and unauthorize guest access, create\nand delete vouchers, and \u2014 with the legacy tier \u2014 block, unblock and reconnect clients. Every\nirreversible one requires an explicit `confirm: true` that the schema enforces before the handler\nruns. **Firewall and network configuration are read-only in every configuration**: a wrong policy\nlocks you out of the console you are managing it through, with no undo.\n\n## Configure\n\n| Variable                                                     | Default                       | Meaning                                                   |\n| ------------------------------------------------------------ | ----------------------------- | --------------------------------------------------------- |\n| `UNIFI_HOST`                                                 | \u2014                             | The console. A pasted browser URL is accepted and split.  |\n| `UNIFI_API_KEY`                                              | \u2014                             | Settings \u2192 Control Plane \u2192 Integrations \u2192 Create API Key. |\n| `UNIFI_MODE`                                                 | inferred                      | `unifios` \u00b7 `cloud` \u00b7 `classic`.                          |\n| `UNIFI_CONSOLE_ID`                                           | \u2014                             | Cloud mode: the console id from unifi.ui.com.             |\n| `UNIFI_SITE`                                                 | \u2014                             | Default site. UUID, legacy name or display name.          |\n| `UNIFI_ALLOW_WRITES`                                         | `false`                       | Register the mutating tools.                              |\n| `UNIFI_INSECURE_TLS`                                         | `false`                       | Disable certificate verification, this server only.       |\n| `UNIFI_ENABLE_LEGACY`                                        | `false`                       | Register the `unifi_legacy_*` tools.                      |\n| `UNIFI_USERNAME` / `UNIFI_PASSWORD`                          | \u2014                             | Legacy tier fallback only. A **local** admin, not SSO.    |\n| `UNIFI_APP_VERSION`                                          | probed                        | Pin the version instead of probing at startup.            |\n| `UNIFI_PAGE_LIMIT` / `UNIFI_MAX_PAGES` / `UNIFI_MAX_RETRIES` | 50 / 20 / 3                   | Tuning.                                                   |\n| `UNIFI_CONFIG`                                               | `~/.config/unifi/config.json` | JSON alternative to all of the above.                     |\n\n`.env.example` is the annotated version. Environment variables beat the config file **per field**,\nso a one-off `UNIFI_ALLOW_WRITES=0` overrides a file that says `true` without discarding the rest.\n\n## Quick start\n\n```bash\nnpx -y @mgcrea/mcp-unifi-network\n```\n\nor from source:\n\n```bash\npnpm install && pnpm build\nUNIFI_HOST=192.168.1.1 UNIFI_API_KEY=\u2026 node dist/cli.js\n```\n\nThe banner on stderr reports what it resolved:\n\n```\nunifi-mcp connected (mode=unifios, host=192.168.1.1, version=10.6.101, tier=full (probe),\n  sites=1, integration=on, legacy=off, tls=verified, writes=disabled)\n```\n\n### Wire into Claude Code\n\nCopy `.mcp.json.example` to `.mcp.json` (gitignored) and fill it in.\n\n### Inspect the tools\n\n```bash\nnpx @modelcontextprotocol/inspector node dist/cli.js\n```\n\n## Tools\n\n**W** = registered only with `UNIFI_ALLOW_WRITES=1`. \u26a0\ufe0f = requires `confirm: true`.\n**Needs** = the minimum UniFi Network version.\n\n| Tool                           | What it does                                             |               | Needs |\n| ------------------------------ | -------------------------------------------------------- | ------------- | ----- |\n| `unifi_auth_status`            | Configuration, console version, and what to set          |               | \u2014     |\n| `unifi_get_console_info`       | Version, tier, and which capabilities are gated off here |               | 9.0   |\n| `unifi_list_sites`             | Every site with all three of its identifiers             |               | 9.0   |\n| `unifi_list_clients`           | Currently connected clients                              |               | 9.0   |\n| `unifi_get_client`             | One client in full                                       |               | 9.3   |\n| `unifi_list_devices`           | Adopted devices, state, model, firmware                  |               | 9.0   |\n| `unifi_get_device`             | One device in full                                       |               | 9.0   |\n| `unifi_get_device_stats`       | CPU, memory, uptime, uplink throughput                   |               | 9.0   |\n| `unifi_list_vouchers`          | Hotspot guest vouchers                                   |               | 9.3   |\n| `unifi_list_networks`          | Networks / VLANs (read-only)                             |               | 10.0  |\n| `unifi_list_wlans`             | WiFi broadcasts / SSIDs (read-only)                      |               | 10.0  |\n| `unifi_list_firewall_zones`    | Firewall zones (read-only)                               |               | 10.0  |\n| `unifi_list_firewall_policies` | Zone policies, and their ordering per zone pair          |               | 10.0  |\n| `unifi_request`                | Escape hatch for any unwrapped endpoint                  | W for non-GET | 9.0   |\n| `unifi_restart_device`         | Reboot a device                                          | W \u26a0\ufe0f          | 9.0   |\n| `unifi_power_cycle_port`       | Reboot whatever is on a PoE port                         | W \u26a0\ufe0f          | 9.3   |\n| `unifi_authorize_guest`        | Let a client onto the guest network                      | W             | 9.3   |\n| `unifi_unauthorize_guest`      | Cut a guest's access immediately                         | W \u26a0\ufe0f          | 9.3   |\n| `unifi_create_vouchers`        | Generate guest vouchers                                  | W             | 9.3   |\n| `unifi_delete_vouchers`        | Delete one voucher, or every match of a filter           | W \u26a0\ufe0f          | 9.3   |\n\nWith `UNIFI_ENABLE_LEGACY=1`. On a UniFi OS console this needs no extra\ncredential \u2014 the console accepts `UNIFI_API_KEY` on the legacy paths too, so the\nflag alone is enough:\n\n| Tool                              | What it does                                                   |              |\n| --------------------------------- | -------------------------------------------------------------- | ------------ |\n| `unifi_diagnose_client`           | \"Why will this device not connect?\" \u2014 one call, with a verdict |              |\n| `unifi_health_check`              | \"Is my network OK?\" \u2014 ranked findings across every subsystem   |              |\n| `unifi_legacy_list_known_clients` | Every client ever seen, which are blocked, and what is new     |              |\n| `unifi_legacy_get_health`         | Raw per-subsystem health                                       |              |\n| `unifi_legacy_list_events`        | Controller event log                                           |              |\n| `unifi_legacy_list_alarms`        | Open alarms                                                    |              |\n| `unifi_legacy_request`            | Escape hatch: port forwarding, adoption, upgrades, DPI         | W \u26a0\ufe0f non-GET |\n| `unifi_legacy_unblock_client`     | Let a blocked client back on                                   | W            |\n| `unifi_legacy_block_client`       | Block a client by MAC                                          | W \u26a0\ufe0f         |\n| `unifi_legacy_reconnect_client`   | Kick a client so it reassociates                               | W \u26a0\ufe0f         |\n\n## Prompts\n\nClients surface these as slash commands. They carry the _order_ to call things\nin and the wrong conclusions to avoid on the way \u2014 the part no single tool\ndescription can hold, because it spans several tools.\n\n| Prompt             | Argument           | For                                  |\n| ------------------ | ------------------ | ------------------------------------ |\n| `/diagnose-client` | `device`           | \"Why won't my lawnmower connect?\"    |\n| `/new-devices`     | `days` (default 7) | \"Did anything new join the network?\" |\n| `/network-health`  | \u2014                  | \"Is everything OK?\"                  |\n\nAll three are registered unconditionally, so they work before anything is\nconfigured.\n\n## Resources\n\n`unifi://troubleshooting` \u2014 field notes on the API behaviours that return a\nsuccessful, plausible, **wrong** answer. Registered unconditionally, including\nwith no credentials, because several of them describe failures that occur before\nanything is configured. Read it before concluding that a device is absent, that\nnothing is blocked, or that a client has been offline for months.\n\n## A worked example: a device that will not connect\n\n```\nunifi_diagnose_client { \"device\": \"husqvarna\" }\n  \u2192 { found: false, verdict: \"absent\", explanation: \"NOT KNOWN TO THIS CONSOLE AT ALL \u2026\" }\n```\n\n`absent` is a diagnosis, not a dead end. A client record is written on\n_association_, which happens before the password is checked \u2014 so a device refused\nat the 802.11 authentication frame appears nowhere in the API: no record, no\nevent, nothing. The usual cause is an **orphaned block**: blocking a client\nwrites its MAC to `/etc/persistent/cfg/blocked_sta` on every AP, and deleting the\nclient from the controller afterwards leaves that file behind with no way to undo\nit in the UI. It survives reboots _and_ re-provisioning.\n\n`unifi_legacy_unblock_client` is safe on a MAC the controller has never heard of\nand clears exactly this. To confirm before or after, read the AP logs the gateway\nalready collects:\n\n```bash\nssh <gateway> 'grep -a \"<mac>\" /srv/unifi/logs/remote/*.log | tail -20'\n```\n\n`auth: disallowed by ACL` is a block. Silence means the device never reached the\nAP at all.\n\n## A worked example: find and reboot a stuck access point\n\n```\nunifi_list_devices { \"state\": \"OFFLINE\" }\n  \u2192 [{ id: \"\u2026\", name: \"Garage AP\", model: \"U6LR\", state: \"OFFLINE\", \u2026 }]\n\nunifi_get_device_stats { \"deviceId\": \"\u2026\" }\n  \u2192 { uptimeSec: 32, cpuUtilizationPct: 94, \u2026 }\n\nunifi_restart_device { \"deviceId\": \"\u2026\", \"confirm\": true }\n```\n\nThe first call filters **on the console** \u2014 `state.eq('OFFLINE')` goes down as a query parameter,\nso nothing is fetched and discarded here.\n\n## Traps worth knowing\n\nAll of these are baked into the tool descriptions, but they explain the shape of this server.\n\n1. **`unifi_list_clients` returns only what is connected _right now_.** It is not a device\n   inventory. A blocked client, or one that has not been on the network for a week, is simply\n   absent \u2014 so \"is anything blocked?\" and \"why will this thing not connect?\" cannot be answered\n   from it, and an empty result reads like an all-clear when it is nothing of the kind. The\n   Integration API has no historical view at all: there is no known-clients, blocked-clients or\n   event endpoint anywhere in it. `unifi_legacy_list_known_clients` is the answer, and it is the\n   main reason to turn the legacy tier on.\n\n   Worse, the obvious workaround does not work. A server-side filter for the blocked state\n   returns an empty set rather than an error **for a value that does not exist**:\n\n   ```\n   filter=access.type.eq('BLOCKED')          \u2192 0 results\n   filter=access.type.eq('NOT_A_REAL_VALUE') \u2192 0 results\n   ```\n\n   So a zero from that query is not evidence of absence, and it is very easy to report a false\n   all-clear from it. Whenever a filtered count is load-bearing, check it against a value you\n   know is fake before you trust the zero.\n\n2. **There are two kinds of API key.** A cloud key from `unifi.ui.com` is not a local console\n   key, and using one against a local console gives a 401 that looks like a typo. See Configure.\n   A local key is accepted on the **legacy** paths too, which is why the legacy tier needs no\n   console password on UniFi OS.\n3. **Cloud mode cannot reach a console the Site Manager API does not list.** `UNIFI_CONSOLE_ID`\n   has to come from `GET https://api.ui.com/v1/hosts`, and that listing is not the same as what\n   unifi.ui.com shows you. A console grouped into a **Fabric** \u2014 several consoles (Network,\n   Protect, NAS) presented under one name \u2014 appears in the web UI but **not** in `/v1/hosts`,\n   even with `cloudConnected: true` on the console itself. Observed on a UDM-Pro that the portal\n   showed and the API did not, on both `/v1/hosts` and `/ea/hosts`, with no pagination involved.\n   For such a console there is no host id, so cloud mode is unavailable and you need a local\n   Integration key with `UNIFI_MODE=unifios`.\n4. **`siteId` is a UUID, not `default`.** A site has three identifiers: the UUID this API's paths\n   take, the legacy 8-character `internalReference` that appears in every controller URL and forum\n   post, and a display name. Every tool accepts all three. The legacy tools need the\n   `internalReference`, and that translation happens for you too.\n5. **The endpoint set depends on the console's version.** 7 paths in 9.0, 12 in 9.3, 32 in 10.0,\n   44 in 10.3. The server probes `GET /v1/info` at startup and registers accordingly, so the tool\n   list can differ between two runs against different consoles. `unifi_get_console_info` says why.\n   If the console cannot be reached at startup the server still comes up, assumes the newest\n   version, and lets any gap surface as an error naming the version it needs \u2014 a visible failure\n   beats a silently missing tool.\n6. **Local consoles use self-signed certificates, and pinning one is not enough.** The\n   certificate is issued to `unifi.local` with no IP SAN, so a console addressed by IP fails\n   verification however the certificate is trusted \u2014 you need a host name too. See Security.\n7. **The classic self-hosted controller has no Integration API.** API keys are UniFi OS only, so\n   port 8443 means the legacy tier or nothing. The config refuses the contradictory combination\n   rather than failing later at request time.\n8. **The legacy API reports errors with HTTP 200.** `{\"meta\":{\"rc\":\"error\"}}` is a failure however\n   healthy the status line looks. That is unwrapped for you in one place.\n9. **Legacy payloads are enormous** \u2014 a `stat/device` object declares ~423 fields and one UDM-Pro\n   is 50\u2013150 KB. Legacy responses are projected down, and `unifi_legacy_request` refuses anything\n   over 5 MB rather than parsing it. Pass `attrs` and `_limit`.\n10. **Login is rate-limited.** The legacy session is established once per server start and reused;\n    a 429 on login is never retried, because retrying deepens the lockout.\n\n## Troubleshooting\n\n**The server does not appear / `Connection closed`.** Run `node dist/cli.js` by hand with the same\nenvironment and read stderr \u2014 this server is built never to exit on missing configuration, so a\nreal crash is visible there.\n\n**A tool I expected is missing.** Call `unifi_auth_status`, then `unifi_get_console_info`. It is\nalmost always the version gate or the write flag, both of which unregister rather than refuse.\n\n**401 on every call.** The key is per-console and shown only once. Re-create it under\none of **two different kinds of key**, which are not interchangeable and which produce a\nconfusing 401 when mixed up:\n\n- **Local Integration key** \u2014 created on the console itself at\n  `https://<console>/network/default/settings/control-plane/integrations`. This is what\n  `UNIFI_MODE=unifios` needs. Use the URL rather than hunting the sidebar: on Network 10.6\n  `Control Plane` lives under a heading named after your console at the _bottom_ of the settings\n  sidebar, below `System`, which is why it gets reported as missing.\n- **Cloud Site Manager key** \u2014 created at `https://unifi.ui.com/settings/api-keys`. A console's\n  local API **rejects this with a 401**. It is used with `UNIFI_MODE=cloud` and\n  `UNIFI_CONSOLE_ID`, which also works behind CGNAT and needs no TLS workaround at all.\n\nEither kind is shown once and can afterwards only be renamed or deleted, any admin can create one,\nand creation sometimes errors on the first attempt, so retry before assuming it is broken.\n\n**`fetch failed` / certificate errors.** Self-signed certificate; see Security.\n\n## Develop\n\n```bash\npnpm dev            # tsdown --watch\npnpm test           # vitest, offline, no credentials needed\npnpm typecheck\npnpm lint && pnpm format\n```\n\nRelease:\n\n```bash\npnpm dlx release-it        # bump, commit, tag\ngit push --follow-tags     # CI publishes to npm and cuts the GitHub release\n```\n\nThe offline suite covers the registration matrix, the confirm gates, site resolution and both\nerror envelopes. The real-console check is the `curl` probe in `.env.example` plus the inspector.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-30T08:39:07.202Z",
+   "0.2.0": "2026-08-30T08:50:12.607Z",
+   "0.3.0": "2026-08-30T13:27:23.942Z",
+   "0.4.0": "2026-08-30T13:45:20.184Z",
+   "0.5.0": "2026-08-30T19:32:12.493Z",
+   "0.5.1": "2026-09-01T14:12:39.052Z",
+   "created": "2026-08-30T08:39:06.794Z",
+   "modified": "2026-09-01T14:12:39.365Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.1.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.1.0_1788079146992_0.306052662109765"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 12,
+     "integrity": "sha512-uqbFF3VyKk+uoJFCjLUiOAHIU0yT2+t/ooPDiMWM87Hu/aTJ94WCUSbeNjo7Y5IFm//IS40pDWQXWnisor4RiA==",
+     "shasum": "9aa46cd14272016c8216f7156c40eb004da83154",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCB8CP39AaII8uY4yTZlyObeoMYhPIwQIysaMTVj4LP0gIgbHZ/5CsXIcEkL0sC3TskiK5LnbS/DRp3s3hRBnEa/gM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.1.0.tgz",
+     "unpackedSize": 356261
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4de1cc3125d00c976be75df745783b8b9cb54c44",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.2.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.2.0_1788079812448_0.6182401243367872"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:783bd7a9-fe68-4c88-ae5a-4456e34a6d82"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-network@0.2.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-VIsm9Y/CPKhjioXgBHn0CCbh8NsrFTCm9r+NP7Fc37H1x+B0pFI/VBopea4tRhnVfkXpOSnFTRWOzH93XZadOw==",
+     "shasum": "503a69e1128aa3744c4252059fbac8ca2202f14a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC4jHDx3ihFoOJBuMoOgmNr1pzPpPcDWx9i3C8kWj89LAiEAj21WBZ+ouHyHA9E39hNdmq0p0mPmS/QkU9hrcfUGO6U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.2.0.tgz",
+     "unpackedSize": 356261
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a60fae779f9058641f57caf62c17649cedc91cc6",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.3.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.3.0_1788096443773_0.7367887124038037"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:783bd7a9-fe68-4c88-ae5a-4456e34a6d82"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-network@0.3.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-USW/GGpUJRptCtvYDHS4Hr6fth72PhOq/vY0tbjkCwcNHnHfZbH7G/GWlbQPrlZ2/LpwZhC6VzNpLEnIqW1o3w==",
+     "shasum": "6cee0854c9146172f3c1f809efd16902c7cc9fd4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG09eh1jQnCBE2OrktJOChjRvPkprAyxQWBVbdz62W7jAiEAlvmxd77li6gABErgdTpBRcQWrZCE50kWvv7G53c3gfg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.3.0.tgz",
+     "unpackedSize": 429057
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "599c8aec88239e91759efaa6c513665a764c60e7",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.4.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.4.0_1788097520029_0.6011182585033408"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:783bd7a9-fe68-4c88-ae5a-4456e34a6d82"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-network@0.4.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-Vr5e9Fqi1PkKC0gmpABXK6QSIgRNQL+89wKaIgu9jG1vI5GjCk6ZY3Cj5KvKI+T1MMjZhgEDFmM1rpm/t+q6ag==",
+     "shasum": "3d12ef92da51f13d906c8a3523dedf0c40039fd8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDXNxL0eFQ2LdmSjLwBmL36aWHw1jXeg78M2mwvnBvxWAiEAiYO871Vacjgl/8JEd81pyBv6/+X2M8WBLOJ80yjrnpc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.4.0.tgz",
+     "unpackedSize": 440431
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e164cd41aa354e26fc0ecca981cdc5e2c7f06c24",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.5.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.5.0_1788118332346_0.5633426602935958"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:783bd7a9-fe68-4c88-ae5a-4456e34a6d82"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-network@0.5.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-tDkAF3iCejaHIZw3kJf6q09V12lPHhzZCihhZyw7SEn1RE4pZoFAsSRA7Johtr9GfyWJsCCknwuAM80vTgVI6Q==",
+     "shasum": "a8e6d6cfe2f669185784d677488e318b3ef06695",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEMCIFtmLLdGDv+YGW8aBRnmmYNZidVFziKDIUX26z6nHuKEAh8GnT7AoTFhRylOoW2wbGmOmgt6f2v7ih4XGHrcjTJ2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.5.0.tgz",
+     "unpackedSize": 444158
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c88fdfc428a53c6ad4e205c93124869385a72c69",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-network@0.5.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-network_0.5.1_1788271958842_0.3700649732974379"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:783bd7a9-fe68-4c88-ae5a-4456e34a6d82"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-network-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-network/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the UniFi Network API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-network@0.5.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-LT8HIUmtN9t08LP3Xqaf4uS0HkQfJJqe2eTjqBRl2iy75q0ZmY6KcQywi/nBC4iX40ZWIB/4tRKSr1qQ3UXNXQ==",
+     "shasum": "56991cdb0129a27e0cfe2076c6154bec0b402ef2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDHflyoH3vwY1D6VkdHGimJRg2g9+4723YQ6omRSSqI/wIhAIq+5x3urPqc/jwzmV7bplqF02Hf47SNvvuvn8hbKmLA"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-network/-/mcp-unifi-network-0.5.1.tgz",
+     "unpackedSize": 450338
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1d707da9568ee8e18ba096ce84ec2121a7a642e9",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-network#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "networking",
+     "ubiquiti",
+     "unifi",
+     "unifi-network"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-network",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-network.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-network:latest && docker push mgcrea/mcp-unifi-network:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.1"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-unifi-network",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-unifi-network"
+}

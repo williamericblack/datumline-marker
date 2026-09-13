@@ -1,0 +1,2636 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.36",
+  "maintainers": [
+   {
+    "email": "[redacted-email:1af6adea0513]",
+    "name": "thanhnguyen5"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.10",
+   "0.1.11",
+   "0.1.12",
+   "0.1.13",
+   "0.1.14",
+   "0.1.15",
+   "0.1.16",
+   "0.1.17",
+   "0.1.18",
+   "0.1.19",
+   "0.1.2",
+   "0.1.20",
+   "0.1.22",
+   "0.1.23",
+   "0.1.26",
+   "0.1.27",
+   "0.1.28",
+   "0.1.29",
+   "0.1.3",
+   "0.1.30",
+   "0.1.31",
+   "0.1.32",
+   "0.1.34",
+   "0.1.35",
+   "0.1.36",
+   "0.1.4",
+   "0.1.5",
+   "0.1.6",
+   "0.1.7",
+   "0.1.8",
+   "0.1.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@komplit/mcp-server",
+  "_rev": "33-4fa8680da6d1ce8002c317376f641619",
+  "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+  "dist-tags": {
+   "latest": "0.1.36"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:1af6adea0513]",
+    "name": "thanhnguyen5"
+   }
+  ],
+  "name": "@komplit/mcp-server",
+  "readme": "# @komplit/mcp-server\n\nMCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.\n\n[![npm version](https://img.shields.io/npm/v/@komplit/mcp-server)](https://www.npmjs.com/package/@komplit/mcp-server)\n\n## Quick Install\n\n```bash\nnpm install -g @komplit/mcp-server\n```\n\nThe package exposes a `komplit-mcp` binary using **stdio transport** \u2014 works with Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.\n\n---\n\n## Claude Desktop Setup\n\nAdd to `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"komplit\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@komplit/mcp-server@latest\"]\n    }\n  }\n}\n```\n\nOr if installed globally:\n\n```json\n{\n  \"mcpServers\": {\n    \"komplit\": {\n      \"command\": \"komplit-mcp\"\n    }\n  }\n}\n```\n\n### Environment Variables\n\n| Variable          | Required | Default                                           | Description          |\n| ----------------- | -------- | ------------------------------------------------- | -------------------- |\n| `KOMPLIT_API_URL` | No       | `https://komplit-dev-api-fgvrsq73mq-as.a.run.app` | Komplit API base URL |\n\n### Authentication\n\nThe MCP server uses **device-flow OAuth 2.0** \u2014 no API key needed in config. On first tool call:\n\n1. The server returns an activation URL\n2. Open the URL in a browser, log in with your Komplit account\n3. Call `auth_wait_for_login` to confirm\n4. Credentials are cached at `~/.komplit/credentials.json`\n5. Subsequent calls auto-refresh via refresh token\n\nTo clear credentials and re-authenticate: delete `~/.komplit/credentials.json`.\n\n---\n\n## Architecture\n\n```\nAI Agent \u2192 MCP Tool Call \u2192 komplit-mcp (stdio) \u2192 HTTP \u2192 Komplit API \u2192 DB / TigerBeetle / Vendors\n```\n\nThe MCP server contains **zero business logic** \u2014 every tool is a thin proxy that forwards requests over HTTP to the Komplit API. Authentication (device flow, refresh, 401-retry) is handled transparently.\n\n**Supported platforms (hard rule):** the platform supports **only Instagram and X** \u2014 `instagram` and `x` are the only valid channel/platform values everywhere (`brief_create` channel, `connections_ensure`, `assets_produce`, `posts_publish`, `posts_boost`, `concepts_generate`). No other platform (Facebook, TikTok, YouTube, LinkedIn, \u2026) is supported or should be suggested.\n\n**Wire contract:** all request/response fields are **camelCase** (enforced since 2026-08-21, commit `5e275e2`). Legacy snake_case field names (`checkout_url`, `handoff_link_id`, `brief_so_far`, `known_fields`, `channel_hint`, `brand_fit_score`, `trend_evidence`, `session_id`, `expected_version`, \u2026) are rejected with 400 \u2014 clients must send camelCase.\n\n**Transports:**\n- `server-stdio.ts` \u2192 StdioServerTransport (default, npm binary)\n- `server-http.ts` \u2192 StreamableHTTPServerTransport (for remote/hosted deployments)\n\n---\n\n## Tools (39)\n\n### Brief & Ideation\n| Tool | Description |\n|------|-------------|\n| `brief_create` | Create or continue a creative brief via interview or oneshot mode |\n| `concepts_generate` | Generate content concepts from a completed brief |\n\n### Asset Production\n| Tool | Description |\n|------|-------------|\n| `assets_produce` | Produce creative assets (image, carousel, video) |\n| `assets_status` | Poll asset production job status |\n| `audio_treatment_apply` | Apply audio treatment (music/narration/both) to video |\n| `audio_treatment_status` | Poll audio treatment job status |\n\n### Creative QA\n| Tool | Description |\n|------|-------------|\n| `creative_qa_score` | Score creative asset via Neurons/Kantar |\n| `creative_qa_status` | Poll QA scoring job status |\n\n### Branded Assets\n| Tool | Description |\n|------|-------------|\n| `brand_assets_compose` | Compose branded assets from template + production assets |\n| `brand_assets_status` | Poll branded asset composition job status |\n| `brand_assets_upload` | Create an upload handoff link (brand assets / product references) via `resource_link` |\n| `brand_assets_upload_status` | Poll an upload handoff until the user completes it (returns product refs / brand profile ids) |\n| `brand_templates_browse` | List master templates with previewUrl |\n| `brand_templates_submit` | Submit master template + brand profile for approval |\n| `brand_templates_status` | Poll template submission/approval job status |\n| `brand_profiles_list` | List active brand profiles for the tenant |\n| `brand_profiles_get` | Get a single brand profile with props |\n| `brand_toolkits_list` | List brand toolkits (logos, colors, fonts) |\n| `brand_toolkits_create` | Create a new brand toolkit |\n\n### Publishing & Connections\n| Tool | Description |\n|------|-------------|\n| `connections_ensure` | Initiate OAuth (Instagram / X) \u2014 returns consent URL if needed |\n| `connections_list` | List active platform connections |\n| `connections_set_autopublish` | Toggle autopublish (skip human approval) |\n| `connections_revoke` | Disconnect a platform \u2014 **DESTRUCTIVE** |\n| `posts_publish` | Publish post to a platform (returns approval URL via `resource_link`) |\n| `posts_boost` | Boost post with paid promotion \u2014 **SPEND** |\n| `posts_status` | Poll publish/boost job status |\n\n### Snapshots\n| Tool | Description |\n|------|-------------|\n| `snapshots_save` | Save agent state as versioned snapshot |\n| `snapshots_restore` | Restore agent state from snapshot |\n| `snapshots_list` | List all snapshots |\n| `snapshots_delete` | Delete snapshot(s) \u2014 **DESTRUCTIVE** |\n\n### Billing & Auth\n| Tool | Description |\n|------|-------------|\n| `billing_balance` | Get current credit balance |\n| `billing_checkout_link` | Create Stripe checkout session for credit purchase (returns URL via `resource_link`) |\n| `billing_wait_for_credit` | Poll until credit purchase completes |\n| `auth_wait_for_login` | Wait for device-flow auth (blocks up to 120s) |\n\n### Skills\n| Tool | Description |\n|------|-------------|\n| `skills_list` | List all skills for the tenant |\n| `skills_get` | Get fully-resolved brand+campaign skill bodies |\n| `skills_upsert` | Upsert tenant instance params for a skill |\n| `skills_check_escalations` | Check which escalation thresholds are triggered |\n\n### Discovery\n| Tool | Description |\n|------|-------------|\n| `tools_list` | List all 39 available tools with descriptions |\n\n---\n\n## URL Output\n\nAll tool responses that contain a URL \u2014 asset, preview, approval, checkout, OAuth/device-flow \u2014 are emitted as MCP `resource_link` content blocks (spec 2025-06-18). The URL is also present in a `text` block as a labeled plain-text link, so clients that reject `resource_link` still receive it. Clients must present the URL as a clickable link and never fetch, download, embed, or preview the resource's content. **Asset and preview URLs are permanent media links** (`{API_BASE_URL}/v1/media?t=<capability token>`, no expiry \u2014 safe to store, bookmark, or hand off); each click 302s to a fresh short-lived signed URL, so clients should follow redirects and never cache the final URL (2026-08-19).\n\n---\n\n## Troubleshooting\n\n| Symptom | Fix |\n|---------|-----|\n| `401 Unauthorized` | Credentials expired \u2014 delete `~/.komplit/credentials.json` and re-auth |\n| `auth_wait_for_login` timeout | API server not reachable \u2014 verify `KOMPLIT_API_URL` |\n| `402 Insufficient credits` | Account has run out of credits \u2014 surface the returned checkout URL (or call `billing_checkout_link`), have the user pay, poll `billing_wait_for_credit` with the returned `handoffLinkId`, then retry with a fresh idempotency key |\n| Tool returns error JSON | Check Komplit API status at `{KOMPLIT_API_URL}/health` |\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-07-31T20:01:20.399Z",
+   "0.1.1": "2026-07-31T20:57:29.831Z",
+   "0.1.10": "2026-08-12T11:29:22.867Z",
+   "0.1.11": "2026-08-17T04:06:23.727Z",
+   "0.1.12": "2026-08-17T08:31:52.155Z",
+   "0.1.13": "2026-08-18T03:15:59.131Z",
+   "0.1.14": "2026-08-18T19:30:03.751Z",
+   "0.1.15": "2026-08-19T04:36:31.127Z",
+   "0.1.16": "2026-08-19T07:50:44.861Z",
+   "0.1.17": "2026-08-19T19:48:40.323Z",
+   "0.1.18": "2026-08-22T04:44:23.137Z",
+   "0.1.19": "2026-08-25T03:17:24.526Z",
+   "0.1.2": "2026-07-31T21:24:50.425Z",
+   "0.1.20": "2026-08-25T08:39:50.382Z",
+   "0.1.22": "2026-08-25T09:57:47.267Z",
+   "0.1.23": "2026-08-26T11:03:42.260Z",
+   "0.1.26": "2026-08-27T08:39:52.437Z",
+   "0.1.27": "2026-08-28T08:04:04.475Z",
+   "0.1.28": "2026-08-28T08:32:50.968Z",
+   "0.1.29": "2026-09-03T04:45:54.688Z",
+   "0.1.3": "2026-08-03T02:22:54.677Z",
+   "0.1.30": "2026-09-03T08:53:46.351Z",
+   "0.1.31": "2026-09-04T07:36:06.918Z",
+   "0.1.32": "2026-09-07T08:43:26.463Z",
+   "0.1.34": "2026-09-07T15:27:32.067Z",
+   "0.1.35": "2026-09-07T19:44:07.982Z",
+   "0.1.36": "2026-09-08T03:55:48.895Z",
+   "0.1.4": "2026-08-04T04:14:23.402Z",
+   "0.1.5": "2026-08-04T10:53:33.535Z",
+   "0.1.6": "2026-08-05T08:33:38.084Z",
+   "0.1.7": "2026-08-06T07:29:24.219Z",
+   "0.1.8": "2026-08-07T04:19:06.669Z",
+   "0.1.9": "2026-08-10T10:08:32.831Z",
+   "created": "2026-07-31T20:01:20.088Z",
+   "modified": "2026-09-08T03:55:49.059Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_from": "file:komplit-mcp-server-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.0",
+    "_integrity": "sha512-SaERMu+Tex8KIpQW39vpzLYOVRua0PAtTGEnbBMDUVZknTHGMqHLEj5dKLl6B2uYGFwgaF8RkbMHMepD/gMApA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1785528080236_0.6018394800883982"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/084ece75eeba6dc6e2179e57c4eebb9a/komplit-mcp-server-0.1.0.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "Standalone MCP (Model Context Protocol) server wrapping all 7 Komplit Creative Platform services. Exposes 19 tools that agents (Claude, GPT, etc.) use as their sole interface into the platform \u2014 agents never call the REST API directly.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@swc-node/register": "^1.10.9",
+     "@swc/cli": "^0.6.0",
+     "@swc/core": "^1.11.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 29,
+     "integrity": "sha512-SaERMu+Tex8KIpQW39vpzLYOVRua0PAtTGEnbBMDUVZknTHGMqHLEj5dKLl6B2uYGFwgaF8RkbMHMepD/gMApA==",
+     "shasum": "4d42b434d59adbbf9d5a63138ba8e882ca37f0d2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBYDvxCAed5gTNAMq/uXp2ZgepJQaYi0E5aEW8pLQ3EYAiEAzbBNuVbSgm2uJ1Rage3NOpXVfbWBCBsGGK3eKlVvXE4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 81874
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "swc src -d dist --strip-leading-paths",
+     "dev": "node --import @swc-node/register/esm-register src/server-stdio.ts",
+     "dev:http": "node --import @swc-node/register/esm-register src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_from": "file:komplit-mcp-server-0.1.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.1",
+    "_integrity": "sha512-Zi7Ud5Y+Ly2dTb/zmUyNfPKtCkcTJhGbWBqVo3ezi0uGmgXBK5nMYUjRBPWC4fBTmKv5fO4pnOdOBkrHuWXErA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1785531449681_0.8090687845295101"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/5b9224ed27ae7abc72c2c2f6d10e973d/komplit-mcp-server-0.1.1.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@swc-node/register": "^1.10.9",
+     "@swc/cli": "^0.6.0",
+     "@swc/core": "^1.11.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 29,
+     "integrity": "sha512-Zi7Ud5Y+Ly2dTb/zmUyNfPKtCkcTJhGbWBqVo3ezi0uGmgXBK5nMYUjRBPWC4fBTmKv5fO4pnOdOBkrHuWXErA==",
+     "shasum": "762ef301d179eb9c4a183242dec40affb9bece37",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDBGhauXhUSVhUSbu4F+e0FVvJXxmk0xQ4sI+C4L5kD1QIgdI3C0nm3/guiJ+Z9j6AStznvJeHc10kImY5wUPyEYYw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 85952
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "swc src -d dist --strip-leading-paths",
+     "dev": "node --import @swc-node/register/esm-register src/server-stdio.ts",
+     "dev:http": "node --import @swc-node/register/esm-register src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.10": {
+    "_from": "file:komplit-mcp-server-0.1.10.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.10",
+    "_integrity": "sha512-JEbz6UECb/wPYNSLgtJvsOAo/R/JCw6hXWZ4X+j1700Ze6y6FA2eRWcVBUPOZO67IQnWaf+zA5CtDJx3Hht40w==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.10_1786534162722_0.6637249072404765"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/99bdc6c89b09b78bc115080726b1063b/komplit-mcp-server-0.1.10.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-JEbz6UECb/wPYNSLgtJvsOAo/R/JCw6hXWZ4X+j1700Ze6y6FA2eRWcVBUPOZO67IQnWaf+zA5CtDJx3Hht40w==",
+     "shasum": "8bbe742b736f1bdc5cf11644ea44a2475caae248",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA+h7p45MUaSFVOX4aUKtqFLcyNw1gJrti+8QuiKCILdAiBF1mBRG9rsJFiMvOc18qeTqfZ6tifKxbuHahUNfR7kew=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.10.tgz",
+     "unpackedSize": 133825
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.10"
+   },
+   "0.1.11": {
+    "_from": "file:komplit-mcp-server-0.1.11.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.11",
+    "_integrity": "sha512-id2TSwGu2kmI6ww9T+O/vpTnXEDsFZUc1PWoCyINc1+A3cJiBf4cYEVaqAmdQ7NB8lf0LrFvnJXwOcRg6sgaGw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.11_1786939583584_0.6699017897334028"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/5202ba3a8c99ef7fd0092a17e6b9c216/komplit-mcp-server-0.1.11.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-id2TSwGu2kmI6ww9T+O/vpTnXEDsFZUc1PWoCyINc1+A3cJiBf4cYEVaqAmdQ7NB8lf0LrFvnJXwOcRg6sgaGw==",
+     "shasum": "4ff03ad2d1d4eacd23f8a7cff21a28dfd1a19865",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID87rBozUrlmPW5kqFiV9kFYak4BmkvvRV8626SzF/KLAiEAwgyUEaHOvXxj6AdlciwBCx02Hiy0O2HfssGvG3qld9c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.11.tgz",
+     "unpackedSize": 154112
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.11"
+   },
+   "0.1.12": {
+    "_from": "file:komplit-mcp-server-0.1.12.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.12",
+    "_integrity": "sha512-22/jGM3dT9w2ROqEkWeToxZ7za2CQv7FGvqFIvVnM9bxfo6oNt+Q0lCifn1oL3VJI1EikxePlNXjh1n61PiJNA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.12_1786955512017_0.5960562521207051"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/f550ef79a3366e3d3be707b18846b73e/komplit-mcp-server-0.1.12.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-22/jGM3dT9w2ROqEkWeToxZ7za2CQv7FGvqFIvVnM9bxfo6oNt+Q0lCifn1oL3VJI1EikxePlNXjh1n61PiJNA==",
+     "shasum": "fae68864caadf223c2bddffe7566a7b6ab2a6dc7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFdbgsrjWdwjgHxYsviRc4raQh+QmaOdWZkOppj3uVNiAiAjyQqPxvqF/EanOva3toOvurQAA+4WXlutibc0NnbjVw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.12.tgz",
+     "unpackedSize": 162081
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.12"
+   },
+   "0.1.13": {
+    "_from": "file:komplit-mcp-server-0.1.13.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.13",
+    "_integrity": "sha512-Fux+r9UnUovbNkIQc1/Uo3yKGCadb6xuwIp3UwtnrZG47H9MxK/+VOwrwrplS0Dh03+JJAB1iWAti9EJKPFgGw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.13_1787022958977_0.14301527131569203"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/7cef0870cd49bb05ad6611a2d84582a3/komplit-mcp-server-0.1.13.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-Fux+r9UnUovbNkIQc1/Uo3yKGCadb6xuwIp3UwtnrZG47H9MxK/+VOwrwrplS0Dh03+JJAB1iWAti9EJKPFgGw==",
+     "shasum": "d17a65100d5e068ae1f249fddf387e9d22aa6cb2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDxyYawVcAcOpbYJ4uha2WDtqQMLLLwX+kTfM5FD01ZmgIhAOonSpcShlL9RX7j0O52jITvQPkSt4zj7rkjT+ENEMKi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.13.tgz",
+     "unpackedSize": 163405
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.13"
+   },
+   "0.1.14": {
+    "_from": "file:komplit-mcp-server-0.1.14.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.14",
+    "_integrity": "sha512-s8V0xPafg1xbHWYlc5Sp8VUWWFsiWE73Eq2TGv0bCwKdGwYBIpdF5HjjyX2YuH4bJ6YKnr0NT5zFUHTu05uYZw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.14_1787081403601_0.7570952209436819"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/7ee020c7f42c825fa719c300df72ecd5/komplit-mcp-server-0.1.14.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-s8V0xPafg1xbHWYlc5Sp8VUWWFsiWE73Eq2TGv0bCwKdGwYBIpdF5HjjyX2YuH4bJ6YKnr0NT5zFUHTu05uYZw==",
+     "shasum": "f9709d642ded46273f67d2e3c49b93f852390e68",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQClvY6yQAuypghWFOG57jcD3IsZhmv3R9JCJNQ1OkRFowIhAKQ69pTXZbSdEKOUrIge4AR1ZZ8uwUpwRbTONIjZpF0A"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.14.tgz",
+     "unpackedSize": 203879
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.14"
+   },
+   "0.1.15": {
+    "_from": "file:komplit-mcp-server-0.1.15.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.15",
+    "_integrity": "sha512-GKOR7QqdDrwIGqFQKyVe1u0RHY5E0DLgC1wSqcYBEX7ZRM3AThAAkgfibE+ERaqv7iPkjE2P30b4mFCu4IwHsg==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.15_1787114190975_0.5317253570245843"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/d4fc18eb96092383e27d37f640542d62/komplit-mcp-server-0.1.15.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-GKOR7QqdDrwIGqFQKyVe1u0RHY5E0DLgC1wSqcYBEX7ZRM3AThAAkgfibE+ERaqv7iPkjE2P30b4mFCu4IwHsg==",
+     "shasum": "f3acde6a548cfd800d59d8c529982a06154f4b5e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIARhMuoeAL2XPaFMpFtNcUrDkNOABdtSqopc2DMongmGAiB5PPBedkEcHpRC4XFjH20gt8AZIz35o0B5Z7A9SDGljg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.15.tgz",
+     "unpackedSize": 203801
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.15"
+   },
+   "0.1.16": {
+    "_from": "file:komplit-mcp-server-0.1.16.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.16",
+    "_integrity": "sha512-+5tr6J0xEUvsyu6zpqiz+bk73DOP524GCYo/TUWlz2uRsAo/kcA87dqoIaKSAFLZu/A/LKIKTsj3r3EtaH4jjw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.16_1787125844723_0.9823205175464629"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/13549012604b054f0e107a59e50c1b57/komplit-mcp-server-0.1.16.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-+5tr6J0xEUvsyu6zpqiz+bk73DOP524GCYo/TUWlz2uRsAo/kcA87dqoIaKSAFLZu/A/LKIKTsj3r3EtaH4jjw==",
+     "shasum": "0e2478ae8901895c8697a922e05f95cf4b7fbb41",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDMLyYxMn9sqMr11Zky1SwQO97vgr4bNUYniB/p0u+gDAIhAOC0zeAydhXmFYG9NmFVtDtJznqDmmG85b6BZa1jD7iL"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.16.tgz",
+     "unpackedSize": 205203
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.16"
+   },
+   "0.1.17": {
+    "_from": "file:komplit-mcp-server-0.1.17.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.17",
+    "_integrity": "sha512-UBuPHkCyTspC67opDwVYkOdEs1MMdUx4+4z2MWK7kAqIW3otMYKFxrhlLX9R4qKjsZ0EONdivrJyLIxUqWVjRQ==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.17_1787168920170_0.2797667207044907"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/4399663bcb2a98e2d50bcf3a2aaabd50/komplit-mcp-server-0.1.17.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-UBuPHkCyTspC67opDwVYkOdEs1MMdUx4+4z2MWK7kAqIW3otMYKFxrhlLX9R4qKjsZ0EONdivrJyLIxUqWVjRQ==",
+     "shasum": "8a6c929b1e564634625298227418ec83b9384107",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCmH+va4Z3jOytgdvrrI9+UAcxq5smL8wfXbjXQOWmp5QIhAMJ6QBBlYfGnFaIuc40ftyxnNHNckh5tvGc8OrLga6s2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.17.tgz",
+     "unpackedSize": 203931
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.17"
+   },
+   "0.1.18": {
+    "_from": "file:komplit-mcp-server-0.1.18.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.18",
+    "_integrity": "sha512-W1vmK7K3WrS4/6JP9NL4z8pYJlbXtSa3Kkaf5boPZcSgRm1adzuWbGsnx0RP38kLL+ixBusMOxB3Z0nDd5jmIw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.18_1787373862664_0.9655666284470896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/44e0a259aee203cb789f554464a7593a/komplit-mcp-server-0.1.18.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-W1vmK7K3WrS4/6JP9NL4z8pYJlbXtSa3Kkaf5boPZcSgRm1adzuWbGsnx0RP38kLL+ixBusMOxB3Z0nDd5jmIw==",
+     "shasum": "0623b91d81d42dbcac2b92520c231fe8369d6d12",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCHs3FqcT/wU3ZRPowWhTCT4Nku4PMrUIMFFdlHm5GxBQIgQN+sM644Onm3y2Se+n2ZzKm6Xkm/+4w1NcLx1uX0B/I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.18.tgz",
+     "unpackedSize": 238280
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.18"
+   },
+   "0.1.19": {
+    "_from": "file:komplit-mcp-server-0.1.19.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.19",
+    "_integrity": "sha512-2PivIIIbqxZnBjx9NV83IfjQeY2WMMCYX3uIWIeX4epgEuuIn3zLUwy92n0kke2Kv3IyPcnnJjpF98WZMxdK0g==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.19_1787627844411_0.2373346236093925"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/2b6542e9ebcdd2f0903d8264f3f5a16b/komplit-mcp-server-0.1.19.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-2PivIIIbqxZnBjx9NV83IfjQeY2WMMCYX3uIWIeX4epgEuuIn3zLUwy92n0kke2Kv3IyPcnnJjpF98WZMxdK0g==",
+     "shasum": "cc06495395a99db7ce1411ef74020b03167596a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG75T3RCrX9OO/XdzMTK70r059JcjdbCFdEznws09kPYAiEA8Qz4VimLH7rjHmMiJzX5hNCbhLNBeOBlRILSv+i5tS0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.19.tgz",
+     "unpackedSize": 247538
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker build -t $IMAGE -f Dockerfile ../../ && docker push $IMAGE",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.19"
+   },
+   "0.1.2": {
+    "_from": "file:komplit-mcp-server-0.1.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.2",
+    "_integrity": "sha512-pVltI1PnrHcKBA99+Ubyyy3tHB1ox0BGXh5RTP9H+JMflaYtX9H4P67Tl3+gjEbO3XBrm3R8Pz5nISyRpVseLg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.2_1785533090246_0.8188807282572774"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/9fc9d56bb8349ba4758c0d4150956f8a/komplit-mcp-server-0.1.2.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-pVltI1PnrHcKBA99+Ubyyy3tHB1ox0BGXh5RTP9H+JMflaYtX9H4P67Tl3+gjEbO3XBrm3R8Pz5nISyRpVseLg==",
+     "shasum": "04a41420b1f59860921e9c4c3380c2a4cd5bf1b8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHsuSfyPjkQj1vtRDynR2HSh6lmO8tM41WCGTG/dON/ZAiAsVJpl+b+rH6dKTAs1phNYowxTK0xbUpGMP6QbQ9t3SA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.2.tgz",
+     "unpackedSize": 90650
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.20": {
+    "_from": "file:komplit-mcp-server-0.1.20.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.20",
+    "_integrity": "sha512-v1oKLr7xwhQRwgpSZqbxOaX2tMtCdsiiCUlPWdp6fISEorgqGfPXYQAhn1KBi5ruIu0Sd/zQsZDDkc55tQCBVA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.20_1787647190215_0.04149272853331509"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/abb9f3f984b300c021218d79ab752689/komplit-mcp-server-0.1.20.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-v1oKLr7xwhQRwgpSZqbxOaX2tMtCdsiiCUlPWdp6fISEorgqGfPXYQAhn1KBi5ruIu0Sd/zQsZDDkc55tQCBVA==",
+     "shasum": "19bbb79c6b068abac7d5550c79f1d998f1b52e2f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD6X+818Mi9SdMAjuYgIwxdIsGbY0zVnHL/Hy8qghisZQIhAOppZvFppBSoMLbzqxVt74s+xaNXTZQ6z51tkfVYyvl9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.20.tgz",
+     "unpackedSize": 272492
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker build -t $IMAGE -f Dockerfile ../../ && docker push $IMAGE",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.20"
+   },
+   "0.1.22": {
+    "_from": "file:komplit-mcp-server-0.1.22.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.22",
+    "_integrity": "sha512-cCkp3OABhPJwpz6uelqEhaeghq8ilde8T+vf+ZVSfHT1Ep0sUY8+OF1zy7V701GyRJ1J40ujFURvh1ogjlumIw==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.22_1787651867118_0.15420049438362904"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/1596be198be7028c807e593bf7c0da9e/komplit-mcp-server-0.1.22.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-cCkp3OABhPJwpz6uelqEhaeghq8ilde8T+vf+ZVSfHT1Ep0sUY8+OF1zy7V701GyRJ1J40ujFURvh1ogjlumIw==",
+     "shasum": "8ce9bbc282212928e151342a7fc565c9418015aa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGyR/l/PwnQxnPIcjCwyN40nxRJCspyIWxf6DNVvlcGYAiBQn1peCMnl1YMi21zvfuSq1chOK0mdOMMljNWNRZL20w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.22.tgz",
+     "unpackedSize": 272936
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker build -t $IMAGE -f Dockerfile ../../ && docker push $IMAGE",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.22"
+   },
+   "0.1.23": {
+    "_from": "file:komplit-mcp-server-0.1.23.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.23",
+    "_integrity": "sha512-Ucp/95xbIuG+o6F4BDDM7/GiOgpAZmxSD0y5Z3P0mXOUKYqZo3kOt2MSAWsN1dseZaw13d+AlwP3X3sYLCGfyg==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.23_1787742222119_0.6524155272643606"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/87f6e1c3d38074dfb8196a6c4ffeed49/komplit-mcp-server-0.1.23.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-Ucp/95xbIuG+o6F4BDDM7/GiOgpAZmxSD0y5Z3P0mXOUKYqZo3kOt2MSAWsN1dseZaw13d+AlwP3X3sYLCGfyg==",
+     "shasum": "19cefd3702e4b52044d6d8cfd31f1d2f35f9c640",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEfmG1uJ+zs5tqLPKpTUQHN2xqhmdPAieAP/wDFyyp3JAiEAp8chp2kP2xrYZ6dwE9YSa2ee4y+ue/NaAXSisi02l4A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.23.tgz",
+     "unpackedSize": 284496
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker build -t $IMAGE -f Dockerfile ../../ && docker push $IMAGE",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.23"
+   },
+   "0.1.26": {
+    "_from": "file:komplit-mcp-server-0.1.26.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.26",
+    "_integrity": "sha512-6ya+L2RK4ow3GnWjQ99KYMVeofV7Hn3kdWwfXZDey0geWaKRLnW5C0maFKfZ3Lh9OtEHmlSOMxSE/Egy+opLVg==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.26_1787819992256_0.7423979453854803"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/ce0fb07871a5aa6b1a71aa748eb31829/komplit-mcp-server-0.1.26.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-6ya+L2RK4ow3GnWjQ99KYMVeofV7Hn3kdWwfXZDey0geWaKRLnW5C0maFKfZ3Lh9OtEHmlSOMxSE/Egy+opLVg==",
+     "shasum": "00844ddf3dfc670f50934a714a900ff8d9edbe94",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDb0P5skmI42HgP07srEXVdyd9eFvu+MvAmvI+JsvbTgAIhAIhNBrsgGwx1TyJTgGn5OhdxAOkc1RUnhnuHbPpIlBih"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.26.tgz",
+     "unpackedSize": 274836
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker build -t $IMAGE -f Dockerfile ../../ && docker push $IMAGE",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.26"
+   },
+   "0.1.27": {
+    "_from": "file:komplit-mcp-server-0.1.27.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.27",
+    "_integrity": "sha512-Z/GCTzaNYr3F/TUsj74Wi3SwvKLDn3a+ZHmFbZL1VW+FW5wNjN6kJUSfsWK+yHSqSq5aYaTzIKye7Q1msest0g==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.27_1787904244375_0.8585322080453368"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/cf133900bfb2988429f0da36dd2be56a/komplit-mcp-server-0.1.27.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-Z/GCTzaNYr3F/TUsj74Wi3SwvKLDn3a+ZHmFbZL1VW+FW5wNjN6kJUSfsWK+yHSqSq5aYaTzIKye7Q1msest0g==",
+     "shasum": "4b9d14a98416d966dd913879a370940157a2471c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDrmeUgML0ys8QWvLHEoIpkQ8WbXsHUUZKHzmYp+e9y4QIhANhlEE9yLP2WX3+XAZh5+H/6beFhFNtbb1eo7zmvRaQY"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD0oiSegRpk2TMIXD+rX49ml0j2dJpgRfeOpA2A1H7n7AIhAIlj6qXoE1XAdgi9t/48W2EeQiAa3KwQjsbu4y5HS2mt"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.27.tgz",
+     "unpackedSize": 275737
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.27"
+   },
+   "0.1.28": {
+    "_from": "file:komplit-mcp-server-0.1.28.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.28",
+    "_integrity": "sha512-KyCfipu9+Auk0HGa2478FrBWIpcLg/rUPir9mZAjatI/XEoK4ZGuuFOSmQ9ovhOE0zlJ8P0gVvRcwH0QLfFxBA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.28_1787905970848_0.14893896128989503"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/ea8d0d64d8ec7f8cd307fca466609ca7/komplit-mcp-server-0.1.28.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-KyCfipu9+Auk0HGa2478FrBWIpcLg/rUPir9mZAjatI/XEoK4ZGuuFOSmQ9ovhOE0zlJ8P0gVvRcwH0QLfFxBA==",
+     "shasum": "36b821fdb718350e5a4fa360577c70616cc6b7a8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFIe0dheqoVP9jtbUIsQHW4hXTg8kLPDAquZcnADumuJAiEAlgK5T0RcxHJvPjqba3quQYBDqftLVxwl44CYd0JBhpg="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDpxJ5DoqaDxKzGS8f84V2VOLaPbQQxPc37rF2XWdTXKAiB3yTrXwRYCjydQcHV3PFM3XwBmCcanVEAw2LM/qFVKbg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.28.tgz",
+     "unpackedSize": 276665
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.28"
+   },
+   "0.1.29": {
+    "_from": "file:komplit-mcp-server-0.1.29.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.29",
+    "_integrity": "sha512-f29+hHoXFpN+AWcOn1VQz1SDJpcPZpCZ6wG+207at23cXvG7ARI8zNuxudCnlrIm8lZBYEEXAMQLS3++gxcwlw==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.29_1788410754590_0.8466467149976997"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/0150834f64bf68e991c91b1a76263e0c/komplit-mcp-server-0.1.29.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-f29+hHoXFpN+AWcOn1VQz1SDJpcPZpCZ6wG+207at23cXvG7ARI8zNuxudCnlrIm8lZBYEEXAMQLS3++gxcwlw==",
+     "shasum": "e3e0867d5de20f53ed32595ec257e30cf8896241",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHYQ9Dx6Dt4sCsKY9W1vsXNhkT0C53vsh5j0Kt6mxtb7AiEAh/a/AdbzzwSoLcfOl3Dk/rJdDQWHAMbWbdI5bxEx5vw="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCBPGt/nAGnCx6si82f199VFMtwkAXI065QSPl/okiijwIhAMCwBJmTC25P52N9M+BW1+bo1NlY5nNYp7C4hRjMMKs2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.29.tgz",
+     "unpackedSize": 281405
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.29"
+   },
+   "0.1.3": {
+    "_from": "file:komplit-mcp-server-0.1.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.3",
+    "_integrity": "sha512-j8TTEil3EhtzgH12Hbjc2wAOcDUhOeAiTpBdoPR6PmKcwM2YS+JxsJ6BAA4SBh924/oWO7VKveHHazYoJznAag==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.3_1785723774544_0.05212836461929604"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/35042cd32bea0860cd4808783d51f36e/komplit-mcp-server-0.1.3.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-j8TTEil3EhtzgH12Hbjc2wAOcDUhOeAiTpBdoPR6PmKcwM2YS+JxsJ6BAA4SBh924/oWO7VKveHHazYoJznAag==",
+     "shasum": "d6acc296279bdca9dc62bb630f6e2f98b40fbed1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD8SJGgC6CzCFBkcmDBpz/uqfWSL6vblOK5MxcvZ96eBQIgMnMHP5g/C6/wQzcPG/RTFeOyWEHL8yo32X6PwFthGy8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.3.tgz",
+     "unpackedSize": 90309
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.1.30": {
+    "_from": "file:komplit-mcp-server-0.1.30.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.30",
+    "_integrity": "sha512-6B4hlMczNOwGFSLuj+WN/0HT+zsxbBDM7ToRwa2PxrVTF5ZEfK3OvDErdPjST0EYfSLLnfEaVWhAXKglzcItXg==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.30_1788425626262_0.6689295195846658"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/d467d8f8dc4159a2ba8734aa2bd8ecef/komplit-mcp-server-0.1.30.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-6B4hlMczNOwGFSLuj+WN/0HT+zsxbBDM7ToRwa2PxrVTF5ZEfK3OvDErdPjST0EYfSLLnfEaVWhAXKglzcItXg==",
+     "shasum": "664fa7a3fca527e37b291d5eaa39861294045a8a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBWu7qB+HlqyCIY++Yy4wdqRcMYp40Rs2x5744be4K+SAiEAvXfw2AiCDeZ91JDylaQEhDZjOcP4I0wjOuF3lb2iaaU="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCse/zc4jijIVs+iNzAzVZZsGdS1Xgqf9eQQEdIi7qE0AIgHIpQDn8SKsqFK6rR9nLEMIGbgPJt4TKrY6CAbfU0oVk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.30.tgz",
+     "unpackedSize": 282105
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.30"
+   },
+   "0.1.31": {
+    "_from": "file:komplit-mcp-server-0.1.31.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.31",
+    "_integrity": "sha512-M16vPNqh/pZlkXNR8/OpTLEmUnSTHcZns3orsy5pqeZvX2RoVPj8hD+4zI4kbyzqfrXcmlm8DLonz9WoJVuaBA==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.31_1788507366760_0.25861131221733946"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/03892ab1cc4d166258e8c49e71d63779/komplit-mcp-server-0.1.31.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-M16vPNqh/pZlkXNR8/OpTLEmUnSTHcZns3orsy5pqeZvX2RoVPj8hD+4zI4kbyzqfrXcmlm8DLonz9WoJVuaBA==",
+     "shasum": "afae297364140777eb09f0e9166916e33786547a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTr94vhHDkUwrbsHPzrLZGve+w2/+ZElN2j08cdNPcygIhAKny8eiX8esxTh0GFzE6vaTaV5/Uimqm7QP0dK80WKp0"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDXWNPnk+tL3t37uIMVseNa6DY8KRUBDY9nUhJpPn8fNwIgId//ujoLhSKW2UGqHMQ4gmKRrP/cack0Rl9fc2F4w1c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.31.tgz",
+     "unpackedSize": 281417
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.31"
+   },
+   "0.1.32": {
+    "_from": "file:komplit-mcp-server-0.1.32.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.32",
+    "_integrity": "sha512-HRJw9fNSwNJUo6kGtE6bhPf2yN5E3IQfTVKaY1p7+Yv0mfZ6Lt+J3YDKt3ClszIAYQYDZYkbEXQJBPWBxLwVvg==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.32_1788770606345_0.557111587291766"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/8932546af2a17912190fc83f9df28cf3/komplit-mcp-server-0.1.32.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-HRJw9fNSwNJUo6kGtE6bhPf2yN5E3IQfTVKaY1p7+Yv0mfZ6Lt+J3YDKt3ClszIAYQYDZYkbEXQJBPWBxLwVvg==",
+     "shasum": "267369d7d2895c619eb65cacc6220f54ed0cb8bb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC5tSHUNyLrwgVzvVvGzCp0sm48Ca5LhX0uVBFIXucCLgIhAMV1xND6dXipNvvYnaO8Yu2RKnPWQKnXV0vZBf13F5an"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDp347vdCyJXfb6fxuduRdSYpLVlvCdPrt08sn8UZfD5wIhAM9z01cck5zq7F6RzD+k0QZ/ZTgrsJja86Qjwj/MNVNH"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.32.tgz",
+     "unpackedSize": 296579
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.32"
+   },
+   "0.1.34": {
+    "_from": "file:komplit-mcp-server-0.1.34.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.34",
+    "_integrity": "sha512-WBywoimME4rsXXfjf8eqqyh3DLHeoGLr12nn9FPWe0LZQnWQ5E6OzghhF0yt5aUMdvT46zSbdi2kn8s9huQ1dQ==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.34_1788794851963_0.6890055440810916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/408d0e9594592e2865a74cb7f7bbdef6/komplit-mcp-server-0.1.34.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-WBywoimME4rsXXfjf8eqqyh3DLHeoGLr12nn9FPWe0LZQnWQ5E6OzghhF0yt5aUMdvT46zSbdi2kn8s9huQ1dQ==",
+     "shasum": "3bb1decd9b2dc854c10290c1068085fac35dcb35",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDrDIgipVldgpeGOYIKK6UbxuPbm5uYqWruYfIt65pXtQIgL8avoeg7R+u++lfnAntAMZGwkkHGGiGZmEfdTxaIisQ="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFAevWHpKZ0H1L3Nm8wzBKD4S1it1GQpLsglbAZC9TJIAiEA8VLn8xly8wjp490v9+nJVK2NyMifR16xafXG+gZyDzA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.34.tgz",
+     "unpackedSize": 306613
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.34"
+   },
+   "0.1.35": {
+    "_from": "file:komplit-mcp-server-0.1.35.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.35",
+    "_integrity": "sha512-ujYztLWpqZ8twxtRc87tHg/25jpz26LfOREoTShHMhouQEqNubF4anLKIjzAl14qPi1tIKeMIfxYbN7dE9V7zw==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.35_1788810247875_0.4734603893699729"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/34e1b2b902a20751e5939e5ef3ac391f/komplit-mcp-server-0.1.35.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-ujYztLWpqZ8twxtRc87tHg/25jpz26LfOREoTShHMhouQEqNubF4anLKIjzAl14qPi1tIKeMIfxYbN7dE9V7zw==",
+     "shasum": "6c642b61ec68d60bce9cc96fc452ed67259f5ed3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA/RCWDdJpYs5rZqlLuOq/Nm0Mc6qKEzUuH1mKX78nkmAiALiAHQHiYc2roAW0ErI/QvtJGLQK6bsM6qIC89ILz1og=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEqnh9lRKM/StH7qFHr+QEHotVevtekYjFAaZcXbNUIqAiA5F+q+jdf8I7h7xsARIn9yW11+x7dqyuTKWuc2VaAMzA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.35.tgz",
+     "unpackedSize": 328991
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.35"
+   },
+   "0.1.36": {
+    "_from": "file:komplit-mcp-server-0.1.36.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.36",
+    "_integrity": "sha512-QPlrL17gQie40LuqOcovBBlkEJvm0hf+nVdUfFh4YhHeh2jVFqsduLTlFSP9u2OI7rI1h5SoehhP6gxbipwzEw==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.36_1788839748785_0.7490297296783335"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/257c5db94714feba3cf2173cd00b4259/komplit-mcp-server-0.1.36.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-QPlrL17gQie40LuqOcovBBlkEJvm0hf+nVdUfFh4YhHeh2jVFqsduLTlFSP9u2OI7rI1h5SoehhP6gxbipwzEw==",
+     "shasum": "695b8ab7b29e95520c02ffebbd10dc1c3b30566d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDe+0CdRLhrH1l1Vc72AL5VAeWQfTp8u0g34T10mDv9yAiAD4l4JbHJaDJMBiH5APNZONohmon7xVrVsB4woS43UrA=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID7zPP5RhjAFzVHJRhSYbS/mPaH8Pb8WhTLRpivib2kzAiEAp5Pzw/rVHy0d3NrcRee3MV9swuaS1lcPCSrRkXM3hRA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.36.tgz",
+     "unpackedSize": 328965
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "docker:build": "IMAGE=$DOCKER_REGISTRY/$(basename $PWD):$DOCKER_IMAGE_TAG && docker buildx build -t $IMAGE --cache-from type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache --cache-to type=registry,ref=$DOCKER_REGISTRY/$(basename $PWD):buildcache,mode=max --push -f Dockerfile ../../",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.36"
+   },
+   "0.1.4": {
+    "_from": "file:komplit-mcp-server-0.1.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.4",
+    "_integrity": "sha512-3GBTfDLzEXXpIm1lE/75JFPw2Kw44D/pXSD8gQw0mp2kq4/Iz6NDRWFuGd7N56CuzqkC/f1XoNpUQNuRD9KuxA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.4_1785816863260_0.7662801845458413"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/de518831b11e23c706deef4ce1e04648/komplit-mcp-server-0.1.4.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-3GBTfDLzEXXpIm1lE/75JFPw2Kw44D/pXSD8gQw0mp2kq4/Iz6NDRWFuGd7N56CuzqkC/f1XoNpUQNuRD9KuxA==",
+     "shasum": "ec380fb6714609839c633dd026129f605b4ade62",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIANfFHySoi2SJ0/nVn3LRmi8olb6AMcZeBGNI47oDp6NAiEAxh83/zjoAwTuKXmbeiWh+U+xx+HlRFISyVUYCYK9Hqk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.4.tgz",
+     "unpackedSize": 92286
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_from": "file:komplit-mcp-server-0.1.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.5",
+    "_integrity": "sha512-YdKE/LGp/Yy/PPPnTXdoi7p0asAEzndOWHRRTtu0kispOgSyzYCV4iYhifXZXjr6Y+c44lr3Htg6hfi94f0OXQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.5_1785840813361_0.8438269074185258"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/09801584caca50d09aece3ec06a88fb9/komplit-mcp-server-0.1.5.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-YdKE/LGp/Yy/PPPnTXdoi7p0asAEzndOWHRRTtu0kispOgSyzYCV4iYhifXZXjr6Y+c44lr3Htg6hfi94f0OXQ==",
+     "shasum": "32808084cf0230981babc5dee3cc4c1c76c0a5aa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCbMHW2Cu3EP+WEvuB08W5RP+UVhkxhaQ4NoBDuBBCR2QIhAN6+KFqjI9YYIGcQVB4fJTbUz/RU7ZO2hWy+xwhs9mTR"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.5.tgz",
+     "unpackedSize": 95857
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.5"
+   },
+   "0.1.6": {
+    "_from": "file:komplit-mcp-server-0.1.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.6",
+    "_integrity": "sha512-3vrKieKntQMXMt9K7BAejWAy5GoJVVVhCvv+0tEzgv+IuAW7haGPhHDeIxS/uvRD2YVlp29a5VA0dh9hE0FgBw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.6_1785918817933_0.7710813482711443"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/6ccc328e3ca57727dd90eb9e70f95aec/komplit-mcp-server-0.1.6.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-3vrKieKntQMXMt9K7BAejWAy5GoJVVVhCvv+0tEzgv+IuAW7haGPhHDeIxS/uvRD2YVlp29a5VA0dh9hE0FgBw==",
+     "shasum": "4a88a6aa5873985d85ca49f835fc458b692021e1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDV4+EvzFyLAX/ykTzB91B9alCVmGKkNFPK/FZx+2SUDgIgDWANiytsdHwdjc2C+m+hLNX0YuAWShMgffTS90rUnRw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.6.tgz",
+     "unpackedSize": 95579
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.6"
+   },
+   "0.1.7": {
+    "_from": "file:komplit-mcp-server-0.1.7.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.7",
+    "_integrity": "sha512-x1cbBK2Xbe4T5kUQHIE8VGH9WfhETqZJOW2TsQNc8+iAwxlniPBMmqF3wsAaLzYQeJQOWP3+pI74iEAOao8jnQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.7_1786001364085_0.3045145640038156"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/ef792d34fc9f7314ef15342f6c252e96/komplit-mcp-server-0.1.7.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-x1cbBK2Xbe4T5kUQHIE8VGH9WfhETqZJOW2TsQNc8+iAwxlniPBMmqF3wsAaLzYQeJQOWP3+pI74iEAOao8jnQ==",
+     "shasum": "f641c62593211608574b2c0d03fa91257ed011f9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC1PO+mZ6DSRMYpFAdOoSVwuJhiTztHucJcjRe5ti1/tQIhAO13fXvGD5Hkpwcr0vlxv//0kUkQ6sN87jnPJgNqPKUg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.7.tgz",
+     "unpackedSize": 97902
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.7"
+   },
+   "0.1.8": {
+    "_from": "file:komplit-mcp-server-0.1.8.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.8",
+    "_integrity": "sha512-dL1tJbeobqSU2eU+7p2vVyH5sKmbjYzjr6W+9uCz9dasQCvP8IY2fAgQj1+aT+6S24KuqUYH6buT/Yp+2IoImA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.8_1786076346500_0.9379362784147576"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/5a6d125ecffbc046f82e323677f28279/komplit-mcp-server-0.1.8.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-dL1tJbeobqSU2eU+7p2vVyH5sKmbjYzjr6W+9uCz9dasQCvP8IY2fAgQj1+aT+6S24KuqUYH6buT/Yp+2IoImA==",
+     "shasum": "c9c3eb3276b497f0928d0f814949e84d05b9322e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGFNPwcEY36UytHioPQNdHL06Bor1rY8eIIrd/lgezKAAiEAjssK7M60IJFhfQlj0O2SIpr+ENt+Nl0SS6osMpyQq6c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.8.tgz",
+     "unpackedSize": 97734
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_from": "file:komplit-mcp-server-0.1.9.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@komplit/mcp-server@0.1.9",
+    "_integrity": "sha512-F6cnQqk3wQjfKGSvX9B15SJ4xbNA0zcouuO4a7XAlJrrxwEPcNAcauIpbzTdcgQCU3mD6TUK5k23tjjm/cmFhQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.9_1786356512687_0.3935858437287214"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:1af6adea0513]",
+     "name": "thanhnguyen5"
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/efb5c5fd84119a681c771b18034b87d3/komplit-mcp-server-0.1.9.tgz",
+    "bin": {
+     "komplit-mcp": "dist/server-stdio.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^3.24.1"
+    },
+    "description": "MCP (Model Context Protocol) server for the **Komplit Creative Platform** \u2014 AI agents use this as their sole interface for creative operations. Published to npm.",
+    "devDependencies": {
+     "@komplit/config": "0.0.0",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.1.1",
+     "oxlint": "^1.73.0",
+     "tsup": "^8.5.1",
+     "tsx": "^4.19.4",
+     "typescript": "^5.9.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-F6cnQqk3wQjfKGSvX9B15SJ4xbNA0zcouuO4a7XAlJrrxwEPcNAcauIpbzTdcgQCU3mD6TUK5k23tjjm/cmFhQ==",
+     "shasum": "0840d9bee26d3ceae9f1eda485e79fa58a80d119",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDappEwNuGlYmOIzs0GEsItlLn2SjyWaviFfUFHzDqfeAIgT8gQrFDJwmSr8DTMgNgR5B5SntdMDd1YEEwPlGEt2io="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@komplit/mcp-server/-/mcp-server-0.1.9.tgz",
+     "unpackedSize": 118491
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:1af6adea0513]",
+      "name": "thanhnguyen5"
+     }
+    ],
+    "name": "@komplit/mcp-server",
+    "optionalDependencies": {
+     "express": "^5.2.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/server-stdio.ts",
+     "dev:http": "tsx src/server-http.ts",
+     "lint": "oxlint",
+     "start": "node dist/server-stdio.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.9"
+   }
+  }
+ },
+ "name": "@komplit/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@komplit%2Fmcp-server"
+}

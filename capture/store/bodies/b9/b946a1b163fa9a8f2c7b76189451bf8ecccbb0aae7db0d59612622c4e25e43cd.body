@@ -1,0 +1,2575 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.0.0-alpha.24",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92022a2172ea]",
+    "name": "richcanvas"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0-alpha.2",
+   "0.1.0-alpha.3",
+   "1.0.0-alpha.10",
+   "1.0.0-alpha.11",
+   "1.0.0-alpha.12",
+   "1.0.0-alpha.13",
+   "1.0.0-alpha.14",
+   "1.0.0-alpha.15",
+   "1.0.0-alpha.16",
+   "1.0.0-alpha.17",
+   "1.0.0-alpha.18",
+   "1.0.0-alpha.19",
+   "1.0.0-alpha.20",
+   "1.0.0-alpha.21",
+   "1.0.0-alpha.22",
+   "1.0.0-alpha.23",
+   "1.0.0-alpha.24",
+   "1.0.0-alpha.4",
+   "1.0.0-alpha.5",
+   "1.0.0-alpha.6",
+   "1.0.0-alpha.7",
+   "1.0.0-alpha.8",
+   "1.0.0-alpha.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@agenticprimitives/mcp-runtime",
+  "_rev": "23-c483404f2146cc25f3a0030a6ff257cb",
+  "bugs": {
+   "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+  },
+  "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+  "dist-tags": {
+   "alpha": "0.1.0-alpha.2",
+   "latest": "1.0.0-alpha.24"
+  },
+  "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "delegation",
+   "authorization",
+   "agentic"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92022a2172ea]",
+    "name": "richcanvas"
+   }
+  ],
+  "name": "@agenticprimitives/mcp-runtime",
+  "readme": "# @agenticprimitives/mcp-runtime\n\n**The same delegation that authorizes a web app session authorizes an MCP tool call.** Most MCP servers gate tools with API keys or OAuth scopes \u2014 bearer credentials that say nothing about *who delegated the authority, under which limits, or whether it was revoked five minutes ago*. This package replaces that with the agenticprimitives delegation primitive: an EIP-712-signed, caveat-constrained, on-chain-revocable grant from a canonical Smart Agent. When the principal revokes, the tool stops working. When the time window closes, the tool stops working. No key rotation, no scope audit, no guessing.\n\nPart of [agenticprimitives](../../README.md) \u2014 the trust substrate for the agent economy: one canonical Smart Agent identity with custody, delegation, naming, credentials, and audit evidence designed as one system.\n\nThis package is the **decision layer**, not the SDK. The official `@modelcontextprotocol/sdk` already provides tool/resource/prompt registration, transports, and OAuth 2.1 + PKCE + RFC-9728 + RFC-8707 plumbing (mandated by the 2026-03-15 MCP spec) \u2014 you bring it as a peer dependency. We add the bridge to `@agenticprimitives/delegation` + `@agenticprimitives/tool-policy`: one wrapper that turns \"anyone with the URL\" into \"exactly the principals with a live, scoped grant.\" It also eliminated the ~65% authorization-code duplication observed across smart-agent's three mature MCP servers.\n\nSee [`spec.md`](./spec.md) \u2192 [`specs/205-mcp-runtime.md`](../../specs/205-mcp-runtime.md), and [ADR-0004](../../docs/architecture/decisions/0004-mcp-runtime-as-middleware.md) for why middleware, not SDK.\n\n## Quick start\n\n```ts\nimport { McpServer } from '@modelcontextprotocol/sdk/server';\nimport { withDelegation, createSqliteJtiStore } from '@agenticprimitives/mcp-runtime';\n\nconst config = {\n  audience: 'urn:mcp:server:person',\n  chainId: 31337,\n  rpcUrl: process.env.RPC_URL!,\n  delegationManager: process.env.DELEGATION_MANAGER_ADDRESS as `0x${string}`,\n  enforcerMap,\n  jtiStore: createSqliteJtiStore(db, 'token_usage'),\n};\n\nconst server = new McpServer({ name: 'person-mcp', version: '0.1.0' });\n\nserver.registerTool({\n  name: 'get_profile',\n  inputSchema: { type: 'object', properties: { token: { type: 'string' } } },\n  handler: withDelegation(config, async ({ principal }) => {\n    return db.profiles.findUnique({ where: { ownerAddress: principal } });\n  }),\n});\n```\n\nThe handler no longer touches auth. The wrapper runs the full pipeline on every call: HMAC envelope check \u2192 session-key signature \u2192 EIP-712 hash \u2192 on-chain `isRevoked` \u2192 ERC-1271 verify \u2192 caveat eval (fail-closed) \u2192 JTI usage tracking \u2192 `tool-policy.evaluatePolicy` \u2192 hand `{ principal, grants? }` to the inner handler. Rejections return a single uniform auth-failed error \u2014 externally, a malformed token is indistinguishable from an expired, revoked, or caveat-failed one, so probing leaks nothing.\n\n## What ships\n\n- **`withDelegation`** \u2014 the tool-handler wrapper above; the headline feature.\n- **JTI replay protection** \u2014 `createSqliteJtiStore`, `createPostgresJtiStore`, `createMemoryJtiStore`; atomic single-use tracking under concurrent writers.\n- **`declareResource`** \u2014 joins `tool-policy` classification with MCP resource metadata.\n- **`verifyDelegationForResource`** \u2014 the low-level verification entry point.\n- **Service-to-service MAC** \u2014 `generateServiceMac` / `verifyServiceMac` for the inter-service HTTP envelope.\n- **Test harness** (`/testing` subpath) \u2014 `MockDelegationSigner`, `createTestConfig`, `withMockedDelegationContext`.\n- **Classification lint** (`/lint` subpath) \u2014 `lintMcpClassification`, MCP defaults over `tool-policy.lintClassification`.\n- **Audit events** \u2014 `mcp-runtime.with-delegation.{accept,reject}` and `mcp-runtime.service-mac.{accept,reject}`, correlation-stitched via a caller-supplied `correlationId` ([spec 206](../../specs/206-audit.md)).\n\n## How it's different\n\nThe competing pattern is **OAuth scopes, API keys, and MCP auth middleware** \u2014 server-side allow-lists checked against a bearer credential. Three structural gaps this package closes:\n\n- **Provenance.** A scope string says what; a delegation proves *who granted it* \u2014 the principal's Smart Agent signature, verified ERC-1271 against the account on chain. Every accepted call is attributable to a canonical address, not an API-key row.\n- **Live revocation.** API keys are revoked by rotating them everywhere they leaked. A delegation is revoked once, on chain; the wrapper checks `isRevoked` on every call.\n- **One model across surfaces.** The grant your user issued in a web app is the same grant your MCP server verifies \u2014 same caveats (time window, value cap, allowed methods), same revocation, same audit trail. ERC-8004 registries and agent discovery are being settled this year; the substrate that wins is the one where tool access, agent calls, and on-chain spend share a single authority model. That is the design center here.\n\nWe do not replace the MCP spec's transport-level OAuth \u2014 that stays in the official SDK. We answer the question OAuth cannot: *on whose delegated authority is this tool executing right now?*\n\n## Cross-delegation\n\nRemoved from the public surface in H7-B.8 (XPKG-002 / EXT-024 closure). The previous `withCrossDelegation` was a stub that unconditionally rejected. Per spec 100 \u00a76, experimental capability lives behind a `./experimental` subpath; when cross-delegation work resumes it lands there. See [the production-readiness audit](../../docs/audits/2026-05-packages-contracts-production-readiness.md) (PKG-mcp-runtime-001).\n\n## Validation\n\n```bash\npnpm --filter @agenticprimitives/mcp-runtime typecheck\npnpm --filter @agenticprimitives/mcp-runtime test\npnpm check:forbidden-terms\n```\n\n## Status\n\nTestnet/pilot-ready. Production launch is gated on the public checklist in the root [`README.md`](../../README.md#status--honest-version) \u2014 including third-party contract audit and governance key rotation. Track every security finding live in [`docs/audits/findings.yaml`](../../docs/audits/findings.yaml). Spec + API are stable; `capability.manifest.json` marks this package `experimental` until those gates clear.\n\n## License\n\nUNLICENSED (internal monorepo, not published).\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-runtime",
+   "type": "git",
+   "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+  },
+  "time": {
+   "0.1.0-alpha.2": "2026-05-31T17:13:02.237Z",
+   "0.1.0-alpha.3": "2026-05-31T17:50:06.876Z",
+   "1.0.0-alpha.10": "2026-06-17T00:56:49.537Z",
+   "1.0.0-alpha.11": "2026-06-17T17:38:13.081Z",
+   "1.0.0-alpha.12": "2026-06-18T17:32:37.684Z",
+   "1.0.0-alpha.13": "2026-06-19T03:18:00.114Z",
+   "1.0.0-alpha.14": "2026-07-05T09:50:32.568Z",
+   "1.0.0-alpha.15": "2026-07-05T13:44:19.981Z",
+   "1.0.0-alpha.16": "2026-07-06T01:58:28.061Z",
+   "1.0.0-alpha.17": "2026-07-14T14:57:49.498Z",
+   "1.0.0-alpha.18": "2026-07-17T13:04:41.100Z",
+   "1.0.0-alpha.19": "2026-07-22T01:27:09.707Z",
+   "1.0.0-alpha.20": "2026-07-23T14:39:44.083Z",
+   "1.0.0-alpha.21": "2026-08-03T03:25:25.287Z",
+   "1.0.0-alpha.22": "2026-08-26T20:21:56.611Z",
+   "1.0.0-alpha.23": "2026-09-11T22:02:09.286Z",
+   "1.0.0-alpha.24": "2026-09-12T16:29:07.571Z",
+   "1.0.0-alpha.4": "2026-05-31T21:52:48.176Z",
+   "1.0.0-alpha.5": "2026-06-05T17:24:42.043Z",
+   "1.0.0-alpha.6": "2026-06-05T21:32:23.711Z",
+   "1.0.0-alpha.7": "2026-06-11T04:05:36.261Z",
+   "1.0.0-alpha.8": "2026-06-12T13:06:00.748Z",
+   "1.0.0-alpha.9": "2026-06-12T20:40:48.689Z",
+   "created": "2026-05-31T17:13:01.916Z",
+   "modified": "2026-09-12T16:29:07.749Z"
+  },
+  "versions": {
+   "0.1.0-alpha.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@0.1.0-alpha.2",
+    "_nodeVersion": "24.12.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_0.1.0-alpha.2_1780247582042_0.35312788504380177"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92022a2172ea]",
+     "name": "richcanvas"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-nkfy45AjjCHckNyagSxahTur5OR3ici6pJcK+ZVVTI2Pk+u9FCjrZMEsoBzLIW6MwW2YUPwrYO/u9HBpXI0lOw==",
+     "shasum": "155f33b37b3ae3130563060168bd458db781f69b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCYeTKC0dgYZoOSJLVz2i9qIL+n2+3U3PDxcdrAhWSWkQIgWE1BBO5bfWWqoSSO5YqGOPH6aDF5SoI+g/Ka7JsG1sY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-0.1.0-alpha.2.tgz",
+     "unpackedSize": 77761
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "gitHead": "40e32dc6559d79c6dcdd47c21bf93f821c864b8b",
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "workspace:*",
+     "@agenticprimitives/delegation": "workspace:*",
+     "@agenticprimitives/key-custody": "workspace:*",
+     "@agenticprimitives/tool-policy": "workspace:*",
+     "@agenticprimitives/types": "workspace:*",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.50.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0-alpha.2"
+   },
+   "0.1.0-alpha.3": {
+    "_from": "file:agenticprimitives-mcp-runtime-0.1.0-alpha.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@0.1.0-alpha.3",
+    "_integrity": "sha512-ocuZVXMzrFe19GsVIiyBQbWcxQ0PhmtgLQcTJCIe5yfi2weh3EjmpYlqvl4nTkooAMOXMyu+22xmqq2NBWXTrg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_0.1.0-alpha.3_1780249806712_0.21576930905711023"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/93fcf5cf85cafd4a37c40877ccff6213/agenticprimitives-mcp-runtime-0.1.0-alpha.3.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@0.1.0-alpha.3"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-ocuZVXMzrFe19GsVIiyBQbWcxQ0PhmtgLQcTJCIe5yfi2weh3EjmpYlqvl4nTkooAMOXMyu+22xmqq2NBWXTrg==",
+     "shasum": "2d54d8e5a6071d2a80c11e0e5d0d731ced860e4a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDwdNTI/RmLdAoyKdBGLAagJbsRIKNw1wWANZeGaaC1WQIgFBRDaQib0ej0sA9UBVCE0epNKtdP3AAkeFnyRW00okE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-0.1.0-alpha.3.tgz",
+     "unpackedSize": 77770
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "0.1.0-alpha.3",
+     "@agenticprimitives/delegation": "0.1.0-alpha.3",
+     "@agenticprimitives/key-custody": "0.1.0-alpha.3",
+     "@agenticprimitives/tool-policy": "0.1.0-alpha.3",
+     "@agenticprimitives/types": "0.1.0-alpha.3",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.50.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0-alpha.3"
+   },
+   "1.0.0-alpha.10": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.10.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.10",
+    "_integrity": "sha512-KlXmG5aEp55cPq8sfEN7vwMoMLLJO/4aW+GFjyfIkPh46lmAI93pnmo46q7fIEd5LYENZriqv8l6EW30G9rRpg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.10_1781657809379_0.5149309504167232"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/2fc79466620cbdcb9c608074da00777f/agenticprimitives-mcp-runtime-1.0.0-alpha.10.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.10"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-KlXmG5aEp55cPq8sfEN7vwMoMLLJO/4aW+GFjyfIkPh46lmAI93pnmo46q7fIEd5LYENZriqv8l6EW30G9rRpg==",
+     "shasum": "a51c575a1f8bbb8b6394dc9fcaa10ee534cb021d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCGvNdbBQ8c4mz/lcBzzs/tt9A86Cw6/0Am46alUvxPSAIgFViImhe18v/k3W4oCzjOYMVL04Yp7b8zi+ITfTaz4nc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.10.tgz",
+     "unpackedSize": 98654
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.10",
+     "@agenticprimitives/delegation": "1.0.0-alpha.10",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.10",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.10",
+     "@agenticprimitives/types": "1.0.0-alpha.10",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.10"
+   },
+   "1.0.0-alpha.11": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.11.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.11",
+    "_integrity": "sha512-EGvT0sWXUBTJT8nj/+S/1VajcL578oXrt6f2y6idwfdWLfJRuEpSxXyvnbGGD9FivgBC1VaovG6x2LmtfqlVJg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.11_1781717892949_0.09504727267063995"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/c86bcbe578ec2f92257a36b7e4ed70e1/agenticprimitives-mcp-runtime-1.0.0-alpha.11.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.11"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-EGvT0sWXUBTJT8nj/+S/1VajcL578oXrt6f2y6idwfdWLfJRuEpSxXyvnbGGD9FivgBC1VaovG6x2LmtfqlVJg==",
+     "shasum": "5bb6e68029abcc760c4c2aba858435162c6556fc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQClEgtQvZel21vue4cDN4EoMS5Uq/OyM1Nqg76Rcj6vVQIgLqEOj0rLDqOjUrFpZ2K1ur8nsXYbDC0unEuEZrorg6M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.11.tgz",
+     "unpackedSize": 98703
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.11",
+     "@agenticprimitives/delegation": "1.0.0-alpha.11",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.11",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.11",
+     "@agenticprimitives/types": "1.0.0-alpha.11",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.11"
+   },
+   "1.0.0-alpha.12": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.12.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.12",
+    "_integrity": "sha512-+6r5hCD4t4lCALVq0sHByTBJZ+xmmYZFYsWR6B5Euo0XvqTYdAVv03oJxLWvwcgo3sDVBkr99Nlxmb2WZ27SiA==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.12_1781803957534_0.3512030115395999"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/0f6281b033145d01d8dbfce293dec51c/agenticprimitives-mcp-runtime-1.0.0-alpha.12.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.12"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-+6r5hCD4t4lCALVq0sHByTBJZ+xmmYZFYsWR6B5Euo0XvqTYdAVv03oJxLWvwcgo3sDVBkr99Nlxmb2WZ27SiA==",
+     "shasum": "f1c125e39d75b964612b7e52dfabe2376a82f35e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIER7pUTdtDx1+jgbUp+hab7RtWRJVgYFIkaetEfDArI3AiEAzdI49vR7NetR+p7uN8yGTzDoyyQmfjIE5YZHI05Nxrs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.12.tgz",
+     "unpackedSize": 98703
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.12",
+     "@agenticprimitives/delegation": "1.0.0-alpha.12",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.12",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.12",
+     "@agenticprimitives/types": "1.0.0-alpha.12",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.12"
+   },
+   "1.0.0-alpha.13": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.13.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.13",
+    "_integrity": "sha512-ePhoy8F557CvTMkag4xEgWmkVecxKePCCy4wKPG7ruapMXCkSrCZtxqI8eR7wHgX7PxUjkYdGjSJ8XCcfhGdWw==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.13_1781839079969_0.5272472875372032"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/86a3243928a462413266471a0654a14a/agenticprimitives-mcp-runtime-1.0.0-alpha.13.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.13"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-ePhoy8F557CvTMkag4xEgWmkVecxKePCCy4wKPG7ruapMXCkSrCZtxqI8eR7wHgX7PxUjkYdGjSJ8XCcfhGdWw==",
+     "shasum": "f6b567842e7911416759b362b027fb626eee21c9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC4g2ZiZfnhClkf2mwOSWvRkomfCXO7b55YLOvSUmQJkAiBxJBRBhM/0CQNYzJ/vzXqypojgVy+7qF9ufk51foHD2A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.13.tgz",
+     "unpackedSize": 98703
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.13",
+     "@agenticprimitives/delegation": "1.0.0-alpha.13",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.13",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.13",
+     "@agenticprimitives/types": "1.0.0-alpha.13",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.13"
+   },
+   "1.0.0-alpha.14": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.14.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.14",
+    "_integrity": "sha512-sMHcbsvBpLhtzT57HqAFU13YpxM/0qKT9B3/wXe7bREBNaxLAA8Qf9AyMAULOqZxN2DFfdnGvLPW2jhOhZuXIg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.14_1783245032425_0.7221708399044704"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/63217fb801bb0c4ccb790b711f6fe8bf/agenticprimitives-mcp-runtime-1.0.0-alpha.14.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.14"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-sMHcbsvBpLhtzT57HqAFU13YpxM/0qKT9B3/wXe7bREBNaxLAA8Qf9AyMAULOqZxN2DFfdnGvLPW2jhOhZuXIg==",
+     "shasum": "cdd55599d91f39c48b1bb42484b8d56273121f65",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC4aTfFpjYNb30heRLjk6EJz2klUUeKpUnC+DadX/9S8wIgEvHtoEj3Q+k1qBLEU7udZ4ih1XIbPjXM+6XcFifwqRY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.14.tgz",
+     "unpackedSize": 126357
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.14",
+     "@agenticprimitives/delegation": "1.0.0-alpha.14",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.14",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.14",
+     "@agenticprimitives/types": "1.0.0-alpha.14",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.14"
+   },
+   "1.0.0-alpha.15": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.15.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.15",
+    "_integrity": "sha512-WXO3ivwz7d1/4zK0AOUoOZ4f13O4a+RegKqvXeJCes5V8n/8pUoCZBo13KOrmHPfpIKvQi6GbivzUsaEsAYy5Q==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.15_1783259059847_0.4612091056790433"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/aaa915df12ab2f1587ac64e019e75cdf/agenticprimitives-mcp-runtime-1.0.0-alpha.15.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.15"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-WXO3ivwz7d1/4zK0AOUoOZ4f13O4a+RegKqvXeJCes5V8n/8pUoCZBo13KOrmHPfpIKvQi6GbivzUsaEsAYy5Q==",
+     "shasum": "c7244dcf249c0496f4b8db479c20396564e76cb3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDrEenX4UunmWKa3JEyEB7LreBQi2c6WdPaaO3cLMVVHAIgZCk/poTukl/6AX+2UPEKvFU3U2WgT5hVJ+X+eVBoIxs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.15.tgz",
+     "unpackedSize": 126357
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.15",
+     "@agenticprimitives/delegation": "1.0.0-alpha.15",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.15",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.15",
+     "@agenticprimitives/types": "1.0.0-alpha.15",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.15"
+   },
+   "1.0.0-alpha.16": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.16.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.16",
+    "_integrity": "sha512-M/iIduBAXdOwVr6ZbBclnPobLgGSXbdCZrTuHNt63mQ29iQL992oCRYBGU3W0gsnPI1ruy8gOYEYqQ4lEMRYYw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.16_1783303107919_0.37434171726688503"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/4dfe1ba9838b7f4f7f9c5a671e1064ea/agenticprimitives-mcp-runtime-1.0.0-alpha.16.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.16"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-M/iIduBAXdOwVr6ZbBclnPobLgGSXbdCZrTuHNt63mQ29iQL992oCRYBGU3W0gsnPI1ruy8gOYEYqQ4lEMRYYw==",
+     "shasum": "c0e5d678239db726b54ad2b6acabf3a79d0fb427",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDqDkYqaz/1zuOcYy8ZEq7MCEKBV7b/t+k0N3c9pawImAiEAsfOQMERulRVAwBQPzpALZJxtLEp30JrnIxTO5F/ubjM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.16.tgz",
+     "unpackedSize": 126786
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.16",
+     "@agenticprimitives/delegation": "1.0.0-alpha.16",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.16",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.16",
+     "@agenticprimitives/types": "1.0.0-alpha.16",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.16"
+   },
+   "1.0.0-alpha.17": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.17.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.17",
+    "_integrity": "sha512-0l+a/g9I1B3YAUQ9ukm+qylTQy+KFW8fpSX9HaJLkcxRXF3cj8NcFfl9UIH8aN3/598K1diyJymbnnP1A+GJvg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.17_1784041069352_0.9218202678342722"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/58004aa000f6d5b4eeae2768eeebb2d6/agenticprimitives-mcp-runtime-1.0.0-alpha.17.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.17"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-0l+a/g9I1B3YAUQ9ukm+qylTQy+KFW8fpSX9HaJLkcxRXF3cj8NcFfl9UIH8aN3/598K1diyJymbnnP1A+GJvg==",
+     "shasum": "304b9fd34430fe98f1f6bf5acc40101fceb52b1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDuVbNtv6CB9CoNeN/GIIVGjMgKRZjpeXOTIiRvuFgvAwIgAcqqmukjPHgWFqWKvn0zUKCseRXF7fpwBOqJNjyx2QE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.17.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.17",
+     "@agenticprimitives/delegation": "1.0.0-alpha.17",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.17",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.17",
+     "@agenticprimitives/types": "1.0.0-alpha.17",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.1",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.17"
+   },
+   "1.0.0-alpha.18": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.18.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.18",
+    "_integrity": "sha512-N4pEaXjwX+BrKvSwbDKzDQpspo2IpHh7g2NrO9og6wa4gnHe7sKg0kY0XIN45JhtD/tXzKVQ2tyB1FdHBsaxWg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.18_1784293480964_0.5642631077062472"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/48a0a556dbb9cf8ebcafc01a19912810/agenticprimitives-mcp-runtime-1.0.0-alpha.18.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.18"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-N4pEaXjwX+BrKvSwbDKzDQpspo2IpHh7g2NrO9og6wa4gnHe7sKg0kY0XIN45JhtD/tXzKVQ2tyB1FdHBsaxWg==",
+     "shasum": "9081f821fc4a717a5cd5dead51aaa1b897d8cb65",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCDJmKKOO5W34B62a4kF7ROsbYiWIWJ++wHgR6DEF3wygIgJdgeKxr3/mN65LX6Vl7jYV6bku+GWZRXWJeT7bW8weQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.18.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.18",
+     "@agenticprimitives/delegation": "1.0.0-alpha.18",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.18",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.18",
+     "@agenticprimitives/types": "1.0.0-alpha.18",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.1",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.18"
+   },
+   "1.0.0-alpha.19": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.19.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.19",
+    "_integrity": "sha512-ADDLn/a0iDVHkvXUrK5hs5o4w98AvPNobCYa6MULd7GP9CWHE6/fZYg15ZjVPyYQ5hyATxApnN9YiCzebt02OA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.19_1784683629507_0.07353249955157426"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/ce5a305c06cd8c0b3a4e929485cfe07e/agenticprimitives-mcp-runtime-1.0.0-alpha.19.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.19"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-ADDLn/a0iDVHkvXUrK5hs5o4w98AvPNobCYa6MULd7GP9CWHE6/fZYg15ZjVPyYQ5hyATxApnN9YiCzebt02OA==",
+     "shasum": "726af288b96d0b659ee1d1d6501260666825bcbd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFj9w+ZDlqqvO3wE73V3MuCj0E5MRDVgecGPCZcg0RRRAiA9AahkSdP0wQWO4JLmFsF3tNHxykC7bcLPYPoA5ZaRbA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.19.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.19",
+     "@agenticprimitives/delegation": "1.0.0-alpha.19",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.19",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.19",
+     "@agenticprimitives/types": "1.0.0-alpha.19",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.1",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.19"
+   },
+   "1.0.0-alpha.20": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.20.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.20",
+    "_integrity": "sha512-RBjgQ+ukhXBlpN6PSlWyFb5jddJjlOvPD6T9BaV4z4dCJNW/V9bBBVUVK919FTqJ8sSmbxewEWyMkZzwWbSZKw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.20_1784817583947_0.181442890982197"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/f2aaf9028b498dbac7943658cfc262b2/agenticprimitives-mcp-runtime-1.0.0-alpha.20.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-RBjgQ+ukhXBlpN6PSlWyFb5jddJjlOvPD6T9BaV4z4dCJNW/V9bBBVUVK919FTqJ8sSmbxewEWyMkZzwWbSZKw==",
+     "shasum": "5af627736c02665b7c4c3c6f2ef0409b5ea2a1d3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDdc8K7P0KM58o7SGUczere4h9EnJTJDMXLT9tg7EKG+QIgBJvSd5tatlFwC2496rwFKb5EqjXBLM7IxWIbXDAyi9A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.20.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.20",
+     "@agenticprimitives/delegation": "1.0.0-alpha.20",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.20",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.1",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.20",
+     "@agenticprimitives/types": "1.0.0-alpha.20",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.1",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.20"
+   },
+   "1.0.0-alpha.21": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.21.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.21",
+    "_integrity": "sha512-3hpIHDREibnI92sykrZxX2knCGrkLx2b5V7fg3Om/wW1ti5cx+xb/HORx0Rs4RQTqNZiOwZuXoTyuCkecn7jjQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.21_1785727525141_0.46647247751363685"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/c17e9db88705127fb6adbcd4f0e1bec1/agenticprimitives-mcp-runtime-1.0.0-alpha.21.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-3hpIHDREibnI92sykrZxX2knCGrkLx2b5V7fg3Om/wW1ti5cx+xb/HORx0Rs4RQTqNZiOwZuXoTyuCkecn7jjQ==",
+     "shasum": "ea501b023e4af5899890bef344135e241f108866",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDoNO0EWRcdnz7sQu9wcYY+BuP68vqsZ3voC/URVYZqTAIhAKgFR83UqwHukqQLkTC4gfU7bWXDS8AeyftYTmAvyl5Z"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.21.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.21",
+     "@agenticprimitives/delegation": "1.0.0-alpha.21",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.21",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.2",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.21",
+     "@agenticprimitives/types": "1.0.0-alpha.21",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.2",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.21"
+   },
+   "1.0.0-alpha.22": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.22.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.22",
+    "_integrity": "sha512-srY+n+YN6GqeEbKt6kllOxs9qKI8cczLZRtIQvTAxCVndw8bptEB/X4PBiOg7W+S7CA4/ZHyONo/PtpTepD/DA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.22_1787775716477_0.020599959970712733"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/60710662f104e51896337414e6817177/agenticprimitives-mcp-runtime-1.0.0-alpha.22.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-srY+n+YN6GqeEbKt6kllOxs9qKI8cczLZRtIQvTAxCVndw8bptEB/X4PBiOg7W+S7CA4/ZHyONo/PtpTepD/DA==",
+     "shasum": "d0bd7db98b7ff2f1658fc8003fee53294892d946",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCOF3gzIcjs3/oW3HyvEPk/1CtprXz5jhAyeMwFxF5bXgIgDTUOwq1j9Dlw1I3cEqW36kUvgnTHKh5noGES+O6oE+w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.22.tgz",
+     "unpackedSize": 137603
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.22",
+     "@agenticprimitives/delegation": "1.0.0-alpha.22",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.22",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.2",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.22",
+     "@agenticprimitives/types": "1.0.0-alpha.22",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.3",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.22"
+   },
+   "1.0.0-alpha.23": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.23.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.23",
+    "_integrity": "sha512-WLTkUJ1vjOAF3D2WMfHIij4YCQxUi1XMZJv+l00nwONr6vy+hDpuDu8PA13DkKCP3krY6DdN9RvffKwVw1eI1A==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.23_1789164129146_0.607638972603008"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/a6cbd7f2148a3beaed0bc14e01fad0bf/agenticprimitives-mcp-runtime-1.0.0-alpha.23.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-WLTkUJ1vjOAF3D2WMfHIij4YCQxUi1XMZJv+l00nwONr6vy+hDpuDu8PA13DkKCP3krY6DdN9RvffKwVw1eI1A==",
+     "shasum": "5ad11b4e5d0e00866adbef394c377b56d8b4afed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG9GbCwDBaAlO0D4OKsW/Yc/8WGJUFFgHtzgZa8IOIKYAiEAqP73ASwCRJi1uswyQ2HVU3Lwr7Y/zMrD7gYUMlsYvCE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.23.tgz",
+     "unpackedSize": 137412
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.23",
+     "@agenticprimitives/delegation": "1.0.0-alpha.23",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.23",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.3",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.23",
+     "@agenticprimitives/types": "1.0.0-alpha.23",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.4",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.23"
+   },
+   "1.0.0-alpha.24": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.24.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.24",
+    "_integrity": "sha512-4ApiIKtZafPEdcNxuFHnOMkeEhkq9ehOvFXL393M8Lom2DdHasHMhfek/B1ITSOW/NlufQDjiLhTqrL33xghWw==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.24_1789230547436_0.8362915691311483"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/b5f46415b4b5fa170501273276f30d83/agenticprimitives-mcp-runtime-1.0.0-alpha.24.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-4ApiIKtZafPEdcNxuFHnOMkeEhkq9ehOvFXL393M8Lom2DdHasHMhfek/B1ITSOW/NlufQDjiLhTqrL33xghWw==",
+     "shasum": "04bd7aff5bc0b556777841552c78d1630cf72650",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFuG+Q2vjojoZN0MS1IqH7U/HvLBFZZ58el3fNaFRvgDAiEAuSz5EpIDjfabTae5bIuiMQtWSqnFRs8BbHCIxc6jrZk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.24.tgz",
+     "unpackedSize": 137412
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.24",
+     "@agenticprimitives/delegation": "1.0.0-alpha.24",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.24",
+     "@agenticprimitives/rate-control": "0.0.0-alpha.4",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.24",
+     "@agenticprimitives/types": "1.0.0-alpha.24",
+     "@agenticprimitives/verification-receipts": "0.0.0-alpha.5",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.24"
+   },
+   "1.0.0-alpha.4": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.4",
+    "_integrity": "sha512-WMis2VJ/cHtN+SqaN2lbH13cvo9Zi/rVzmHyav4NnFs1MRmSWLnj9ayTiFSFodMmTERSoso5nbXckBPh5hvGEg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.4_1780264368053_0.9612958621615708"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/c7c2ba6caa2c5f9c573f703d644e6f32/agenticprimitives-mcp-runtime-1.0.0-alpha.4.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.4"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-WMis2VJ/cHtN+SqaN2lbH13cvo9Zi/rVzmHyav4NnFs1MRmSWLnj9ayTiFSFodMmTERSoso5nbXckBPh5hvGEg==",
+     "shasum": "66b50f6b5a0ff6a28e233288671e53bf397a352c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCeO98kn3w08mGiiBsM4sbtcYC3wSP6/RiPuneuw3OZZQIhAKZGYtDMIFY8vyQa5+6kJkkpBDEVWPx5a3VP11lIJfKv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.4.tgz",
+     "unpackedSize": 89276
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.4",
+     "@agenticprimitives/delegation": "1.0.0-alpha.4",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.4",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.4",
+     "@agenticprimitives/types": "1.0.0-alpha.4",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.50.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.4"
+   },
+   "1.0.0-alpha.5": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.5",
+    "_integrity": "sha512-uIdcuhugskG4Al15DpSZ0CnL1XHxlzaoC6S6Z4L1KmfZbtYxlflhBRN2V9NND8W8gBtojVDxQS0i2USwTBnBOg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.5_1780680281900_0.7822752417961916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/c548465cd5a455c09c6345f3a83c63e0/agenticprimitives-mcp-runtime-1.0.0-alpha.5.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.5"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-uIdcuhugskG4Al15DpSZ0CnL1XHxlzaoC6S6Z4L1KmfZbtYxlflhBRN2V9NND8W8gBtojVDxQS0i2USwTBnBOg==",
+     "shasum": "3befbf8c4bcb71cba5a1fad630ec1c8ab395d81f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICnuW+pmkJ/UatvAscEXkNyJ/T65WoU8B/YKIL6AzSTCAiBijD3i/HUPPoARAPjwsnvwEpMhFvRYVHVc0eHrj9vBfw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.5.tgz",
+     "unpackedSize": 92760
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.5",
+     "@agenticprimitives/delegation": "1.0.0-alpha.5",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.5",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.5",
+     "@agenticprimitives/types": "1.0.0-alpha.5",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.5"
+   },
+   "1.0.0-alpha.6": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.6",
+    "_integrity": "sha512-22eHTZyc0cYXZ3Z0Yn9Pk4FHLl1uUmeOXtfUNPjuPPt+QWwlz1kjLaMk3lqlIi9SHEQ3HbwG1ftbkQ3ORK9cTg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.6_1780695143564_0.20504755256274287"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/2b79b91098d89f763433fce1e74ddfee/agenticprimitives-mcp-runtime-1.0.0-alpha.6.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.6"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-22eHTZyc0cYXZ3Z0Yn9Pk4FHLl1uUmeOXtfUNPjuPPt+QWwlz1kjLaMk3lqlIi9SHEQ3HbwG1ftbkQ3ORK9cTg==",
+     "shasum": "644dc4859a87ea56a609fafc0e4733d3d6d646e8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCHwosWG8hJez4Z9wwSzy8yb17rQBedgSqEYMcuj5Eh9sCIQCF1QZHne7b6zF9CbGdJdbEtiBUTmcBqjqwcA+tnaPDDw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.6.tgz",
+     "unpackedSize": 92760
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.6",
+     "@agenticprimitives/delegation": "1.0.0-alpha.6",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.6",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.6",
+     "@agenticprimitives/types": "1.0.0-alpha.6",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.6"
+   },
+   "1.0.0-alpha.7": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.7.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.7",
+    "_integrity": "sha512-d836ypjh9jwBnAjvPfz7Oax6PSxEqCoMuWMXpIPIHenMWAJpOfNjnwKxRS7UMld3yS6sTfjAnpkznEtgn7PCew==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.7_1781150736079_0.06460685140602385"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/c83a13961c5ae478ed7b44137e3fa274/agenticprimitives-mcp-runtime-1.0.0-alpha.7.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.7"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-d836ypjh9jwBnAjvPfz7Oax6PSxEqCoMuWMXpIPIHenMWAJpOfNjnwKxRS7UMld3yS6sTfjAnpkznEtgn7PCew==",
+     "shasum": "0c1e7af19e333d9145bb01e45dded0b85d3910f3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC78uPylfS8fbX/ujjqCM5pQBV6Lfktt8Fnqns3GUO+VgIhAIZw1f1mF97KTUCk9csh3OUIzYyrw8CO6fg1xI2JIIJP"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.7.tgz",
+     "unpackedSize": 98648
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.7",
+     "@agenticprimitives/delegation": "1.0.0-alpha.7",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.7",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.7",
+     "@agenticprimitives/types": "1.0.0-alpha.7",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.7"
+   },
+   "1.0.0-alpha.8": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.8.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.8",
+    "_integrity": "sha512-pJ1rVgAn2Am2VztOxxa6QcBSbQyYH9S6Zj1hfXE6agLEjGRPIikPvEU3H++hortvOAhteYanmc8MW2VgD3CFWQ==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.8_1781269560604_0.6936366222598132"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/699dffa74ed39da63419acfc4841f18a/agenticprimitives-mcp-runtime-1.0.0-alpha.8.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.8"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-pJ1rVgAn2Am2VztOxxa6QcBSbQyYH9S6Zj1hfXE6agLEjGRPIikPvEU3H++hortvOAhteYanmc8MW2VgD3CFWQ==",
+     "shasum": "d69c5d622a75205040535dcd0e788a684e40c34f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCRAHh1cdJSFL927mr1N3zqvGJSUYo5z0KmtTgL9VWXHQIgamMRK+m92M3KnXWgArjvb+0sPiOSS0LTxUyPXUu6DCw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.8.tgz",
+     "unpackedSize": 98648
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.8",
+     "@agenticprimitives/delegation": "1.0.0-alpha.8",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.8",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.8",
+     "@agenticprimitives/types": "1.0.0-alpha.8",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.8"
+   },
+   "1.0.0-alpha.9": {
+    "_from": "file:agenticprimitives-mcp-runtime-1.0.0-alpha.9.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@agenticprimitives/mcp-runtime@1.0.0-alpha.9",
+    "_integrity": "sha512-itsMYZsybo1adrL0z/J6q6zqSeuAfNSqRypWnf1NXAIuFuvEhDJF00Eb2gSp88KimloYkFafMFKQk+JPzfLVcg==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-runtime_1.0.0-alpha.9_1781296848555_0.16050537000724674"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1d76a2b3-bc4d-4379-b765-9e706f664b8b"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/5d397abfcf06f33ba8a7385578cd6aa4/agenticprimitives-mcp-runtime-1.0.0-alpha.9.tgz",
+    "bugs": {
+     "url": "https://github.com/agentictrustlabs/agenticprimitives/issues"
+    },
+    "description": "Delegation-aware authorization middleware around the official MCP TypeScript SDK. The decision layer, not the SDK.",
+    "devDependencies": {
+     "@types/node": "^22.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@agenticprimitives%2fmcp-runtime@1.0.0-alpha.9"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-itsMYZsybo1adrL0z/J6q6zqSeuAfNSqRypWnf1NXAIuFuvEhDJF00Eb2gSp88KimloYkFafMFKQk+JPzfLVcg==",
+     "shasum": "aa2ac9e92385c46652c3be4515d3963b2210c7e8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICfIn/FAmkm4lbvo2jCEl6FxLFmQOFVh+Pp3ejJQY0VtAiEA9HNzfdoDJ8ZAGj2AlFUlNiXaQvMtVKnDNIYhhlI+JK4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agenticprimitives/mcp-runtime/-/mcp-runtime-1.0.0-alpha.9.tgz",
+     "unpackedSize": 98648
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./lint": {
+      "import": "./dist/lint.js",
+      "types": "./dist/lint.d.ts"
+     },
+     "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+     }
+    },
+    "homepage": "https://github.com/agentictrustlabs/agenticprimitives/tree/master/packages/mcp-runtime",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "delegation",
+     "authorization",
+     "agentic"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92022a2172ea]",
+      "name": "richcanvas"
+     }
+    ],
+    "name": "@agenticprimitives/mcp-runtime",
+    "peerDependencies": {
+     "@agenticprimitives/audit": "1.0.0-alpha.9",
+     "@agenticprimitives/delegation": "1.0.0-alpha.9",
+     "@agenticprimitives/key-custody": "1.0.0-alpha.9",
+     "@agenticprimitives/tool-policy": "1.0.0-alpha.9",
+     "@agenticprimitives/types": "1.0.0-alpha.9",
+     "@modelcontextprotocol/sdk": ">=1.29.0 <2",
+     "viem": "^2.52.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-runtime",
+     "type": "git",
+     "url": "git+https://github.com/agentictrustlabs/agenticprimitives.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "test:integration": "vitest run test/integration --passWithNoTests",
+     "test:unit": "vitest run test/unit --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0-alpha.9"
+   }
+  }
+ },
+ "name": "@agenticprimitives/mcp-runtime",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@agenticprimitives%2Fmcp-runtime"
+}

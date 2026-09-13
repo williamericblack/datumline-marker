@@ -1,0 +1,1463 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.16",
+  "maintainers": [
+   {
+    "email": "[redacted-email:67319b2394c9]",
+    "name": "adbpg-imv"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0",
+   "0.2.1",
+   "0.2.10",
+   "0.2.11",
+   "0.2.12",
+   "0.2.13",
+   "0.2.14",
+   "0.2.15",
+   "0.2.16",
+   "0.2.2",
+   "0.2.3",
+   "0.2.4",
+   "0.2.5",
+   "0.2.6",
+   "0.2.7",
+   "0.2.8",
+   "0.2.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@adbpg-imv/imv-mcp-server",
+  "_rev": "17-e9241e7c080e3bf1438658b65a65cbc6",
+  "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+  "dist-tags": {
+   "latest": "0.2.16"
+  },
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "adbpg",
+   "analyticdb",
+   "postgresql",
+   "materialized-view",
+   "imv"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:67319b2394c9]",
+    "name": "adbpg-imv"
+   }
+  ],
+  "name": "@adbpg-imv/imv-mcp-server",
+  "readme": "# ADB-PG IMV MCP Server\n\n> Connect your AnalyticDB for PostgreSQL (ADB-PG) instance to Cursor, Claude, Qoder, and other AI assistants to manage Incremental Materialized Views (IMV).\n\nThe [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) standardizes how Large Language Models (LLMs) talk to external services. This server connects AI assistants directly to an ADB-PG instance through the Aliyun DataAPI, exposing IMV creation, monitoring, diagnostics, and index / distribution-key optimization as a set of structured tools. See the [full list of tools](#tools).\n\n## Prerequisites\n\nYou will need Node.js **version 26.0.0 or later** installed on your machine (this is the version we actually test against). You can check this by running:\n\n```shell\nnode -v\n```\n\nIf you don't have Node.js installed, you can download it from [nodejs.org](https://nodejs.org/).\n\nYou will also need:\n\n- An ADB-PG instance with the **IMV feature** available (incremental materialized views are provided as an instance capability tied to the minor version).\n- A database account (`username` / `password`) for connecting to the target database. A least-privilege account is recommended \u2014 avoid superusers.\n\n## Setup\n\n### 1. Aliyun AccessKey\n\nFirst, go to your [Aliyun RAM console](https://ram.console.aliyun.com/profile/access-keys) and create an AccessKey pair. We recommend a least-privilege RAM sub-account rather than the primary account. The key needs permission to call the instance's DataAPI \u2014 `ExecuteStatement`, `CreateSecret`, `DeleteSecret`, and `ListSecrets` (the last two let the server automatically recreate the secret after a database password rotation). If you omit `IMV_REGION_ID`, it also needs `DescribeDBInstanceAttribute` to auto-discover the instance's region.\n\nMake sure to copy the AccessKey Secret, as you won't be able to see it again.\n\n### 2. Configure MCP client\n\nNext, configure your MCP client to use this server. Most MCP clients store the configuration as JSON in the following format:\n\n```json\n{\n  \"mcpServers\": {\n    \"imv-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@adbpg-imv/imv-mcp-server@latest\"],\n      \"env\": {\n        \"ALIBABA_CLOUD_ACCESS_KEY_ID\": \"<your-ak-id>\",\n        \"ALIBABA_CLOUD_ACCESS_KEY_SECRET\": \"<your-ak-secret>\",\n        \"IMV_DB_INSTANCE_ID\": \"<your-instance-id>\",\n        \"IMV_DATABASE\": \"<your-database>\",\n        \"IMV_DB_USERNAME\": \"<your-db-user>\",\n        \"IMV_DB_PASSWORD\": \"<your-db-password>\"\n      }\n    }\n  }\n}\n```\n\n### Environment variables\n\n| Variable | Required | Description |\n|----------|----------|-------------|\n| `ALIBABA_CLOUD_ACCESS_KEY_ID` | Yes | Aliyun AccessKey ID |\n| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | Yes | Aliyun AccessKey Secret |\n| `ALIBABA_CLOUD_SECURITY_TOKEN` | No | STS token, only needed when using temporary credentials |\n| `IMV_REGION_ID` | No | Instance region. If omitted, it is auto-discovered from the instance ID at startup (requires the `DescribeDBInstanceAttribute` permission). If set, it must match the instance's actual region, otherwise calls fail with `Instance.NotFound` |\n| `IMV_DB_INSTANCE_ID` | Yes | ADB-PG instance ID (e.g. `gp-xxxxxxxx`) |\n| `IMV_DATABASE` | No | Default target database. If omitted, every tool call must specify the `database` parameter instead \u2014 useful when different editor windows / agents need to work on different databases of the same instance |\n| `IMV_DB_USERNAME` | Yes | Database user |\n| `IMV_DB_PASSWORD` | Yes | Database password |\n\n## Tools\n\n_**Note:** This server is pre-1.0, so expect some breaking changes between versions. Since LLMs automatically adapt to the tools available, this shouldn't affect most users._\n\nThe following tools are available to the LLM. The **Monitoring & diagnostics** and **Inspection** groups are read-only; the **IMV lifecycle** and **Schema operations** groups perform writes and require the agent to confirm before running.\n\n### Monitoring & diagnostics\n\n- `imv_latency`: Reports the incremental-maintenance lag (in seconds) for each base table pipeline.\n- `imv_error_log`: Returns the most recent incremental-maintenance error records.\n- `imv_incremental_stat`: Incremental-maintenance timing statistics (avg / max), filterable by base table or MV.\n- `imv_is_ready`: Reports whether an IMV has finished initialization and is ready to query.\n- `adbpg_diagnose_skew_single`: Detects data skew for a single object.\n\n### Inspection\n\n- `imv_list_all`: Lists all IMV names in the database (newest first).\n- `imv_stat_single`: Full snapshot of a single IMV (size / rows / reloptions / timestamps / access heat).\n- `imv_dependency`: Upstream / downstream dependency graph, parameterized by direction and depth (including nested IMVs).\n- `imv_get_viewdef`: Returns an IMV's definition (either the `view` creation definition or the `maintain` definition).\n- `adbpg_list_columns`: Lists the columns of a relation.\n- `adbpg_list_indexes`: Lists all indexes on a relation.\n- `adbpg_index_definition`: Returns the `CREATE INDEX` definition of a specific index.\n- `adbpg_uniqueness_ratio`: Column-combination uniqueness ratio (NDV / row count).\n- `imv_optimize`: Checks an IMV's index and distribution key, returning diagnostic facts and optimization advice.\n\n### IMV lifecycle (write)\n\n- `imv_init_ddl`: Initializes the DDL environment by creating the `public.imv_ddl` helper function according to the instance's capabilities.\n- `imv_create`: Creates an IMV (via the `imv_ddl` function; runs asynchronously).\n- `imv_replace`: Replaces an IMV definition (`CREATE OR REPLACE`; runs asynchronously).\n- `imv_refresh_self`: Performs a READABLE full refresh of a single IMV.\n- `imv_drop`: Drops a materialized view (`CASCADE` is disabled at the tool layer).\n- `imv_alter_maintain_index`: Atomically replaces an IMV's incremental-maintenance index with the specified columns (single-transaction swap into the canonical `imv<oid>_index` name; the oid is resolved inside the SQL). This index serves **incremental apply performance only \u2014 never change it for query-performance purposes**.\n\n### Schema operations (write)\n\n- `adbpg_create_index`: Creates a btree index on the specified columns.\n- `adbpg_drop_index`: Drops an index.\n- `adbpg_create_view`: Creates a plain view (`CREATE VIEW ... AS SELECT`; `or_replace` switches to `CREATE OR REPLACE VIEW`).\n- `adbpg_drop_view`: Drops a view (`CASCADE` is disabled at the tool layer).\n- `adbpg_relation_alter_access_method`: Changes the storage engine (heap / ao_row / ao_column).\n- `adbpg_relation_alter_distributed`: Changes the distribution key or switches to `REPLICATED`.\n- `adbpg_relation_alter_rename`: Renames a `TABLE` / `VIEW` / `MATERIALIZED VIEW` / `INDEX`.\n\n## Security risks\n\nConnecting any data source to an LLM carries inherent risks, especially when it stores sensitive data.\n\n### Prompt injection\n\nLike all MCP servers that can run database operations, this server returns database content (error messages, view definitions, query results) to the LLM. If that content contains maliciously crafted instruction text, an LLM might be tricked into treating it as a command. Most MCP clients ask you to manually approve each tool call \u2014 we recommend keeping that setting enabled and reviewing tool calls before they run. To lower the risk further, prefer connecting to non-production or controlled data sources, and grant the database account least privilege.\n\n### Built-in safeguards\n\nTool inputs are validated at runtime before SQL is composed. The server enforces each tool's required fields, primitive types, and declared enums; it does not rely on MCP-client schema validation alone:\n\n- **Identifiers** (schema / table / column / index names) may only match `[a-zA-Z_][a-zA-Z0-9_.]*`, otherwise the call throws \u2014 closing off object-name injection.\n- **View-definition fragments** (the `select_sql` of `imv_create` / `imv_replace` / `adbpg_create_view`) must start with `SELECT` / `WITH` and may not contain semicolons, comments, or DDL/DML keywords.\n- **Parameter values** are escaped into PostgreSQL literals so injection strings cannot escape the string context.\n- **Destructive operations**: `imv_drop` disables `CASCADE`; the agent is expected to confirm object names with the user before running delete-style tools.\n- **Credentials are never leaked**: all outgoing error text and diagnostic logs are passed through a redaction step that strips `Password` / `AccessKeyId` / `Signature` / `SecurityToken` and any known plaintext password before output. Passwords and AccessKeys are never persisted in plaintext.\n- **Local secret cache**: on first use the server creates a DataAPI secret and caches its ARN in `.imv-secret-cache.json` (file mode `0600`) inside the server's install directory. The file stores the ARN, a SHA-256 config fingerprint, instance ID, database username, and region \u2014 never the plaintext password or AccessKey. You can delete it at any time; the secret is recreated automatically on the next call.\n\n## License\n\nThis project is licensed under Apache 2.0. See the [LICENSE](./LICENSE) file for details.\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.2.0": "2026-08-10T08:28:29.601Z",
+   "0.2.1": "2026-08-10T09:13:59.105Z",
+   "0.2.10": "2026-08-13T14:02:31.687Z",
+   "0.2.11": "2026-08-14T01:40:39.927Z",
+   "0.2.12": "2026-08-17T04:54:10.961Z",
+   "0.2.13": "2026-08-17T10:50:24.271Z",
+   "0.2.14": "2026-08-24T06:26:10.762Z",
+   "0.2.15": "2026-08-31T09:47:13.663Z",
+   "0.2.16": "2026-09-08T02:13:59.560Z",
+   "0.2.2": "2026-08-10T09:47:28.612Z",
+   "0.2.3": "2026-08-11T03:01:59.112Z",
+   "0.2.4": "2026-08-12T03:18:08.840Z",
+   "0.2.5": "2026-08-12T06:18:57.682Z",
+   "0.2.6": "2026-08-12T11:12:06.211Z",
+   "0.2.7": "2026-08-13T10:35:39.661Z",
+   "0.2.8": "2026-08-13T11:12:28.136Z",
+   "0.2.9": "2026-08-13T11:48:24.812Z",
+   "created": "2026-08-10T08:28:29.373Z",
+   "modified": "2026-09-08T02:13:59.741Z"
+  },
+  "versions": {
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.0_1786350509463_0.14105435243308717"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-E9R2OE2R6NKEc/0KMJR48uXUHzYEBC/B6YvTsQ9gDYA5q4C+Oe5lCA2F6Sya+EqE0c7e400W0LLebwlvqvNSnw==",
+     "shasum": "bd17b7a22fb39ffee775cb27fb3709936c302ad1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID0X11s3r5KF8Tpv1BNCc8dMyQVxTSGaX0IN+udi0O88AiA7MRmnhJqGlIAC7a5//Nz+MjsSNtbtuiOVgwwmhRmA/A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.0.tgz",
+     "unpackedSize": 173053
+    },
+    "gitHead": "5c82bb5d24cd1f6e35dcd253df184286bf661899",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.1_1786353238969_0.2353012342102172"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-LBPzdFJz2ssaxiUdbvyWobJlqLLSsa4L4PvEe7dDfbyPvAAemxYSsnnWmGZZ4Ir4tOp8D/wdNhPL9IhaIrzGiw==",
+     "shasum": "36a7fdb1499532c71d7f70fc76e20510c2e08a35",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCCD8h1HQQ4uhLtDzlxLuNgl9eh5MtSwi/uP86vPqdtHwIgZZSsl/Tdm6J7Z73TFcIbhWOiyWkDodjQ0l8/orbZ9T4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.1.tgz",
+     "unpackedSize": 173053
+    },
+    "gitHead": "5c82bb5d24cd1f6e35dcd253df184286bf661899",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.10",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.10_1786629751496_0.02643970314713906"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-+LiPfddsM20Csh7joA4i9bw2mE1d8XFfdDK8zVfCg8Qfl+qvoscpt3xbSFG6go+8Rm8C0SBoJLbUwCY+oDaZ4A==",
+     "shasum": "0a95ecdb31a3dec59f33329a6f05791a4bee511c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAeVFkgs4KbCflyr3MEIdjgESt1AkDN3qcKas8KHzwc+AiAaKkaguYwTlk6YrK9EOKZWcRLMofNqH6TA73W4WG9VoA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.10.tgz",
+     "unpackedSize": 187605
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "707fbb2e0784e9e1f225395184daac05c4eed5de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.10"
+   },
+   "0.2.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.11",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.11_1786671639763_0.1814690445735705"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-/+Fn2CCE9IXl2zaGKxI7T4m+F+8QpAbLZ6DzcZI1aNUjjrjVdoX/63u9IzWGnqr4gm15gwYACkVz/Pw4qJGQlw==",
+     "shasum": "b84df41dde8ce40ed0ee2cd8ff92c95eedbef9fb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDlzawKzRIm1V45pg14dnE4qPflQ6VZ/yCn5fiDJqCRiQIgT3iJZQufTlfZqJEAvIHLup3iFkvb+YrjUz+5W+/lpWs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.11.tgz",
+     "unpackedSize": 192515
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "171152ca8763fa8607b3ef7f97713e9cfe5ee629",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.11"
+   },
+   "0.2.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.12",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.12_1786942450819_0.32075354384749555"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-scO760rKOCK3icxJbVwDTOmBeII2ZYbmIPakP3FRUv2obf3bSYpln74Gzpz4g8/TPqrzehjVAZb6J2ZZf5jy8g==",
+     "shasum": "768cf469c587d8057193de667dcbb4bedfce408f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGhvka/XMilPkU6C0Kef0F9nrMTDSlSvMXqHmq4J0SQQAiEA6j3d/cOgCoIc+c9/NjihtjW7LyZ0C65+90V23wmZoPQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.12.tgz",
+     "unpackedSize": 216489
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "a3f699e3c76571f240da0619028dfe71d5384a4c",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "build:local": "tsc -p tsconfig.local.json && mv dist_local/src-local/* dist_local/src/ && rm -rf dist_local/src-local",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.12"
+   },
+   "0.2.13": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.13",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.13_1786963824135_0.05655107562774697"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-q/q/1hy32qzYQkbkpRszUGB5LbZJGx+FmagWGSacMtPMNwETGzPC3oITJR4Rl/gK9O7YHcHnxyL0gAvyQH42Tg==",
+     "shasum": "2bb456f24da6d90940bcbd3df7add05db856c1b5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDHXz1PYrRJ3rdVLCZoR77SbGbN/I19TmdOxkqslUn/cQIhAKxJKjPUm4kcIWc2ZTqdgWX69QMOd1ARQikKeW9BPPS/"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.13.tgz",
+     "unpackedSize": 217885
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "d2884f963583e8d5c0e69b3bc1e43f54fc3b8eb3",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "build:local": "tsc -p tsconfig.local.json && mv dist_local/src-local/* dist_local/src/ && rm -rf dist_local/src-local",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.13"
+   },
+   "0.2.14": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.14",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.14_1787552770646_0.9128452483234635"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-ujRdW8mgl4Rnk9kLlRrga9JcE7Uy6bH8ad8eer/QT4TzRosCUYepz4oj14Yij5dZXQYFjRiK6lLqUnmQRDC6+A==",
+     "shasum": "66dec2fbfbdf029e6f9fcde3e49a3ad556dd691e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDYmcybEOYHmo5Y0PqivZas4Il6MEyOstm82B8UxXLTpAIhAJFERI5klyfxOmi+l3+OrL0Fde3kmhWr1qsis1OGjpEw"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAE6NDRsFyutfiMEwzuZIms4W0O86atNqlVA6iTaoLVxAiBh3bs99H0fdz71g7XBMiFb/JFgKD3gVutPhRgCSG/meA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.14.tgz",
+     "unpackedSize": 217940
+    },
+    "engines": {
+     "node": ">=26.0.0"
+    },
+    "gitHead": "d2884f963583e8d5c0e69b3bc1e43f54fc3b8eb3",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "build:local": "tsc -p tsconfig.local.json && mv dist_local/src-local/* dist_local/src/ && rm -rf dist_local/src-local",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.14"
+   },
+   "0.2.15": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.15",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.15_1788169633567_0.9801151842752813"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-yBfB/4+df8LybQcYm+YrzyFIB1XUh0XXdwnOA6Uv6DCtY7W4c6Xdcn0Kqk3bZiXX8GzuhnaMPpqRHAYUmk6o+g==",
+     "shasum": "a3f3d4801f8b0a5adaccb4c266fa14fbd46152ec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAl9AigN4xqDFd8vhyDWZJIfwGZ4TKBdUFn1vUYs32TzAiBAfOpKaNyT2i6TwF4Gg/+dRZs4NWmzD717zchwQzmFGQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC18p5qnQo5+p+gVVuKHAZYL/6aYriJGTvuXlGJXbQ3ugIhAK5+V3Ode4ijtHhQexxWYgOEcRrgCLnqRHK9/9gxJo+g"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.15.tgz",
+     "unpackedSize": 222412
+    },
+    "engines": {
+     "node": ">=26.0.0"
+    },
+    "gitHead": "d2884f963583e8d5c0e69b3bc1e43f54fc3b8eb3",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "build:local": "tsc -p tsconfig.local.json && mv dist_local/src-local/* dist_local/src/ && rm -rf dist_local/src-local",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.15"
+   },
+   "0.2.16": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.16",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.16_1788833639476_0.4942398838647657"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-1VUCpQNpvD7YmTyhfyEtm2LnizRLousZEWu6Nd8lSrsTf63W/2edqYt9NKGPICl7LdYVvhe0QmS1EgRY9Ik1uw==",
+     "shasum": "bccdba8264b29a43506bf961c038089df23c2da2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGPkUlsAuU9CXn2ak6UpBoHRZBkb1RQ2h3/vcx0Ck4rNAiEAvUnLSvVqe8ruDddtG1B+R1m6uUo7KwBVLZyJcD3NuIk="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB+SxTNtiFu7JB2hSaKFuw89tghU88J3yzarHgKzKm4gAiEA9xLz5Ga1AozjG43MFUITvh4vsHz2OAo2yek7JHNHCyw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.16.tgz",
+     "unpackedSize": 237355
+    },
+    "engines": {
+     "node": ">=26.0.0"
+    },
+    "gitHead": "d2884f963583e8d5c0e69b3bc1e43f54fc3b8eb3",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "build:local": "tsc -p tsconfig.local.json && mv dist_local/src-local/* dist_local/src/ && rm -rf dist_local/src-local",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.16"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.2",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.2_1786355248469_0.3607731351574739"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-8h89hFCMdp8Kxs5rFo8H/X0kr6H9AXkwQsbzeNR8G/WGvNEvwy0u5/pod1rr98/Ma3VLNMeh56YsyzPFpTC+iw==",
+     "shasum": "7e76d6e0f62aa79b0ee29a583c918db07fb5e207",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFGj/1rzsCtqmenxPNSfPGPoMvzvt6yDoWSvm8Gl9QZyAiB6JD28VJ+pG19g+PMvvi+h/9eiA29Lr5zRgrdeq/UZdw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.2.tgz",
+     "unpackedSize": 173053
+    },
+    "gitHead": "5c82bb5d24cd1f6e35dcd253df184286bf661899",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.3",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.3_1786417318951_0.1913081272616115"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-l4pt1nTkpx47ylQO4qWG911JNpTGtYlvtbQ+l3DEN9xNKD6ZOpUoE2EJ+MQIqoJQ9Ya3e+uU46i/8Xqgj/yyiw==",
+     "shasum": "b65c3a4d0430e654d1d001004b45af95b9146496",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEbeiIesk22M88lIpde+gMhCxpinVIDcwQ2dUla/tFhKAiEAjcTPljhKq3U9hRmJgaUaHmqUx++LYECYCpmj9C7cHHo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.3.tgz",
+     "unpackedSize": 174227
+    },
+    "gitHead": "5c82bb5d24cd1f6e35dcd253df184286bf661899",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.3"
+   },
+   "0.2.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.4",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.4_1786504688621_0.18401039899181604"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-qyOuuIw4PMK4rRApMQDpvlrWZFZFiGUNkqXXmVMROdxu4nHKm15Wc52G/ETcst9cSxFH4e08A5us9OnwnMY6sw==",
+     "shasum": "f033bc76c5dfacfd41fd6a6433ad586c60875234",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICFfHdGla7yQq+CD6UxJdb900BPiDEiEPsIGLg91EsYyAiEAqonwnnvzbyLPsMOpPkveOiyxGHRpjnObWjyG9XboRUU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.4.tgz",
+     "unpackedSize": 174207
+    },
+    "gitHead": "9fe03cee5297717150c8864abb3a35c389f14e1c",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.4"
+   },
+   "0.2.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.5",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.5_1786515537518_0.4590102114694241"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-IKqpX037GZemGGILzsBk1VJHIxc9x8N5vtFVtIHQsAUmTl+bBiaKM2/NYv3di8WUq3B6ELWnaknkSKLOGtMq3Q==",
+     "shasum": "029df1d31d04e5f2e4883272169eac172477f44d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICUVxfoIpP7f627yqvwNWCI2f2wpN++lxQSzb2fmHnhtAiEA2zfYQEgJivEaZx9O9zFUccRRQX3XCxtC3KHdE23QgCE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.5.tgz",
+     "unpackedSize": 172433
+    },
+    "gitHead": "c613a0e24411adf5e4913b58f1d7e5e3a9bc5e0c",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.5"
+   },
+   "0.2.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.6",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.6_1786533126057_0.581455355319539"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-vGQk3MKP4oLArRGPOh7jtTWDNHJFHAEf4j4teZ2RhIwXu1VhsE/YqaM5i1gYZ1h5amH2ms1p2VeaOOhhJhrWHQ==",
+     "shasum": "6e388973893907141443f367efecb7482c91c724",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICMZqltUPpp9W8GL2cVAXtublMqSfpS4xJ+TmnwGASy4AiAKYsMAXUaDFC4e9g20lVHNGXYg3yCnoN/k6sY9fOof3Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.6.tgz",
+     "unpackedSize": 182552
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "8f91606bb9b22e8f434690c7f1a0bd921589091a",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.6"
+   },
+   "0.2.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.7",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.7_1786617339518_0.2118837860748044"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-5Iu8f3vLkOmERiLlzsdSPf8OauFrN6K/fnlCtM5IQMaVYdvTxK1KmyEoXONZiQKthush/23xhEIRXQckNRbbAQ==",
+     "shasum": "de79e87f077e1e08a485a31181561b603ec2dd14",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC41oH9tWKacmfuxVIyrt83MvvxGxfxIgA9tQS8fxvlXwIhAL/g7hDzY6z5bTDNcn7jMqxksLEW3DxqUeTWKenkGMKb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.7.tgz",
+     "unpackedSize": 182079
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "3fbd3bd370df059e27d546a63ebd19753e8b9c5d",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.7"
+   },
+   "0.2.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.8",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.8_1786619547989_0.7168083641710972"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-saXWAWp3HCdVY+92hB6NOGW+0pkc+wlyPtQcUw7OUbbnL6jABF5ZfQZdiELJvg0JgjqRzgrtEkIxE1h0YCl97A==",
+     "shasum": "f89974f0fb6139140140c86217f248bdbe3ab5ea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA+hjfjzes2ajPFvuX/6avVnScXbUY40OD1pBWdwF1nnAiEA9e24a9npxMM5Gctb+2h1tJ7aeeb24DvY5e2mAY/py6s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.8.tgz",
+     "unpackedSize": 182490
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "85d7aae317addfe3ec9cb640c2871d35407d4406",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.8"
+   },
+   "0.2.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@adbpg-imv/imv-mcp-server@0.2.9",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imv-mcp-server_0.2.9_1786621704665_0.22324804940639043"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:67319b2394c9]",
+     "name": "adbpg-imv"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "imv-mcp-server": "dist/index.js"
+    },
+    "dependencies": {
+     "@alicloud/gpdb20160503": "^2.7.1",
+     "@alicloud/openapi-client": "^0.4.15",
+     "@alicloud/tea-util": "^1.4.9",
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.1"
+    },
+    "description": "ADB-PG IMV MCP Server - Incremental Materialized View monitoring tools",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^3.2.7",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-draNZOo5QxwxgLjhPU+Oj+NOSt7fOUz+CS+cm+L9Jyj0d5gDSHUzzvIx57N0UCBHog+OT5HvcZdvW2yHR8bdfA==",
+     "shasum": "cb1c3bd580ead1c6769fee2b50accf61a398eb30",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQClf6PBUPI9NYqKoNAbukXMdZDTLC0IC1ipaO23FC9NwgIgY3l1pEmZIr1h5sU2mgzlaWAaIiwx3Mt2j56RfRuFO3E="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@adbpg-imv/imv-mcp-server/-/imv-mcp-server-0.2.9.tgz",
+     "unpackedSize": 182753
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "c9c9bfe485576a50c7e1843bbdbb01177de18af8",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "adbpg",
+     "analyticdb",
+     "postgresql",
+     "materialized-view",
+     "imv"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:67319b2394c9]",
+      "name": "adbpg-imv"
+     }
+    ],
+    "name": "@adbpg-imv/imv-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "setup": "tsx src/setup.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.9"
+   }
+  }
+ },
+ "name": "@adbpg-imv/imv-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@adbpg-imv%2Fimv-mcp-server"
+}

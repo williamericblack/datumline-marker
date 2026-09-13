@@ -1,0 +1,622 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ec872d9c4c97]",
+    "name": "dangrondahl"
+   },
+   {
+    "email": "[redacted-email:97e99c03444d]",
+    "name": "alexk87"
+   },
+   {
+    "email": "[redacted-email:828cdf1da67c]",
+    "name": "jbrejner"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@kosli/mcp-server",
+  "_rev": "6-985416bde751631b3fdd20927e1ebd8b",
+  "bugs": {
+   "url": "https://github.com/kosli-dev/mcp-server/issues"
+  },
+  "description": "Model Context Protocol server for the Kosli API",
+  "dist-tags": {
+   "latest": "0.5.0"
+  },
+  "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+  "keywords": [
+   "kosli",
+   "mcp",
+   "model-context-protocol",
+   "claude"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ec872d9c4c97]",
+    "name": "dangrondahl"
+   },
+   {
+    "email": "[redacted-email:97e99c03444d]",
+    "name": "alexk87"
+   },
+   {
+    "email": "[redacted-email:828cdf1da67c]",
+    "name": "jbrejner"
+   }
+  ],
+  "name": "@kosli/mcp-server",
+  "readme": "# Kosli MCP Server\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the [Kosli](https://kosli.com) API to LLM clients (Claude Code, Claude Desktop, etc.).\n\n> [!WARNING]\n> **This server is in beta.** Tool names, parameters, and behaviour may change between releases. If you need stability, pin a version \u2014 e.g. `npx -y @kosli/mcp-server@0.4.0` instead of `npx -y @kosli/mcp-server`.\n\nRather than hand-coding a tool per endpoint, the server ships a catalog generated from Kosli's OpenAPI spec and exposes three generic tools:\n\n- **`search_actions`** \u2014 fuzzy-search the catalog for relevant API actions by natural-language query.\n- **`execute_read_action`** \u2014 invoke any GET action by ID (read-only, auto-allowed by MCP clients).\n- **`execute_write_action`** \u2014 invoke any POST/PUT/PATCH/DELETE action by ID (requires approval in MCP clients \u2014 see [the caution under Usage](#usage)).\n\nThis keeps the tool surface small and lets the catalog stay in sync with the Kosli API by regenerating. MCP clients use the tool annotations to auto-allow reads while gating writes behind user approval.\n\n## Requirements\n\n- Node.js \u2265 20\n- A Kosli API token\n\n## Install & build\n\n```bash\nnpm install\nnpm run build\n```\n\n## Configure\n\nThe server reads configuration from environment variables:\n\n| Variable | Required | Default | Notes |\n|----------|----------|---------|-------|\n| `KOSLI_API_TOKEN` | yes | \u2014 | Preferred. `KOSLI_API_KEY` is accepted as a fallback. |\n| `KOSLI_ORG` | yes | \u2014 | Default org used when a path param `org` is not supplied. |\n| `KOSLI_BASE_URL` | no | `https://app.kosli.com` | EU (default), US (`https://app.us.kosli.com`), or your single-tenant endpoint. |\n\n## Wire up to an MCP client\n\n### Claude Code\n\nRun this from your project directory (or use `--scope user` for global):\n\n```bash\nclaude mcp add kosli \\\n  -e KOSLI_API_TOKEN=your-token \\\n  -e KOSLI_ORG=your-org \\\n  -- npx -y @kosli/mcp-server\n```\n\n### Claude Desktop (Desktop Extension)\n\nDownload the latest `.mcpb` file from [Releases](https://github.com/kosli-dev/mcp-server/releases), then drag it into Claude Desktop or double-click to install. Claude Desktop will prompt you for your API token and organization. This is the recommended method for Claude Desktop as secrets are stored in the OS keychain rather than in a plain-text config file.\n\n> [!NOTE]\n> When installing from a `.mcpb` file, Claude Desktop shows a warning that the extension has not been verified by Anthropic. This is expected for any extension installed from a file rather than from the built-in directory. Sideloaded extensions also do not auto-update \u2014 you'll need to download and reinstall new versions manually. Both of these limitations go away once the extension is listed in Anthropic's [Connectors Directory](https://claude.com/docs/connectors/building/submission).\n\n### Claude Desktop (manual)\n\nAlternatively, add the following to your `claude_desktop_config.json` (Settings \u2192 Developer \u2192 Edit Config). This method auto-updates via `npx` on each restart, but stores secrets in plain text:\n\n```json\n{\n  \"mcpServers\": {\n    \"kosli\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@kosli/mcp-server\"],\n      \"env\": {\n        \"KOSLI_API_TOKEN\": \"your-token\",\n        \"KOSLI_ORG\": \"your-org\"\n      }\n    }\n  }\n}\n```\n\n### Other MCP clients\n\nThe server communicates over stdio. Point any MCP-compatible client at the package via `npx -y @kosli/mcp-server` and set the `KOSLI_API_TOKEN` and `KOSLI_ORG` environment variables.\n\n### Local checkout\n\nIf you're running from a local checkout instead:\n\n```json\n{\n  \"mcpServers\": {\n    \"kosli\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/mcp-server/dist/index.js\"],\n      \"env\": {\n        \"KOSLI_API_TOKEN\": \"your-token\",\n        \"KOSLI_ORG\": \"your-org\"\n      }\n    }\n  }\n}\n```\n\n## Usage\n\nTypical LLM flow:\n\n1. Call `search_actions` with a natural-language query (e.g. `\"list environments\"`) to discover action IDs and their parameter schemas.\n2. Call `execute_read_action` (for GET actions) or `execute_write_action` (for POST/PUT/PATCH/DELETE) with the chosen `actionId` and a `params` object.\n\n> [!IMPORTANT]\n> `execute_write_action` creates, modifies, and deletes real resources in your Kosli organization. MCP clients gate these calls behind an approval prompt \u2014 read the action ID and parameters before approving. An LLM may select the wrong action, or the right action with the wrong parameters, and approval is the only checkpoint before the call is made. Treat deletions and anything touching service accounts or API keys with particular care.\n\nThe `org` path parameter defaults to `KOSLI_ORG` if not supplied. For `GET`/`DELETE`, non-path params become query parameters; for other methods they become the JSON body.\n\nBoth execute tools accept an optional `fields` array to request only specific top-level fields from each object in the response. This dramatically reduces response size and token usage:\n\n```json\n{\n  \"actionId\": \"get_snapshot_snapshots__org___env_name___snapshot_expression__get\",\n  \"params\": { \"env_name\": \"prod-aws\", \"snapshot_expression\": \"-1\" },\n  \"fields\": [\"name\", \"compliant\", \"fingerprint\", \"reasons_for_incompliance\"]\n}\n```\n\n## Regenerate the catalog\n\n`src/catalog.json` is committed and bundled into the build. Refresh it from the live OpenAPI spec with:\n\n```bash\nnpm run generate-catalog\n```\n\n## Development\n\n```bash\nnpm test             # run the test suite (vitest)\nnpm run test:watch   # watch mode\nnpm run build        # compile to dist/\nnpm start            # run the built server over stdio\nnpm run pack:mcpb    # build a .mcpb bundle for Claude Desktop\n```\n\n## Layout\n\n```\nsrc/\n  index.ts              # MCP server entry point (stdio transport)\n  config.ts             # env-var loading\n  types.ts              # shared types (CatalogEntry, Config, \u2026)\n  catalog.json          # generated action catalog\n  client/kosli-client.ts\n  tools/search-actions.ts\n  tools/execute-action.ts\nscripts/\n  generate-catalog.ts   # fetches OpenAPI spec \u2192 catalog.json\ntest/                   # vitest specs mirroring src/\n```\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/kosli-dev/mcp-server.git"
+  },
+  "time": {
+   "0.1.0": "2026-05-01T12:05:06.421Z",
+   "0.2.0": "2026-05-01T12:23:39.825Z",
+   "0.2.1": "2026-05-01T12:39:12.560Z",
+   "0.3.0": "2026-05-04T09:18:26.775Z",
+   "0.4.0": "2026-07-27T13:44:35.830Z",
+   "0.5.0": "2026-08-11T14:55:22.379Z",
+   "created": "2026-05-01T12:05:06.106Z",
+   "modified": "2026-08-11T14:55:22.753Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.1.0",
+    "_nodeVersion": "23.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1777637106242_0.9490023804753878"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ec872d9c4c97]",
+     "name": "dangrondahl"
+    },
+    "_npmVersion": "11.6.0",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-m5Q0+4421FQuMSOtsnQME35/nGJ3+n4Wd/TZUzuZj+GvQE0oy2w4wRX/XKujXUoOK3EaOmhv/LXeInMQKFsl8w==",
+     "shasum": "85fe8e244d557552c345ae89aa494db6f71e9736",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCpKPV/lFXt99Uihlgkmve9o5INjHH5eHkSQje5O1JAcgIhAMd3xJI6w15QrPsvZRbc1rDUWbvVP2ZiHKjoA8MH+4cL"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 197915
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "ca6dc8dc7f498d070dd6e14a57cac6913e62b11a",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.2.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1777638219629_0.6353568888672476"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:763d80ee-ef01-4822-9cb2-852d2223ebb5"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-N4VL/mgqMNe3gMEBbl+MpOzGkZ4DrFPxri0SMvqc+P5nxyFO+ymuGdj1zhNqFGoDn2c3q/Wu9IakmogjBVPtTA==",
+     "shasum": "528299d8f1dd875bc72c18a105510837dd77dff8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC8cevHYZ5q/LtyR/Viq3XG84gKg9y4OFN0YAawdQZpTQIgUDpPOhbz6ahAuq8p+plBEcFNsyqLEUJnVKAI7+9Gp9w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 199655
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "bc20f2da117e67e7bdcb1cd7aeded39189a0cbad",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.2.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1777639152388_0.889702653594397"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:763d80ee-ef01-4822-9cb2-852d2223ebb5"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-RKZ7dDaWw8IuOt4idxiG4nwsbl4lSQnz0QOl8z3tLfC3263Lg1BubBXv+trQbnkanhHsyJwrsLwjWgLfRfnRng==",
+     "shasum": "75fe7fd06f81e49c67794a46c90d9ff5d47ce569",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHkIjFbuEJZyMzNTCF+MHGl8E9GCiCGzRHhwyMBnfR/kAiAA+VG8Nr9TlRKrqStdtGiOWKzzubqU95bbBi3RUpRPAQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 199650
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "6a9058ac97a130f32bfd48b7ed7822534c79e228",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.3.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1777886306640_0.587620850185496"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:763d80ee-ef01-4822-9cb2-852d2223ebb5"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-19hmE/Nta0K6ZgjbirANmPWb86HbalxMNOt37nDZniTwlnnXk5UA69RSQNJR8hZhsBqrtBtMZat3W85csWeFuw==",
+     "shasum": "ebb351d8f3feb09bed9fb58e7185f07311ce5e0d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC33aAHxxshKiD75VZWjno8QSqPgdu1b2VGL/EBSuAoAAIhAP0748Mi/dK9oPx1xURx2IOYtmBc0V40fLmzgR4Mx5W7"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 204993
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "786eda400404a269a32dae2c9cdc1d5c5029f686",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "pack:mcpb": "bash scripts/pack-mcpb.sh",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.4.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1785159875654_0.06043314159949342"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:763d80ee-ef01-4822-9cb2-852d2223ebb5"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-7XlSm6yVDvB84PWca0VdVYUAR4bBwuFUXnL6rtZb+t+ure5ShQ+KzA2TALqufQlGeyeSCtewQ5ErMNVoKC1f+A==",
+     "shasum": "c60003f0024c3b9e4b4483612d82fe02e7e80259",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC6Onz3qEgCYMnuordAHoIbHWw6RgveNmCrqlmsHx7j/QIhAIRH6Fc3e21AZGhldpTKST0NmSCiDMoqIb9V68PJ5keE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 500773
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a72bb32769c73690a1224ffe4a51899912bbc401",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "pack:mcpb": "bash scripts/pack-mcpb.sh",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kosli/mcp-server@0.5.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1786460122246_0.9660126467199992"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:763d80ee-ef01-4822-9cb2-852d2223ebb5"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bin": {
+     "kosli-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kosli-dev/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Model Context Protocol server for the Kosli API",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@kosli%2fmcp-server@0.5.0"
+     },
+     "fileCount": 23,
+     "integrity": "sha512-u54CDXULN0zcUwZfghdW8FZ3Sdm0hMzKhjeA/XT8BhVyGhBirCeDr8jDKzd3JOwTk+FJgizI3Bw0eFPUAKvEOA==",
+     "shasum": "e79dad95f834e8064eebc33562abdc4803d45215",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCjOPV8xt7uIhl8gwgjrzI+6YyrYrXtGWKdUUpSpnfuLgIgd5eu5Rha/hI/BglUaYt3AjE/dAO5Qv+poxfIUXPhcC0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kosli/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 501836
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "3a9e1118f8666ecd4b55c1622bb52d6c234911fb",
+    "homepage": "https://github.com/kosli-dev/mcp-server#readme",
+    "keywords": [
+     "kosli",
+     "mcp",
+     "model-context-protocol",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec872d9c4c97]",
+      "name": "dangrondahl"
+     },
+     {
+      "email": "[redacted-email:97e99c03444d]",
+      "name": "alexk87"
+     },
+     {
+      "email": "[redacted-email:828cdf1da67c]",
+      "name": "jbrejner"
+     }
+    ],
+    "name": "@kosli/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/kosli-dev/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "generate-catalog": "tsx scripts/generate-catalog.ts",
+     "pack:mcpb": "bash scripts/pack-mcpb.sh",
+     "prepublishOnly": "npm run build && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   }
+  }
+ },
+ "name": "@kosli/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@kosli%2Fmcp-server"
+}

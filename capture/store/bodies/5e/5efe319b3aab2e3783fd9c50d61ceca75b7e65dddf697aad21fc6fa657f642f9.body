@@ -1,0 +1,173 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:7412ce97b2cc]",
+    "name": "jverneuer"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.2.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@jverneuer/beds24-mcp-server",
+  "_rev": "5-7cc704cf01e4c9b8ac8a6bf9da9f8d04",
+  "bugs": {
+   "url": "https://github.com/jverneuer/beds24-mcp/issues"
+  },
+  "description": "MCP server + CLI host for Beds24. Depends on beds24-sdk-client (typed API client) and beds24-knowledge (hybrid vector+FTS search). Exposes tools, prompts, and resources for an LLM via @modelcontextprotocol/sdk.",
+  "dist-tags": {
+   "latest": "1.2.0"
+  },
+  "homepage": "https://github.com/jverneuer/beds24-mcp/tree/main/packages/server",
+  "keywords": [
+   "beds24",
+   "mcp",
+   "mcp-server",
+   "llm",
+   "ai",
+   "sdk",
+   "openapi",
+   "schema-validation",
+   "semantic-search",
+   "vector-index"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:7412ce97b2cc]",
+    "name": "jverneuer"
+   }
+  ],
+  "name": "@jverneuer/beds24-mcp-server",
+  "readme": "# beds24-mcp-server\n\nMCP server + CLI host for Beds24. Depends on [`beds24-sdk-client`](../sdk/README.md) (typed API client, schema introspection, validation) and [`beds24-knowledge`](../knowledge/README.md) (hybrid vector+FTS search over the cited docs) and composes them into MCP **tools**, **prompts**, and **resources**. The server itself contains no reusable SDK/knowledge logic \u2014 it wires the two workspace packages.\n\n- **MCP on stdio** \u2014 works with any MCP client (Claude Code, Cursor, Windsurf, VS Code Copilot, goose, OpenCode, \u2026).\n- **Global bin** (`beds24-mcp-server`) \u2014 ships a Node-bundled CLI at `dist/cli.mjs` so the published package is usable without `bun`.\n- **`setup` subcommand** \u2014 detects the user's AI harness(es) and writes (merges) the MCP config for each.\n\nPublished independently to npm. See the [root README](../../README.md) for the workspace layout.\n\n---\n\n## Install\n\n### Global (recommended)\n\n```bash\nnpm install -g beds24-mcp-server   # publishes the beds24-mcp-server command\nbeds24-mcp-server setup            # detects + writes harness configs\n```\n\n`setup` is idempotent: it only touches the `beds24` entry in each config file, backs up a corrupt one (`.bak`), and never clobbers your other MCP servers. Flags:\n\n| Flag | Effect |\n|---|---|\n| `--dry-run` | Preview every write without touching the filesystem. |\n| `--harness claude --harness cursor` | Pick specific harnesses (repeatable). |\n| `--all` | Configure every detected harness, non-interactively. |\n| `--skip-install` | Skip the `bun install` step. |\n| `--skip-index` | Skip the `bun run index` step (you can build later). |\n\nIf stdin is non-interactive and nothing is detected, `setup` exits non-zero and tells you to pass `--harness <name>`.\n\nRestart your harness; the tools appear.\n\n### From source\n\n```bash\nbun install\nbun run index    # build the vector index from knowledge/*.md (one-time, ~30s)\nbun run serve    # start the MCP server on stdio (same as the global command)\nbun run setup    # same harness auto-config as the global command\n```\n\nThe server auto-indexes on startup if `.beds24/index.db` is missing, so `bun run index` is optional. `bun run reindex` forces a rebuild.\n\n---\n\n## Using the SDK from another repo\n\nThe SDK has no MCP dependency \u2014 just point it at the facts + yaml:\n\n```ts\nimport { Beds24Validator, Beds24Search } from \"@jverneuer/beds24-sdk-client\";     // validation only\nimport { Beds24Client, BookingOps } from \"@jverneuer/beds24-sdk-client\";          // full client\n\nconst validator = Beds24Validator.create();\nconst result = await validator.validate(\"POST /bookings\", \"request\", payload);\n// result.valid, result.errors \u2014 feed errors back to your LLM to fix the call\n```\n\nThis lets you run schema validation from a Dagster asset, an Inngest function, or a CLI \u2014 no MCP server needed.\n\n## Using the client directly\n\n```ts\nimport { Beds24Client } from \"@jverneuer/beds24-sdk-client\";\n\nconst client = new Beds24Client({ refreshToken });\nconst { data, credits } = await client.request(\"GET /bookings\", {\n  arrival: \"2026-08-01\",\n  departure: \"2026-08-05\",\n});\n// credits.remaining / credits.resetsIn \u2014 the 5-minute rate-limit window\n```\n\nEvery `METHOD /path` in `apiV2.yaml` is reachable via `client.request(key, body)`, with body + response types inferred from the generated schemas. Request bodies are validated before sending (fail fast, save a credit). Throws `Beds24Error` (`status`, `code`, `retryable`, `creditsRemaining`).\n\n---\n\n## Tools\n\nEach operational tool additionally takes an `auth` block:\n\n```ts\n{ refreshToken?: string; inviteCode?: string; token?: string; baseUrl?: string }\n```\n\nProvide **one** of `refreshToken` (preferred), `inviteCode`, or `token`. `baseUrl` defaults to `https://www.beds24.com/api/v2`.\n\n### Search & knowledge\n\n| Tool | Input | Output |\n|---|---|---|\n| `beds24_search` | `query: string`, `topK?: number` | top section hits (safe buckets) |\n| `beds24_search_all` | `query`, `topK?` | hits across all buckets |\n| `beds24_search_in_bucket` | `bucket`, `query`, `topK?` | hits in one bucket |\n| `beds24_schema` | `endpoint: \"METHOD /path\"`, `direction: \"request\"\\|\"response\"` | flat field list (`name, type, required, description, enum?`) |\n| `beds24_validate` | `endpoint`, `direction`, `payload: unknown` | `{valid, errors: [{path, message, expected, actual, suggestion?}]}` |\n| `beds24_howto` | `task: string` | search hits + matched endpoint + request schema + steps |\n| `beds24_status` | \u2014 | index + corpus status (`chunksIndexed`, `byBucket`, `dbSizeBytes`, `apiEndpoints`, `factsFiles`) |\n\n### Bookings\n\n| Tool | Verb |\n|---|---|\n| `beds24_booking_get` | GET /bookings (filter by status, dates, property/room) |\n| `beds24_booking_create` | POST /bookings |\n| `beds24_booking_cancel` | cancel by id |\n| `beds24_booking_message_list` | GET /bookings/messages |\n| `beds24_booking_message_send` | POST /bookings/messages (OTA only) |\n\n### Pricing\n\n| Tool | Verb |\n|---|---|\n| `beds24_price_set_daily` | POST /inventory/rooms/calendar (per-day prices) |\n| `beds24_price_get_calendar` | GET /inventory/rooms/calendar |\n| `beds24_price_set_fixed` | POST /inventory/fixedPrices (date-range prices) |\n\n### Availability / inventory / properties / accounts\n\n| Tool | Verb |\n|---|---|\n| `beds24_availability_get` | GET /inventory/rooms/availability |\n| `beds24_inventory_offers` | GET /inventory/rooms/offers |\n| `beds24_property_list` | GET /properties |\n| `beds24_account_list` | GET /accounts |\n\n### Channels / webhooks\n\n| Tool | Verb |\n|---|---|\n| `beds24_channel_settings_get` | GET /channels/settings |\n| `beds24_channel_settings_configure` | POST /channels/settings |\n| `beds24_webhook_register` | POST the webhook payload shape your URL receives |\n\n### Prompts\n\n| Prompt | Workflow |\n|---|---|\n| `beds24_prompt_create_booking` | search \u2192 schema \u2192 validate \u2192 `beds24_booking_create` |\n| `beds24_prompt_set_daily_prices` | search \u2192 schema \u2192 validate \u2192 `beds24_price_set_daily` |\n| `beds24_prompt_register_webhook` | search \u2192 schema \u2192 `beds24_webhook_register` |\n\n### Resources\n\n| URI | Handler |\n|---|---|\n| `beds24://facts/{path}` | read one raw markdown facts file |\n| `beds24://endpoints` | full V2 endpoint index as JSON |\n\n---\n\n## Server instructions\n\nAt initialize time the server sends the connected LLM a fixed block that encodes the **search \u2192 inspect \u2192 validate \u2192 operate** workflow. The intent: make the model use the cheaper inspect/validate tools before spending API credits. Defined in `server.ts` as `SERVER_INSTRUCTIONS`.\n\n---\n\n## Harness config (MCP)\n\nAll harnesses speak the same JSON shape; only the **config file location** differs.\n\nThe shared block (`command` / `args`). **Prefer the global command** when installed via npm \u2014 it survives reinstalls and doesn't hard-code a checkout path:\n\n```json\n{ \"command\": \"beds24-mcp-server\", \"args\": [\"serve\"] }\n```\n\nFalling back to a source checkout (replace `/ABS/PATH/to/beds24-mcp`):\n\n```json\n{ \"command\": \"bun\", \"args\": [\"run\", \"/ABS/PATH/to/beds24-mcp/packages/server/src/server.ts\"] }\n```\n\n> Run `beds24-mcp-server setup` (or `bun run setup`) to write these files automatically \u2014 no hand-editing needed.\n\n### Claude Code\n`~/.claude/.mcp.json` (user) or project `.mcp.json`. Uses the `mcpServers` key. Restart after editing.\n\n### Cursor\n`~/.cursor/mcp.json`. Uses the `mcpServers` key. Open **Settings \u2192 MCP**; restart servers if it's not green.\n\n### Windsurf\n`~/.codeium/windsurf/mcp_config.json`. Uses the `mcpServers` key. Reload the window.\n\n### VS Code (Copilot)\nProject `.vscode/mcp.json`. Uses the `servers` key (note: **not** `mcpServers`). Restart after editing.\n\n### Troubleshooting\n- **\"bun not found\"** \u2014 launch the harness from a terminal, or add the bun dir to the config's `env.PATH`.\n- **No tools after restart** \u2014 the server auto-indexes on first run and logs to stderr. Open the harness's MCP panel and look for `[beds24] MCP server connected on stdio.`.\n- **Stale facts** \u2014 after updating `knowledge/`, run `bun run reindex` (or delete `.beds24/` and restart; it rebuilds).\n\n---\n\n## Boundaries\n\n- This package **must not** implement SDK or knowledge logic. All reusable code lives in `beds24-sdk-client` / `beds24-knowledge`.\n- Per `CONTRACT.md`, the SDK **must not** import libsql/sqlite-vec/the MCP SDK, and the knowledge package **must not** import openapi-fetch/ajv/js-yaml/the MCP SDK. The server is the only package that depends on all of `@modelcontextprotocol/sdk`, `beds24-sdk-client`, and `beds24-knowledge`.\n\n---\n\n## Source layout\n\n```\npackages/server/\n\u251c\u2500\u2500 src/\n\u2502   \u251c\u2500\u2500 server.ts              # MCP tools / prompts / resources registration\n\u2502   \u251c\u2500\u2500 cli.ts                 # index | status | serve | setup\n\u2502   \u251c\u2500\u2500 setup.ts               # harness auto-config (Claude / Cursor / Windsurf / VS Code)\n\u2502   \u251c\u2500\u2500 index.ts               # package barrel (startServer, runSetup)\n\u2502   \u251c\u2500\u2500 integration-harness.ts # real three-package end-to-end scenarios (spawned in isolation)\n\u2502   \u2514\u2500\u2500 *.test.ts              # unit + integration tests\n\u2514\u2500\u2500 package.json               # bin: { \"beds24-mcp-server\": \"dist/cli.mjs\" }\n```\n\n---\n\n## Building & testing\n\n```bash\n# from repo root\nbun run build:server        # tsc + bun build src/cli.ts \u2192 dist/cli.mjs\nbun run typecheck           # tsc --noEmit across the workspace\nbun test                    # run the whole suite\n\n# this package only\ncd packages/server && bun test\n```\n\nThe `build` script emits `dist/index.js` (for `import`) and `dist/cli.mjs` (the bin, with a `#!/usr/bin/env node` banner and `chmod +x`). `bun run prepublishOnly` (typecheck + build) runs automatically before `npm publish`.\n\n---\n\n## Exports\n\n```ts\nimport { startServer } from \"beds24-mcp-server\";   // build the index (if missing) + connect on stdio\nimport { runSetup } from \"beds24-mcp-server\";      // programmatic harness auto-config\nimport type { SetupOptions } from \"beds24-mcp-server\";\n```\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/server",
+   "type": "git",
+   "url": "git+https://github.com/jverneuer/beds24-mcp.git"
+  },
+  "time": {
+   "1.1.3": "2026-07-29T05:05:58.888Z",
+   "1.1.4": "2026-07-29T05:09:30.331Z",
+   "1.2.0": "2026-08-08T05:29:01.302Z",
+   "created": "2026-08-08T05:29:01.006Z",
+   "modified": "2026-08-08T05:29:01.723Z"
+  },
+  "versions": {
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@jverneuer/beds24-mcp-server@1.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/beds24-mcp-server_1.2.0_1786166941170_0.6291806886284319"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7412ce97b2cc]",
+     "name": "jverneuer"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "beds24-mcp-server": "dist/cli.mjs"
+    },
+    "bugs": {
+     "url": "https://github.com/jverneuer/beds24-mcp/issues"
+    },
+    "dependencies": {
+     "@jverneuer/beds24-knowledge": "workspace:*",
+     "@jverneuer/beds24-sdk-client": "workspace:*",
+     "@modelcontextprotocol/sdk": "^1.10.0",
+     "zod": "^3.23.0"
+    },
+    "description": "MCP server + CLI host for Beds24. Depends on beds24-sdk-client (typed API client) and beds24-knowledge (hybrid vector+FTS search). Exposes tools, prompts, and resources for an LLM via @modelcontextprotocol/sdk.",
+    "devDependencies": {
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@jverneuer%2fbeds24-mcp-server@1.2.0"
+     },
+     "fileCount": 19,
+     "integrity": "sha512-czZ1HQRPeq3MZ6a6AEWpXIFXt6NcadfYQNEG0K2b5mSo3UrIh9/qG3zwtZo3wwHV/+4oSkIiGawcnuJMOzug5Q==",
+     "shasum": "79d9f10229c6e188910cc98521d72973aa676980",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDf/zcULQGw57yj8EdHHEx3WKcjJ7TTeK7dow//s2zYKAIgGUB5U9D1HcgZNAgFlIJFUD9mJTAHI+KFBwjYK5M05Cw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jverneuer/beds24-mcp-server/-/beds24-mcp-server-1.2.0.tgz",
+     "unpackedSize": 223965
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "28cdd4ffa0dcb5b98287f0d22c077aa62adf7ed1",
+    "homepage": "https://github.com/jverneuer/beds24-mcp/tree/main/packages/server",
+    "keywords": [
+     "beds24",
+     "mcp",
+     "mcp-server",
+     "llm",
+     "ai",
+     "sdk",
+     "openapi",
+     "schema-validation",
+     "semantic-search",
+     "vector-index"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7412ce97b2cc]",
+      "name": "jverneuer"
+     }
+    ],
+    "name": "@jverneuer/beds24-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/server",
+     "type": "git",
+     "url": "git+https://github.com/jverneuer/beds24-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json && bun build src/cli.ts --target node --packages=external --outfile dist/cli.mjs --banner '#!/usr/bin/env node' && chmod +x dist/cli.mjs",
+     "index": "bun run src/cli.ts index",
+     "reindex": "bun run src/cli.ts index --force",
+     "serve": "bun run src/server.ts",
+     "setup": "bun run src/cli.ts setup",
+     "status": "bun run src/cli.ts status",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.2.0"
+   }
+  }
+ },
+ "name": "@jverneuer/beds24-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@jverneuer%2Fbeds24-mcp-server"
+}

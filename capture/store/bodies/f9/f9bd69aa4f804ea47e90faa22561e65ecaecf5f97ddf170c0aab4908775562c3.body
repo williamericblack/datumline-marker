@@ -1,0 +1,1038 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.0",
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.2.3",
+   "0.3.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-ios-device",
+  "_rev": "8-252882a2cf5d6d1e90b4594323c24fa0",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+  },
+  "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+  "dist-tags": {
+   "latest": "0.3.0"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+  "keywords": [
+   "ios-device",
+   "mcp",
+   "model-context-protocol"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-ios-device",
+  "readme": "# @mgcrea/mcp-ios-device\n\nModel Context Protocol server for driving a **physical iPhone or iPad** from a model: screenshot\nthe screen, read its accessibility tree, tap, swipe, type, and manage the app under test. Read-only\nby default \u2014 the tools that touch the device are not merely refused without `IOS_DEVICE_ALLOW_WRITES`,\nthey are never registered.\n\nIt exists because the Simulator cannot exercise a camera, on-device inference, real sensors or\nreal push, so the bugs that matter most only reproduce on hardware \u2014 and reproducing one there\notherwise means a person holding the phone and narrating.\n\n## Features\n\n- **See the screen.** A screenshot scaled to exactly the device's point size, so positions read\n  off the image are tap coordinates with no conversion.\n- **Read the screen.** A flattened, pruned accessibility tree \u2014 type, label, identifier and the\n  precomputed tap point per element \u2014 instead of the tens of KB of nested JSON WebDriverAgent\n  actually returns.\n- **Drive the screen.** Tap by coordinate or by accessibility identifier, swipe, type, hardware\n  buttons. Every action returns the resulting screen by default, so a mis-aimed tap is visible\n  on the call that made it.\n- **Manage the app.** Install a build, launch it with arguments, terminate it, pull its data\n  container off the device.\n- **TypeScript only.** Three npm dependencies at runtime, one of them our own, and no Python,\n  no `iproxy`, no usbmux client, no Appium server. See\n  [How it reaches the device](#how-it-reaches-the-device).\n\n## Security\n\n**Blast radius.** With writes enabled, this server can tap anything on an unlocked phone that\nbelongs to a real person: send a message, make a purchase, delete data. That is not a\nhypothetical widening of scope \u2014 it is what \"drive the UI\" means. Read the write-gate section\nbefore turning it on, and prefer `IOS_DEVICE_LAUNCH_ARGS` to pin the app under test into a\nfixture mode.\n\n**Your credentials.** There are none. The server holds no tokens and talks to no vendor API. It\nreaches the device through `xcrun devicectl` and a locally-reachable HTTP server, both of which\nare already authorised by the trust relationship between this Mac and this phone.\n\n**Supply chain.** Three runtime dependencies: `@modelcontextprotocol/server`, `zod`, and\n[`@mgcrea/mcp-ios-core`](../mcp-ios-core) \u2014 our own, and itself dependent on only the first two.\nThe core holds the half of this server that a simulator drives identically: the WebDriverAgent\nclient, the accessibility-tree flattening, the screenshot renderer and the tap/swipe/type tools.\nIt is a peer package rather than a subpath of this one because\n[`mcp-ios-simulator`](../mcp-ios-simulator) needs none of what is left here \u2014 `devicectl`, the\ntunnel, the signed runner \u2014 and shipping it a whole second server to reuse half of it would be the\nwrong dependency direction. Scaling\nimages uses `sips`, which ships with macOS, specifically so an image library does not have to be\ninstalled into a process that holds device access.\n\n**What it can read.** `ios_device_pull_container` copies an app's private data \u2014 a SwiftData\nstore, logs, caches \u2014 onto this machine. It is behind the write gate and requires `confirm`\ndespite being a read on the device, because that data belongs to whoever holds the phone.\n\n## How it reaches the device\n\nTwo lanes, and knowing which is which explains every error message this server produces.\n\n| Lane                     | Carries                                                                     | Needs                                   |\n| ------------------------ | --------------------------------------------------------------------------- | --------------------------------------- |\n| `xcrun devicectl`        | devices, apps, install, launch, terminate, container copy, display geometry | Xcode. Nothing on the phone.            |\n| WebDriverAgent over HTTP | screenshot, UI tree, tap, swipe, type, buttons                              | a runner built and running on the phone |\n\nThe interesting part is the second lane's transport. A device CoreDevice has connected to is\nalready routable from this Mac at an IPv6 address it reports as `tunnelIPAddress` \u2014 an `fd\u2026::1`\non a `utun` interface, with a route in the kernel table. So WebDriverAgent's port 8100 is\nreachable as `http://[fd1f:\u2026::1]:8100` from plain `fetch`, with no port forwarding of any kind.\n\nThat is what removes `pymobiledevice3`, `go-ios`, `iproxy` and the Appium server from the\npicture, and it is why the whole server is TypeScript.\n\n`ios_device_diagnostics` reports both lanes separately, so \"the device is fine but the runner is\nnot up\" is a distinguishable answer rather than a generic failure.\n\n## Configure\n\n| Variable                    | Default                   | What it does                                                                                          |\n| --------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |\n| `IOS_DEVICE_ID`             | the only connected device | CoreDevice identifier, UDID, or name. Two connected devices and no value is an error that names them. |\n| `IOS_DEVICE_ALLOW_WRITES`   | off                       | Registers the nine tools that drive the device.                                                       |\n| `IOS_DEVICE_LAUNCH_ARGS`    | none                      | Launch arguments applied when `ios_device_launch` does not pass its own.                              |\n| `IOS_DEVICE_WDA_URL`        | derived from the tunnel   | Explicit WebDriverAgent URL, when something else forwards the port.                                   |\n| `IOS_DEVICE_WDA_PORT`       | `8100`                    | Port WebDriverAgent listens on.                                                                       |\n| `IOS_DEVICE_MAX_TREE_BYTES` | `24000`                   | Byte cap on a `ui_tree` payload.                                                                      |\n| `IOS_DEVICE_TIMEOUT_MS`     | `120000`                  | Budget for one `devicectl` call; a large install is slow.                                             |\n| `IOS_DEVICE_WDA_TIMEOUT_MS` | `30000`                   | Budget for one WebDriverAgent call.                                                                   |\n| `IOS_DEVICE_OUTPUT_DIR`     | `$TMPDIR/mcp-ios-device`  | Where saved screenshots and pulled containers land.                                                   |\n| `IOS_DEVICE_DEBUG`          | off                       | Log every `devicectl` and WebDriverAgent call to stderr.                                              |\n\nThe same keys in camelCase can go in `~/.config/ios-device-mcp/config.json`\n(`IOS_DEVICE_CONFIG` to move it). The environment wins **per field**, so a one-off\n`IOS_DEVICE_ALLOW_WRITES=0` beats a file that says `true`. Unknown keys in the file are an\nerror rather than silently ignored \u2014 a typo that looks like \"that setting had no effect\" is the\nworst way to learn where your configuration came from.\n\nSee [.env.example](.env.example) for the annotated version.\n\n## Quick start\n\nRequires macOS with Xcode, and a device that is paired, unlocked, has Developer Mode on, and has\n**Settings \u2192 Developer \u2192 Enable UI Automation** on. That last toggle is separate from Developer\nMode and is the one people miss.\n\n### A. Observe only, no setup\n\n```bash\nnpx -y @mgcrea/mcp-ios-device\n```\n\n`list_devices`, `list_apps`, `get_display_info` and `diagnostics` work immediately.\n\n### B. The screen lane\n\n`screenshot`, `ui_tree` and everything that taps need a WebDriverAgent runner on the device.\nBuild and install it once:\n\n```bash\nIOS_DEVICE_TEAM_ID=YOURTEAMID scripts/wda.sh setup   # ~5 minutes, signs with your team\nscripts/wda.sh run                                    # leave this running\nscripts/wda.sh status                                 # is it answering?\n```\n\nInstalled from npm rather than a checkout, the same script is the `ios-device-wda` binary:\n\n```bash\nIOS_DEVICE_TEAM_ID=YOURTEAMID npx -p @mgcrea/mcp-ios-device ios-device-wda setup\nnpx -p @mgcrea/mcp-ios-device ios-device-wda run\n```\n\n`run` has to stay open: the HTTP server _is_ the XCTest process, so it stops when the test\nsession does. The first run may put an untrusted-developer prompt on the phone \u2014 trust your\nteam in Settings \u2192 General \u2192 VPN & Device Management, then run it again.\n\n### C. Wired into a client\n\n```json\n{\n  \"mcpServers\": {\n    \"ios-device\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@mgcrea/mcp-ios-device\"],\n      \"env\": { \"IOS_DEVICE_ALLOW_WRITES\": \"1\", \"IOS_DEVICE_LAUNCH_ARGS\": \"-DemoMode\" }\n    }\n  }\n}\n```\n\n### Inspect the tools\n\n```bash\nprintf '%s\\n' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"cli\",\"version\":\"0\"}}}' \\\n  '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' \\\n| node dist/cli.js 2>/dev/null | grep -o '\"name\":\"[a-z_]*\"' | sort -u\n```\n\n## Tools\n\n| Tool                          | What it does                                         | Writes? |\n| ----------------------------- | ---------------------------------------------------- | ------- |\n| `ios_device_diagnostics`      | Both lanes' state and what to fix. Never throws.     | no      |\n| `ios_device_list_devices`     | Devices CoreDevice sees, with tunnel state           | no      |\n| `ios_device_list_apps`        | Installed apps and their bundle ids                  | no      |\n| `ios_device_get_display_info` | Screen size in pixels and points, orientation        | no      |\n| `ios_device_screenshot`       | The screen, scaled into point space                  | no      |\n| `ios_device_ui_tree`          | Flattened, pruned accessibility tree with tap points | no      |\n| `ios_device_wait_for_element` | Poll until something appears, or goes away           | no      |\n| `ios_device_tap`              | Tap a point                                          | **yes** |\n| `ios_device_tap_element`      | Tap by accessibility id, label or predicate          | **yes** |\n| `ios_device_swipe`            | Drag between two points                              | **yes** |\n| `ios_device_type`             | Type into the focused field, or a named one          | **yes** |\n| `ios_device_press_button`     | home, volume up, volume down                         | **yes** |\n| `ios_device_install`          | Install a `.app` or `.ipa`                           | **yes** |\n| `ios_device_launch`           | Launch with arguments and environment                | **yes** |\n| `ios_device_terminate`        | Kill a running app by bundle id                      | **yes** |\n| `ios_device_pull_container`   | Copy an app's data container to this Mac             | **yes** |\n| `ios_device_restart_wda`      | Stop and restart the WebDriverAgent runner           | **yes** |\n\nPlus one resource, `ios-device://diagnostics`, carrying the same payload as the tool so a client\ncan attach the device's standing state instead of spending a call on it.\n\n## Reproducing a bug on a real device\n\n```\nios_device_diagnostics                                  \u2192 device connected, WDA answering\nios_device_launch      { bundle_id: \"io.mgcrea.Canopy\" } \u2192 relaunches in demo mode\nios_device_screenshot                                    \u2192 the Garden tab\nios_device_ui_tree     { contains: \"Today\" }             \u2192 { type: \"Button\", label: \"Today\", tap: [140, 920] }\nios_device_tap_element { label: \"Today\" }                \u2192 taps it, returns the new screen\nios_device_type        { id: \"search.field\", text: \"monstera\" }\nios_device_pull_container { bundle_id: \"io.mgcrea.Canopy\",\n                            source: \"/Library/Application Support\", confirm: true }\n```\n\nPrefer `tap_element` over `tap`: a label or identifier survives the list scrolling and the copy\nbeing reworded, and a coordinate does not.\n\n## What it costs\n\nMeasured against an iPhone 17 Pro Max on iOS 26.6.1, WebDriverAgent 16.12.3:\n\n| Call                         | Time    | Payload                                         |\n| ---------------------------- | ------- | ----------------------------------------------- |\n| `list_devices`               | ~50 ms  | 1.1 KB, from a 10.7 KB `devicectl` envelope     |\n| `get_display_info`           | ~165 ms | 200 B                                           |\n| `screenshot`                 | ~0.6 s  | 440x956 JPEG, ~90 KB \u2014 roughly 540 image tokens |\n| `ui_tree` on an app screen   | ~1.3 s  | 4 KB, from a 154 KB `/source`                   |\n| `ui_tree` on the home screen | ~5.7 s  | 2.2 KB, 23 elements                             |\n| `tap_element`                | ~2 s    | plus a screenshot unless turned off             |\n\nThe home screen is the slow case for `/source`; a normal app screen is four times\nfaster. If `ui_tree` is the bottleneck in a loop, narrow it with `contains` rather than\nreaching for coordinates.\n\n## Traps worth knowing\n\n- **Coordinates are points, everywhere.** A default screenshot is scaled to exactly the point\n  size so that its pixels _are_ points. Pass `max_dimension` and that stops being true \u2014 the\n  result then says `coordinateSpace: \"image_pixels\"` and gives the factor to multiply by.\n- **A locked phone captures nothing** and refuses every launch. The failure says so, but it is\n  the first thing to check.\n- **The runner dies with its terminal.** `scripts/wda.sh run` is not a daemon. When taps stop\n  working, that window is usually why. `ios_device_restart_wda` starts one detached instead, which\n  survives that but logs to a file rather than to your screen.\n- **The automation grant is per XCTest session, not per request.** Enabling\n  Settings \u2192 Developer \u2192 Enable UI Automation does nothing for a runner that is already up: the\n  grant is handed out when the session starts and never revisited. Measured on iOS 26.6.1 with the\n  toggle off, `POST /session` still succeeds and `/wda/activeAppInfo` on that fresh session still\n  answers `pid: 0`, so no amount of re-sessioning reaches it. Toggle, then restart the runner \u2014 in\n  that order, with `ios_device_restart_wda`.\n- **A label belongs to the control _and_ to every container around it**, and WebDriverAgent\n  answers depth-first, so an unqualified label match lands on the navigation bar about as often\n  as on the button \u2014 and a tap on a container does nothing while reporting success.\n  `tap_element` narrows a label to the interactive types first, and says `preferredControl` when\n  it did. Pass `index` to take over the ordering yourself and that narrowing is skipped.\n- **`isVisible` is not always truthful.** Measured on a simulator running the same XCUITest\n  stack: a photo picker reports all of its asset cells `isVisible: \"0\"` while they are on screen\n  and tappable. The default `ui_tree` filter drops them, so the result carries a `filtered` tally\n  of what the filters removed \u2014 a short list that has been filtered and a screen that is\n  genuinely bare are otherwise the same answer.\n- **A relaunch without `terminate_existing` ignores your arguments.** It foregrounds the running\n  process instead, so the flags you just passed have no effect and nothing says so. It defaults\n  to on for this reason.\n- **`IOS_DEVICE_LAUNCH_ARGS` applies silently** when a launch passes no `arguments`. The result\n  reports `argumentsFrom` so you can tell which happened; pass `arguments: []` to mean \"no flags\"\n  deliberately.\n- **An alert swallows every tap** while reporting nothing useful. Action results include an\n  `alert` field when one is on screen.\n- **WebDriverAgent reports booleans as `\"1\"` and `\"0\"`**, not `true`/`false`. Only relevant\n  if you parse `/source` yourself \u2014 this server already handles it \u2014 but the narrow version\n  of that check returns an empty tree that looks exactly like a working answer.\n- **The tunnel is not the Wi-Fi address.** `tunnel.address` is an `fd\u2026::1` on a `utun`\n  interface, only routable from this Mac, and only while CoreDevice keeps it up.\n\n## Troubleshooting\n\nStart with `ios_device_diagnostics`; it names which half is wrong. Then:\n\n- **\"Connection closed\" in the client** \u2014 run `node dist/cli.js` by hand with the same\n  environment; the error the client swallowed is on stderr.\n- **Tools missing** \u2014 the driving tools only exist with `IOS_DEVICE_ALLOW_WRITES` set. Check the\n  startup banner, which prints `writes=ENABLED` or `writes=disabled`.\n- **WebDriverAgent not reachable** \u2014 `scripts/wda.sh status`. If the tunnel address is missing,\n  reconnect the device or open Xcode once to bring the tunnel up.\n- **\"Not authorized for performing UI testing actions\"** \u2014 the runner is up and its XCTest lane is\n  not. A healthy `/status` does not imply a working screen lane: `/status` is answered by the HTTP\n  server inside the runner and never crosses into XCTest, so it reports `ready: true` on a runner\n  that cannot take a single screenshot. Turn on **Settings \u2192 Developer \u2192 Enable UI Automation** on\n  the device, then restart the runner with `ios_device_restart_wda` (or `scripts/wda.sh run` with\n  writes off). `ios_device_diagnostics` probes this directly and reports it as `wda.authorized`.\n- **`node: command not found` in the runner log** \u2014 `scripts/wda.sh` parses devicectl's JSON with\n  node, and a host that embeds its own runtime leaves nothing called `node` on `PATH`.\n  `ios_device_restart_wda` passes `NODE` and extends `PATH` for exactly this; running the script by\n  hand from such an environment needs `NODE=/path/to/node`.\n- **`ui_tree` is empty or suspiciously short** \u2014 check `filtered` in the result before believing\n  it. It counts what the filters removed and names the argument that brings it back:\n  `detail: \"labelled\"` for labelled non-controls, `include_invisible: true` for elements\n  XCUITest marks invisible while they are plainly on screen. A truncated answer says so\n  separately, in `truncated`.\n- **A screen that loads slowly** \u2014 `wait_for_element` polls until something appears, or with\n  `absent: true` until a spinner goes. `settle_ms` on the action tools is a pause for an\n  animation and caps at ten seconds; it is not a wait.\n- **Provisioning expired** \u2014 a development profile lasts a year on a paid team. Re-run\n  `scripts/wda.sh setup` to re-sign.\n\n## Develop\n\n```bash\npnpm install\npnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build\n```\n\nThe suite runs offline with no device: `exec` and `fetch` are both injectable, so `xcrun` and\nWebDriverAgent are stubbed while the tools, the SDK's own validation and the shaping layer all\nrun for real.\n\nPublish:\n\n```bash\npnpm dlx release-it            # bump, commit, tag\ngit push --follow-tags         # CI publishes to npm from the tag\n```\n\n## License\n\nMIT \u2014 see [LICENSE](LICENSE).\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+  },
+  "time": {
+   "0.0.0": "2026-09-04T10:11:46.889Z",
+   "0.1.0": "2026-09-04T10:35:35.920Z",
+   "0.1.1": "2026-09-04T13:33:26.345Z",
+   "0.2.0": "2026-09-04T16:28:45.261Z",
+   "0.2.1": "2026-09-04T19:58:54.221Z",
+   "0.2.2": "2026-09-04T21:53:31.749Z",
+   "0.2.3": "2026-09-05T12:30:32.069Z",
+   "0.3.0": "2026-09-06T12:12:23.860Z",
+   "created": "2026-09-04T10:11:46.453Z",
+   "modified": "2026-09-06T12:12:24.170Z"
+  },
+  "versions": {
+   "0.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.0.0_1788516706747_0.42119028248554624"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "author": "Olivier Louvignes <[redacted-email:3ebf74febb7d]>",
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 12,
+     "integrity": "sha512-NZNu917QHKC0z91PHHeBTUN4WytIwMDfewy9BkX1+s65XzSCPOKCcT2tqKoiyZIuFA2gXX0YLKur+VZxuS45Aw==",
+     "shasum": "2c629387d5af1d922e371f3f46c031022a16b584",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCQV3cRiqqHXqAaBB39D8z+MZuh9ajmEKpIKx7vCFvC7QIgND2DNQRK/fgvk3vRtz2dwvK3OD7X2kDA6s2IS9dzFbY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.0.0.tgz",
+     "unpackedSize": 273987
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.0"
+   },
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.1.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.1.0_1788518135782_0.298179861738358"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.1.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-6KxaF2evR6fDSFHMJZWdbJYmKHbY7sXZcWnBIHrabZbm1ivWhpQ3dp0zttBytC463T+I+bBn4KDYjCKVRP8YFg==",
+     "shasum": "6a810c29fd6ad62a21efd2e5595f022611084395",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIArhO9gaCbixmxeH0qfZqbl8D0W643gqCw4KuH0Boy9TAiEAy+cGLgI66mwVD3QQ80V+uZeN26/WqDMJ7SQUR3N8Bmo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.1.0.tgz",
+     "unpackedSize": 273987
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a8579c7951c54496083e79f0483802bb997c2f31",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.1.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.1.1_1788528806193_0.6441825925886973"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.1.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-hbk0jz7AqN43P/FScUoU8VB+W4CmjDk1QfHshMlMmy/00jOvE4TuBoOp4m+fqPBjLDsJUakmOEMI9+ScVIC9Kg==",
+     "shasum": "5390d5091e79b848e25e204cbe2620222a8208c6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHwJFAQ/w9hcApGlSlRUbd07MbDxSIDMETUirzMExgrmAiAoJ3bfCcfr1+EqsvL1j6zOy80bKNIUXtFJ8FH10aAy0g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.1.1.tgz",
+     "unpackedSize": 285657
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "88c898dcea4f251b660b94b3d9b034c0491cac77",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.2.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.2.0_1788539325097_0.93810846763499"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.2.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-rTd9KaveyJwqJvimFq+/9ot6cug4hXPzBHf0ULZ4mtgwe0poiMAhQthKAxB7UXSj2hYyRArpW7E5R6M7dlzOmw==",
+     "shasum": "bb64f0a35f7801bebfe514ae3e65c1059ebdd59e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5sUk/x8OEAvwcr8ByQ50sEpTW74/l3kdlV3fZMK5YnwIhAJFFcAXD5GQ+G0+wYPpMBvR/JVQkbJL9dccDEt17uf5q"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.2.0.tgz",
+     "unpackedSize": 308584
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "59eb4494c49df1ba41563abaf0354d6a6b02640a",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.2.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.2.1_1788551934092_0.8847521177722917"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.2.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-PS4t6W9nqdDj2YrYXnE2DQ+s0PNMhq/iYtViZseUknkMANwicwQjkG0qosusA2BujGXaj0TscyH4yGGEPFyEng==",
+     "shasum": "0a87591eb2a156a481de407e6bf04c5030337070",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBen3UNHrXO2w889DCVzmB8Gu4g6oNKHRybXrlyfzVyGAiEArJGuxGvmK3wfKoTL/TGqTY23PbSFPRk3Rghi9XskNaI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.2.1.tgz",
+     "unpackedSize": 311709
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7bd7fcf61e0c675a2c1d2685c46f658289ad5e50",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.2.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.2.2_1788558811595_0.39105784866174176"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@mgcrea/mcp-ios-core": "^0.1.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.2.2"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-67ZBp+ua+1z5ibBBIvxbcOFLZvPgto2Mi3HXU7Qz2STqjETk4+wDZ0tGy3BhEuSV+l4+RDHSEculzhF+pnhK7w==",
+     "shasum": "9cf7761c4c479e8cc8cf5831d60d2cb48e61d05e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGhYgxZOJ9ickuNeaUZEe1Opq1+7KL3xfcOCJqBDbTuqAiEA6kRLjZlK5RNz1e4hKbhPrfU9Rr2VrPwEwQgAU1DZQXc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.2.2.tgz",
+     "unpackedSize": 215202
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "38ad5718d003872b8e1df75750b98141bf08ab7a",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.2.3",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.2.3_1788611431928_0.8012802866886819"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh",
+     "mcp-ios-device": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@mgcrea/mcp-ios-core": "^0.1.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.2.3"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-pNQwbmja5e0Sn6bFlas6PNkrNSdqStGQYjbXlKYThAFI112lnty0LyM2Gi6kSpxsSqZ5p3M0RMjdPvKw38AyMQ==",
+     "shasum": "7d2b331652589f759b2f3cdfa1d1f72246afd3cf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDBmRneObLaF1zVJteiV/4EfuzqANeTBQgBOGXDjfR7RAIhAIn4GI5P2LqfLdqxXl2i5eFt3Qkm42RJlTJnZ9Jw0wHC"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.2.3.tgz",
+     "unpackedSize": 215239
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "8b957a188a1e3a2e477024692444a47782338594",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.3"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-ios-device@0.3.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-ios-device_0.3.0_1788696743656_0.8718217320015131"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:91e6bc62-ef9a-4966-9e5f-341a6a28ef8d"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "ios-device-mcp": "dist/cli.js",
+     "ios-device-wda": "scripts/wda.sh",
+     "mcp-ios-device": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-ios-device/issues"
+    },
+    "dependencies": {
+     "@mgcrea/mcp-ios-core": "^0.2.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for driving a physical iOS device: screenshots, UI tree, taps and app lifecycle",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-ios-device@0.3.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-U/5tDy6rNcJXCVtqWcIE5ctGwZgHJA+ynh+9grBJre56sj+62/FE4Imx5jkBdX86Gthqa1R8P6q45fM04ZO/vA==",
+     "shasum": "a8592688a1a02405310c9ee847546b1445c41a1d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH/RsPrsRkvZt/6b2aN7rYyD8JxuZLrUY3FwlT10EatbAiAd35kO2xuByAJn6IXMNALdbN4U8cpsvY4S3pJFAAeMOw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-ios-device/-/mcp-ios-device-0.3.0.tgz",
+     "unpackedSize": 222049
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "255febf420c6dd27c9f726b76e474461377a763d",
+    "homepage": "https://github.com/mgcrea/mcp-ios-device#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "ios-device",
+     "mcp",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-ios-device",
+    "os": [
+     "darwin"
+    ],
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-ios-device.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-ios-device",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-ios-device"
+}

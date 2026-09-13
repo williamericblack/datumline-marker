@@ -1,0 +1,749 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.6.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:31fed68e3723]",
+    "name": "kaeexpandfi"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.0.1",
+   "1.0.2",
+   "1.1.0",
+   "1.2.0",
+   "1.2.1",
+   "1.3.0",
+   "1.4.0",
+   "1.5.0",
+   "1.6.0",
+   "1.6.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@expandfi/mcp-server",
+  "_rev": "12-ba54bb9978865c85ea566078efb58096",
+  "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+  "dist-tags": {
+   "latest": "1.6.1"
+  },
+  "keywords": [
+   "mcp",
+   "claude",
+   "expandfi",
+   "ecommerce",
+   "analytics"
+  ],
+  "license": "UNLICENSED",
+  "maintainers": [
+   {
+    "email": "[redacted-email:31fed68e3723]",
+    "name": "kaeexpandfi"
+   }
+  ],
+  "name": "@expandfi/mcp-server",
+  "readme": "# ExpandFi MCP Server\n\nConnect Claude to your ExpandFi account \u2014 sales, customers, advertising, and\nprofitability data across Amazon and Shopify \u2014 from Claude Code or Claude\nDesktop.\n\nRequires Node 18 or newer.\n\n## Install\n\n```bash\nnpm install -g @expandfi/mcp-server@latest\n```\n\nThen, **from the project directory you want to work in**:\n\n```bash\nexpandfi-mcp-setup\n```\n\nThe directory you run setup from is where Claude Code picks the server up. Fully\nquit and reopen Claude Code or Claude Desktop afterwards \u2014 the server process\nstarts when the client does, so nothing takes effect until you restart.\n\nThen ask Claude to run any ExpandFi tool \u2014 `list_merchants` is a good first one.\nSign-in happens automatically on the first call that needs it: your browser\nopens to ExpandFi and the tool completes once you have signed in. To sign in\ndeliberately instead, run `get_auth_status` with `action='reauth'`.\n\n`get_auth_status` on its own only *reports* status \u2014 it will say\n`not_configured` and will not open anything. Use it to check the running\nversion, the resolved workspace, and whether your tokens are still valid.\n\nIf you would rather have Claude do the whole install for you, paste the prompt\nat <https://app.expandfi.com/mcp/prompt.txt> into a new session.\n\n### What setup changes\n\n`expandfi-mcp-setup` writes an `expandfi` entry into **both** MCP configs it can\nfind, and leaves everything else in them alone:\n\n- `./.mcp.json` in the directory you ran it from (Claude Code)\n- `claude_desktop_config.json` (Claude Desktop)\n\nIt also installs a session-freshness hook \u2014 `~/.expandfi-mcp/session-freshness-hook.cjs`\n\u2014 and **registers it in `~/.claude/settings.json` as a global `SessionStart`\nhook.** That is user-level, so it runs in every Claude Code session, not only in\nprojects that use ExpandFi. It reminds Claude to check whether your ExpandFi\ndocs and skills are current. Re-running setup replaces our entry rather than\nadding a second one, and other people's hooks are preserved.\n\nAny config file it rewrites is copied to `<name>.bak-<YYYY-MM-DD>` first.\n\n## Upgrading\n\n`npm install -g @expandfi/mcp-server` with no tag can leave an existing global\ninstall exactly where it was, depending on your npm version \u2014 and it says\nnothing when it does. Always name the tag, then you never have to know:\n\n```bash\nnpm install -g @expandfi/mcp-server@latest\n```\n\n`@latest` is npm's moving \"newest published release\" tag, not a version pin. To\npin, name an exact version (`@expandfi/mcp-server@1.6.1`). Restart your client,\nthen run `get_auth_status` \u2014 it reports the running version and whether ExpandFi\nconsiders it current.\n\n## Where files are written\n\nTwo different roots, deliberately:\n\n| What | Where | Follows cwd? |\n|---|---|---|\n| Skills + agents | `~/.claude/skills`, `~/.claude/agents` | No \u2014 always user-level |\n| Docs (`get_docs`) | `<workspace>/expandfi_docs/` | Yes |\n| Report + Dash artifacts (`download_report`, `download_data_dash_artifact`) | `<workspace>/expandfi_reports/` | Yes |\n\n`<workspace>` is chosen at startup, in this order:\n\n1. `EXPANDFI_WORKSPACE_DIR`, if set and usable.\n2. The process cwd \u2014 in terminal Claude Code this is your project, so artifacts\n   land next to your work.\n3. `~/.expandfi-mcp/workspace`, when the cwd is unusable: a filesystem root, a\n   Windows system directory, or somewhere we cannot actually write. A GUI launch\n   often lands in one of those.\n4. Your home directory, only if that fallback cannot be created either.\n\n### `EXPANDFI_WORKSPACE_DIR`\n\nSet this when your client launches the server with a cwd you do not want\nartifacts in. **Claude Desktop passes no cwd of its own**, so a `\"cwd\"` key in\n`claude_desktop_config.json` does nothing \u2014 this env var is the supported\nescape hatch:\n\n```json\n{\n  \"mcpServers\": {\n    \"expandfi\": {\n      \"command\": \"expandfi-mcp\",\n      \"env\": {\n        \"EXPANDFI_SERVER_URL\": \"https://app.expandfi.com\",\n        \"EXPANDFI_CLIENT_ID\": \"expandfi-mcp\",\n        \"EXPANDFI_WORKSPACE_DIR\": \"C:\\\\Users\\\\<you>\\\\expandfi\"\n      }\n    }\n  }\n}\n```\n\nAn unusable value (not writable, or a system directory) is ignored with a\nwarning on stderr, and selection carries on from step 2 \u2014 so a usable cwd still\nwins. Run `get_auth_status` to see the resolved `workspace_dir`.\n\n### About `.expandfi-write-probe-*` files\n\nChoosing the workspace requires knowing whether a directory is really writable.\n`access()` cannot answer that on Windows \u2014 it ignores ACLs \u2014 so the server\ncreates and immediately deletes a zero-byte `.expandfi-write-probe-*` file\ninstead. It is removed synchronously; you would only ever see one if the process\nwere killed in that window, and it is safe to delete.\n\n## Signing in\n\nThe first tool call starts an OAuth sign-in. The server prints the sign-in URL\non stderr and also tries to open your browser.\n\nIf the browser does not open \u2014 over SSH, or in a restricted terminal \u2014 copy the\nwhole printed URL and paste it into a browser on the same machine. It must be\nthe same machine: sign-in completes on a short-lived listener bound to\n`127.0.0.1`.\n\n**Paste the entire URL.** If it is truncated at the first `&`, ExpandFi answers\n*\"Missing required parameter: client_id.\"* That is a clipped URL, not a broken\naccount.\n\nYour tokens are stored in `~/.expandfi-mcp/.tokens`. Deleting that file signs\nyou out; nothing else in the install depends on it.\n\n## Support\n\n- Install / upgrade prompt: <https://app.expandfi.com/mcp/prompt.txt>\n- Connected devices and sign-out: <https://app.expandfi.com/mcp/devices>\n- Setup and troubleshooting: <https://app.expandfi.com/mcp/setup>\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "1.0.0": "2026-02-22T22:32:24.986Z",
+   "1.0.1": "2026-02-23T00:36:16.551Z",
+   "1.0.2": "2026-02-23T14:48:14.217Z",
+   "1.1.0": "2026-06-10T17:29:02.314Z",
+   "1.2.0": "2026-06-13T17:02:23.637Z",
+   "1.2.1": "2026-06-14T17:34:03.798Z",
+   "1.3.0": "2026-06-21T17:18:59.604Z",
+   "1.4.0": "2026-06-23T02:27:29.174Z",
+   "1.5.0": "2026-08-22T18:45:05.991Z",
+   "1.6.0": "2026-08-25T16:54:50.400Z",
+   "1.6.1": "2026-08-26T15:28:31.799Z",
+   "created": "2026-02-22T22:32:24.703Z",
+   "modified": "2026-08-26T15:28:31.993Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.0.0",
+    "_nodeVersion": "23.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.0_1771799544836_0.006146586026707368"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "deprecated": "admin tooling readable in base.js; upgrade to   >=1.2.1",
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-tuGs5pPxPybQr+o6FXXr+fpKLo0Z80L63rRDeZedYYx8LrnWeA4T0ApLwwuyYNGPs22rDhQ3B4Cr46XBS0qRsg==",
+     "shasum": "359a44cc477d7b3e59b206c62d980cd5e01258cf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBbm1Unn+E1l0bRH9FHSwLUPJPq6dMD1wFxBm7zyc6/5AiEAtJL446HUj4kUlKObO35912Rq6q8XRbpGBigrqKvzkxs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.0.0.tgz",
+     "unpackedSize": 52038
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "0195348f8524ae35464765987e0f9ff9533502de",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.0.1",
+    "_nodeVersion": "23.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.1_1771806976401_0.3432763601348845"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "deprecated": "admin tooling readable in base.js; upgrade to   >=1.2.1",
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-oPn/V4M27I9qAmULGwwGZOQxQQ66c4BVgHPocAYOGEXqfgCd6Zi/j9GNSCSNxUwXnzPEoyGgEcXsovAWT8Nm0Q==",
+     "shasum": "85c0462579c94179ce9dca2f4b3609e3dc55c810",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDOek++zSaxpPUep9+ikwa83/c7vLa4RKgusZvPTx5cpQIhAI+c5zqFf67H0kQBj+l3Qc5I2HffSVmArzizFYNz4laf"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.0.1.tgz",
+     "unpackedSize": 52121
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9b23fb424cfc3337c2cadb183f237e3f775648dc",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.0.1"
+   },
+   "1.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.0.2",
+    "_nodeVersion": "23.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.2_1771858094062_0.26651668924643657"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "deprecated": "admin tooling readable in base.js; upgrade to   >=1.2.1",
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-0tqWl7bEvO1NJ3z0WipDip+GbhkJ5dVhRujdBufbweGfQiH98k90mdzEuKWucuSLs/+shYLVaSmZx/WoFzwsEA==",
+     "shasum": "87a5543d82f4bbd5950d4752c9f3f3963d1a289a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCXBEcb3NAncQz3sMFY2ISSJfeiQVAKjaGNF/0ru/AqkQIhAJAartrKr4f4Bs8dSRhzzJW8Mb6DlgVj81Kjawe8+t5w"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.0.2.tgz",
+     "unpackedSize": 53790
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "4166155dd7b5d829acb0c981feec52f6ead67d3d",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.0.2"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.1.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.0_1781112542174_0.8151302221053078"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "deprecated": "admin tooling readable in base.js; upgrade to   >=1.2.1",
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-uf3qiODtmAbgJWHo+EGzbjCRgSCnQl2FKCpYzCsvRF8rh53jGuYQ+p8qD3H56ez0mN3uYs7Q7bMMw3ALSY1xyg==",
+     "shasum": "eb44f48d5d9f4a4cc7581a1f29ca270bd049d8ae",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEplSfGJ94Kc6YsDEQCMh9Ny1Powj9uYbfVzyxf6LbmVAiEA58KjpY/qrTbbQeMDbhx2p8txHDqesWZT0/SSDvEbBhU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.1.0.tgz",
+     "unpackedSize": 94824
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "4a8cf62f75c6d16f4cca80d94d66cc61f92623b4",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.1.0"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.2.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.0_1781370143477_0.8263314305283076"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "deprecated": "admin tooling readable in base.js; upgrade to   >=1.2.1",
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-dURqHAHpmOpsl/THtV+kh2+S/Wg2qXjdq0hAmGqcozXABOwXJSpYSIbH8CgGWpdZxz0S4fL39ejrDGNMI7kP6A==",
+     "shasum": "5e09559e9d37ce4fcbac1338a0aa5c69c58b5969",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH/nAZJlzitFxWVCbcThXL9g9DNt8EVgNFfk4uSZ5NSyAiAlWqDhlnXqjp7JrG3zdI9Fbna2vK9J64jiezAOulvXKA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.2.0.tgz",
+     "unpackedSize": 99387
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "f14345d7d4d51635a7d92af262ecae8b570eed43",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.2.0"
+   },
+   "1.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.2.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.1_1781458443666_0.9195898069232278"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-kZq8UuLCvYoZZt/AJ/Ofs8cLnQ5UYLfPTYSm0WGo9pOQnz8IpK70G4t6DGftaVEQDLK4+iqcEJD4lVSs1tByzg==",
+     "shasum": "e873c5996e9bfe20b96c1c4df691a9464060168a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDECs53BdplxolGw1gLz6gqDuzW11wu+98BATC/X5xV+QIgEcbsnee8Ytr+4ahl/16598jK6aQ8kQ51av5vZy5Ls3g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.2.1.tgz",
+     "unpackedSize": 90123
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "b27dbc9472d11747734ebe2dcd6fe5e3dd574404",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.2.1"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.3.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.3.0_1782062339490_0.816557813792747"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-QKZRw0FVfMMti9fEveb5dcL1SXAbo4Ciu3JhONuPdeBUM0KCVf5s5O1K6D54NArJ+luV4Md8Z54YvbZPfHzPQg==",
+     "shasum": "cacd52c5442793586172cf701f8d1ed7d91b7f00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDXpkdsC9r0INDmvmimMFVeYvm3hO42s6zzApd6ga+XXAIgNoo1m/4dfh3VUyomf2WckWaC8I3/tEaAW649eWc2b+E="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.3.0.tgz",
+     "unpackedSize": 93117
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "24f8afe8aa4888be30d210c411ba1b80c5b61cd2",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.3.0"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.4.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.4.0_1782181649035_0.3802253439273353"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-GNmx+67cOJa2h4WO7ucQQtYMxQZ/k1DK9GrgiuZOlVWbHstEhy8ZTbNwFfQ7gpJUc7h2VWWqjNquOyXXrCfrjg==",
+     "shasum": "a01357600eb03d406eeeb82c9d6287d80a0b229b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGbTe1qnkxQWDJr7vk/7cXpROqDuUAb754/L9Ky2Rj56AiEA6YUydOkLDGry8u6FTQQWwTDQZK4dCK+ugHmQ6/JSjAM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.4.0.tgz",
+     "unpackedSize": 95393
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "12b0f370255e2acb9a2bf260540d6a9e5ba06c7d",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/"
+    },
+    "type": "module",
+    "version": "1.4.0"
+   },
+   "1.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.5.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.5.0_1787424305840_0.03448539640269788"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-48Wy8ob+zKjE1ugaB/jxHEHy7jPFbHk5Ann75hBZphM6sMFFG/LgEUAoTq02Ye5e1mGjNWfHu30gpdDdSNN1UA==",
+     "shasum": "5fb88adec07e6a71e7ab24f341783fded2d56ca7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICFBN7CuW16RtSE9xUIIb+Vwka8VUiYITm1dXYLNXvB1AiBywLuI0Z0LEPcKysYJwMIoKMktwtjqPY6ju0r8ciAYPQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.5.0.tgz",
+     "unpackedSize": 113114
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "2a8df3ddd587401fdbb4cdd26159c456277fa80b",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/test_*.js"
+    },
+    "type": "module",
+    "version": "1.5.0"
+   },
+   "1.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.6.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.6.0_1787676890252_0.4046365575250026"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-GBu71Hp5agXGRUe49kxPrIzOsaNQEEsUX1JZGZZitkZX1xkSofShDv7140gspex4qpH8bu7ROPYuNVo/t9v7PA==",
+     "shasum": "386c07a574f00987f09dcd0149634b1031a70863",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDSEgPeyCSEq55HpixF6z6akD/EuaBEkFKlceV+iDSFXwIhANzNmBkoMfRvJYxmRe+9NMzuFDCNDUAZOvPq1/R8HhBU"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.6.0.tgz",
+     "unpackedSize": 127377
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "ae02cceae1fd17ee96984b71b30233ae96f890bd",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/test_*.js"
+    },
+    "type": "module",
+    "version": "1.6.0"
+   },
+   "1.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@expandfi/mcp-server@1.6.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.6.1_1787758111659_0.4729810031548327"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:31fed68e3723]",
+     "name": "kaeexpandfi"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "expandfi-mcp": "expandfi_mcp_server.js",
+     "expandfi-mcp-setup": "bin/setup.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.11.0",
+     "zod": "^3.24.0"
+    },
+    "description": "ExpandFi MCP server for Claude Desktop and Claude Code",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-uLK1NowCeh+S2XYZGIiUy4LL70/cj8/5xobnIpJ/ZVMfUmBb6CXKTVfjNLGIGpzPdrpHKwkj2p2gWgRMnAe7ew==",
+     "shasum": "0891a330e519cf87f8ea046cad1dacd326bcfc8b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCQpN9VPQiwbNx5iqa58bdw6vHafMAI+vbsYkezoaIJNAIhAIhuCaW2xAiy+cCFkp4fMYFmDp+nx4tBBoc6CuwrMhTi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expandfi/mcp-server/-/mcp-server-1.6.1.tgz",
+     "unpackedSize": 136669
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "f9886470ef4867a940fabc31022cb921366d07e3",
+    "keywords": [
+     "mcp",
+     "claude",
+     "expandfi",
+     "ecommerce",
+     "analytics"
+    ],
+    "license": "UNLICENSED",
+    "maintainers": [
+     {
+      "email": "[redacted-email:31fed68e3723]",
+      "name": "kaeexpandfi"
+     }
+    ],
+    "name": "@expandfi/mcp-server",
+    "scripts": {
+     "test": "node --test test/test_*.js"
+    },
+    "type": "module",
+    "version": "1.6.1"
+   }
+  }
+ },
+ "name": "@expandfi/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@expandfi%2Fmcp-server"
+}

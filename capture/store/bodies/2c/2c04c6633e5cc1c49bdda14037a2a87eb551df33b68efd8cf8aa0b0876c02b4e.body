@@ -1,0 +1,1354 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.4.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:c3da966a6e58]",
+    "name": "wesleyyyb"
+   },
+   {
+    "email": "[redacted-email:f08b57b1f891]",
+    "name": "bryson.tang"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0-alpha.0",
+   "0.1.1-alpha.0",
+   "0.1.2-alpha.0",
+   "0.2.0-alpha.0",
+   "0.2.2-alpha.0",
+   "0.2.3-alpha.0",
+   "0.2.4",
+   "0.2.4-alpha.0",
+   "0.3.0",
+   "0.4.0",
+   "0.4.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@cazvid-ai/nestjs-mcp",
+  "_rev": "12-d82201f1541e9743ec789cbcc0501d6a",
+  "bugs": {
+   "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+  },
+  "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+  "dist-tags": {
+   "latest": "0.4.1",
+   "next": "0.2.4-alpha.0"
+  },
+  "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+  "keywords": [
+   "nestjs",
+   "model-context-protocol",
+   "mcp",
+   "decorators"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:c3da966a6e58]",
+    "name": "wesleyyyb"
+   },
+   {
+    "email": "[redacted-email:f08b57b1f891]",
+    "name": "bryson.tang"
+   }
+  ],
+  "name": "@cazvid-ai/nestjs-mcp",
+  "readme": "# @cazvid-ai/nestjs-mcp\n\nNestJS utilities for exposing [Model Context Protocol](https://modelcontextprotocol.io/) tools without hand-rolling a server in every project. Decorate any injectable with `@McpTool()`, import `McpModule`, and you get a streamable HTTP endpoint backed by the official MCP TypeScript SDK.\n\n> \ud83d\udea7 This package is pre-1.0. Expect breaking changes while the API stabilizes and please send feedback.\n\n## Installation\n\n- Node.js \u2265 18.18 with ES module support (`\"type\": \"module\"` in your `package.json`).\n- Nest app using `@nestjs/platform-express`.\n- Peer dependencies: `@nestjs/common`, `@nestjs/core`, `reflect-metadata`, `zod`, and `@modelcontextprotocol/sdk`.\n\n```bash\n# Stable release\npnpm add @cazvid-ai/nestjs-mcp @modelcontextprotocol/sdk zod reflect-metadata\n\n# Preview channel (optional)\npnpm add @cazvid-ai/nestjs-mcp@next @modelcontextprotocol/sdk zod reflect-metadata\n```\n\nEnsure your `tsconfig.json` enables decorators and NodeNext module resolution (see [docs/getting-started.md](docs/getting-started.md) for the full example).\n\n## Quick Start\n\n```ts\n// app.module.ts\nimport { Module } from '@nestjs/common';\nimport { McpModule } from '@cazvid-ai/nestjs-mcp';\nimport { DataTools } from './data.tools.js';\n\n@Module({\n  imports: [\n    McpModule.forRoot({\n      auth: { mode: 'service', key: process.env.MCP_SERVICE_KEY! },\n      path: '/mcp', // optional, defaults to '/mcp'\n    }),\n  ],\n  providers: [DataTools],\n})\nexport class AppModule {}\n```\n\n```ts\n// data.tools.ts\nimport { Injectable } from '@nestjs/common';\nimport { McpTool, McpExecutionContext } from '@cazvid-ai/nestjs-mcp';\nimport type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';\nimport { z } from 'zod';\n\nconst PingInput = z.object({ message: z.string().default('ping') });\nconst PingOutput = z.object({\n  reply: z.string(),\n});\n\n@Injectable()\nexport class DataTools {\n  @McpTool({\n    name: 'ping',\n    description: 'Simple health check',\n    inputSchema: PingInput,\n    outputSchema: PingOutput,\n  })\n  async ping(\n    input: z.infer<typeof PingInput>,\n    ctx: McpExecutionContext\n  ): Promise<CallToolResult> {\n    const ua = ctx.headers['user-agent'];\n    const base = input.message === 'ping' ? 'pong' : `echo:${input.message}`;\n    const reply = typeof ua === 'string' ? `${base} (from ${ua})` : base;\n\n    return {\n      structuredContent: { reply },\n      content: [\n        {\n          type: 'text',\n          text: reply,\n        },\n      ],\n    };\n  }\n}\n```\n\n```ts\n// main.ts\nimport 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module.js';\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(process.env.PORT ?? 3000);\n}\nbootstrap();\n```\n\nNeed separate endpoints with different auth or tool groups? Import the module once with `forRoot()` and use `McpModule.register()` for each additional route:\n\n```ts\n@Module({\n  imports: [\n    McpModule.forRoot({\n      auth: { mode: 'service', key: process.env.MCP_SERVICE_KEY! },\n      path: '/mcp',\n      groups: ['public'],\n    }),\n    McpModule.register({\n      auth: { mode: 'bearer', verifier: AdminBearerVerifier },\n      path: '/mcp-admin',\n      groups: ['admin'],\n    }),\n  ],\n  providers: [AdminBearerVerifier],\n})\nexport class AppModule {}\n```\n\n> **Heads up:** Router registration is enabled by default. Only set `registerRouter: false` if you intend to mount the controller manually\u2014the module will otherwise fall back to mounting at `/mcp` when no explicit path is provided.\n\nAsync callers can return `path` or `registerRouter` from `forRootAsync()`/`registerAsync()` factories and the router will align once the factory resolves.\n\nBy default the HTTP controller is mounted at `/mcp`. Override the `path` option or provide an array when you need additional aliases. Run the app and probe the endpoint:\n\n```bash\nPORT=3000 MCP_SERVICE_KEY=xyz pnpm start\n\ncurl -i -X POST http://localhost:3000/mcp \\\n  -H 'content-type: application/json' \\\n  -H 'x-api-key: xyz' \\\n  --data '{\"method\":\"ping\",\"params\":{\"message\":\"ping\"}}'\n```\n\n> If you configure `outputSchema`, **success results** should return a `CallToolResult` with `structuredContent` that matches the schema. **Error results** (`isError: true`) may omit `structuredContent`; the server will pass the error through without validating it. Non-string outputs without a schema are JSON\u2011stringified into a text item, so prefer the structured MCP shape for production handlers.\n\n## Documentation\n\n- [docs/getting-started.md](docs/getting-started.md) \u2014 installation prerequisites, TypeScript setup, and a full walkthrough.\n- [docs/authentication.md](docs/authentication.md) \u2014 service keys, bearer auth, and async configuration patterns.\n- [docs/module-options.md](docs/module-options.md) \u2014 `McpModuleOptions`, tool grouping, multi-server setups, and observability hooks.\n- [docs/tools-and-context.md](docs/tools-and-context.md) \u2014 `@McpTool` metadata, request guards, execution context, and error handling.\n- [docs/dev-experience.md](docs/dev-experience.md) \u2014 MCP Inspector usage plus the verification checklist.\n\n## Verification Checklist\n\nBefore submitting changes (or when picking up the repo), make sure the following commands succeed and fix implementations rather than muting tests:\n\n```bash\npnpm lint\npnpm typecheck\npnpm test\n```\n\n## Roadmap\n\n- Optional JWT/OAuth guard\n- Schema-to-docs utilities\n- More granular error mapping and logging helpers\n\n## License\n\nMIT \u00a9 Cazvid AI\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+  },
+  "time": {
+   "0.1.0-alpha.0": "2025-10-09T08:03:32.672Z",
+   "0.1.1-alpha.0": "2025-10-09T08:57:50.039Z",
+   "0.1.2-alpha.0": "2025-10-09T09:14:23.301Z",
+   "0.2.0-alpha.0": "2025-10-09T23:46:58.627Z",
+   "0.2.2-alpha.0": "2025-10-10T01:54:25.138Z",
+   "0.2.3-alpha.0": "2025-10-10T02:10:33.832Z",
+   "0.2.4": "2025-10-11T08:43:44.573Z",
+   "0.2.4-alpha.0": "2025-10-10T13:10:56.727Z",
+   "0.3.0": "2025-10-11T11:06:03.271Z",
+   "0.4.0": "2025-10-11T22:55:21.771Z",
+   "0.4.1": "2025-10-12T10:42:04.137Z",
+   "created": "2025-10-09T08:03:32.409Z",
+   "modified": "2026-02-25T18:46:24.142Z"
+  },
+  "versions": {
+   "0.1.0-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.1.0-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.1.0-alpha.0",
+    "_integrity": "sha512-5ZgJ6FICAhVXCpWO2AVj7XCLsqtaLxnc4A4qWUusblD3+umLHsaqZI8d2u+5uh5600ttVOHJOeufRcOpbsP/RA==",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.1.0-alpha.0_1759997012478_0.8484979625331461"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.9.2",
+    "_resolved": "/private/var/folders/0c/jz9xl1bn1l76cln4b1_92qcm0000gn/T/2d16377d35150da9bc8205fcded100dd/cazvid-ai-nestjs-mcp-0.1.0-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "typescript": "^5.4.0",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-5ZgJ6FICAhVXCpWO2AVj7XCLsqtaLxnc4A4qWUusblD3+umLHsaqZI8d2u+5uh5600ttVOHJOeufRcOpbsP/RA==",
+     "shasum": "74759d3d3a81167cb83b7e89acf60d52c9c54152",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDEIxT/K3tjFGhP+i3WogxoWm/wzoOTATI9C0ZXMg7IHAIhAP03pHqgc5Hr5GxBSXRJJ8PtUd4fFaoQuZFKOdor7jgV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.1.0-alpha.0.tgz",
+     "unpackedSize": 58132
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-alpha.0"
+   },
+   "0.1.1-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.1.1-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.1.1-alpha.0",
+    "_integrity": "sha512-ML9WrWjF+UGa/I7fWoQJOUFmggz4mLX+n3qNqAlAhuDavUmGdvaerswCTvoklUuqquMUHlJbYj3WfGcS62VQ5g==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.1.1-alpha.0_1760000269851_0.9870923662983637"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/251dddfd3fea171f7d4ce12955729865/cazvid-ai-nestjs-mcp-0.1.1-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "typescript": "^5.4.0",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-ML9WrWjF+UGa/I7fWoQJOUFmggz4mLX+n3qNqAlAhuDavUmGdvaerswCTvoklUuqquMUHlJbYj3WfGcS62VQ5g==",
+     "shasum": "8e4114716f26081ab0e1176254572d023fe8cea6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC86vvIpajr7Fho2B44pax980sEMiTmNUK2co0zv2BkpAiBhIcV6XdCsXTFTPn9u26q4Qp8B0a9go8vbar+rCjhcpg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.1.1-alpha.0.tgz",
+     "unpackedSize": 67647
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.1-alpha.0"
+   },
+   "0.1.2-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.1.2-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.1.2-alpha.0",
+    "_integrity": "sha512-Vs4hDeffpr0RHD+KIa6roEMc1opfDo2vE64k90ZBxpdwHtRPBCPLqpXB7qO+7DKgdcHtRxufyG1vsH32ITl6kg==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.1.2-alpha.0_1760001263137_0.023697631660930973"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/b5e291ecfc153eb923ffc29dd46e7901/cazvid-ai-nestjs-mcp-0.1.2-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "typescript": "^5.4.0",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-Vs4hDeffpr0RHD+KIa6roEMc1opfDo2vE64k90ZBxpdwHtRPBCPLqpXB7qO+7DKgdcHtRxufyG1vsH32ITl6kg==",
+     "shasum": "f3616205f2117e741b64896b6e729e525311b437",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICLROYxw+xBjpQx2Kc8CoYoR+1niJtMnJF1q135TVV4OAiBU6RwdMiRx0u8alHs7YrBJqwRu0gi9KKQQbi35izen9A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.1.2-alpha.0.tgz",
+     "unpackedSize": 67596
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.0.0",
+     "@nestjs/core": "^10.0.0",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.2-alpha.0"
+   },
+   "0.2.0-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.2.0-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.2.0-alpha.0",
+    "_integrity": "sha512-cFUOUypf+j0pZmQTbZyTc2r9q4VVkAwwoSO6ICmvGOGkrw9jbJT/b4hi2ZD9oBUj41jGZceB5VsJE16Yo/FMwg==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.2.0-alpha.0_1760053618418_0.9014069801445306"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/b94f761c91477d4e00e26f6803c5bbd9/cazvid-ai-nestjs-mcp-0.2.0-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 75,
+     "integrity": "sha512-cFUOUypf+j0pZmQTbZyTc2r9q4VVkAwwoSO6ICmvGOGkrw9jbJT/b4hi2ZD9oBUj41jGZceB5VsJE16Yo/FMwg==",
+     "shasum": "c8559c598ec44f2451231ee802cf6370be565a1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCnKwvuzhpWMrB08Xr7qZCYz4KY9lz/y9Z4nJpFGWetagIhAIptbzbuhXmvJl1Y4dTxKQ4QktX+zL/iQfumggd0j+RB"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.2.0-alpha.0.tgz",
+     "unpackedSize": 215180
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.{ts,tsx,js,json}": "biome check --write"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0-alpha.0"
+   },
+   "0.2.2-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.2.2-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.2.2-alpha.0",
+    "_integrity": "sha512-woIrUbtTY0HfPrgWCP2yqRM0ErjxU6mRQnkE1z4wxT08RHkAUa5xsgBRdHi+5MEeG1CCVb1ZPIpYCcWKaUfu6Q==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.2.2-alpha.0_1760061264950_0.23365033248010003"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/12f20cc1eb88f981367705039ca9ceaa/cazvid-ai-nestjs-mcp-0.2.2-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 75,
+     "integrity": "sha512-woIrUbtTY0HfPrgWCP2yqRM0ErjxU6mRQnkE1z4wxT08RHkAUa5xsgBRdHi+5MEeG1CCVb1ZPIpYCcWKaUfu6Q==",
+     "shasum": "94ad561c245d51a1c97273d85a707bdbb7166d77",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCTVRXkYsLMiES2g5IfAcEt8X5VDqc2Dgxr3847EZACWgIgP5MqDgFeCYOsn+7z7HL/4pCoDxEIZtv3eiCf+oM4CyU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.2.2-alpha.0.tgz",
+     "unpackedSize": 218777
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.{ts,tsx,js,json}": "biome check --write"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.2-alpha.0"
+   },
+   "0.2.3-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.2.3-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.2.3-alpha.0",
+    "_integrity": "sha512-jX0a0hspn+3HybRMcIPXPLCqPV7NBP8PXNTycbLpJJxREDp6dtBgSGML9Qo1A9MOVA+74PUePrhpWtq0bFw5ng==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.2.3-alpha.0_1760062233636_0.35840204077550575"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/9640395e3f9a6d8d306dd4f366d96880/cazvid-ai-nestjs-mcp-0.2.3-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 75,
+     "integrity": "sha512-jX0a0hspn+3HybRMcIPXPLCqPV7NBP8PXNTycbLpJJxREDp6dtBgSGML9Qo1A9MOVA+74PUePrhpWtq0bFw5ng==",
+     "shasum": "0b1787e699ff8ac7bd4b68d0be6046c7b254200d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA8LCHIjeOQUKPAsxWhi1i4KVqc8vL5RWcPE2xnLKmjgAiAZUW9/a79EdnI8mMQg7YskBFMX8VH+QpXoJTOE68kCow=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.2.3-alpha.0.tgz",
+     "unpackedSize": 218519
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.{ts,tsx,js,json}": "biome check --write"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.3-alpha.0"
+   },
+   "0.2.4": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.2.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.2.4",
+    "_integrity": "sha512-LFR9XpW08SPCUPTdgSV1jJHXDKvu6tCwZPq3MTwmEyB8mp6kAf2rOXvo4BLsS/Q3UD4F2NPSdxVbpI12I+oy/Q==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.2.4_1760172224354_0.7340038418478869"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/619174df2488983b08443c047b965c9b/cazvid-ai-nestjs-mcp-0.2.4.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 79,
+     "integrity": "sha512-LFR9XpW08SPCUPTdgSV1jJHXDKvu6tCwZPq3MTwmEyB8mp6kAf2rOXvo4BLsS/Q3UD4F2NPSdxVbpI12I+oy/Q==",
+     "shasum": "008a264ab1e9e2cd0e565a18106e006165f9e3ea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD98wr24Q+6+kXNUEL1dLSyxPLlLYHChzsntIwdg7RcigIgfdC0Su5NoA7z7buvuyFcpKK5aKq3httz4dZH0c9HmsQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.2.4.tgz",
+     "unpackedSize": 238891
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.json": "biome format --write",
+     "*.{ts,tsx,js}": "biome check --write",
+     ".github/.release-please-manifest.json": "echo skip"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "check:deprecations": "node scripts/deprecation-gates.mjs",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.4"
+   },
+   "0.2.4-alpha.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.2.4-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.2.4-alpha.0",
+    "_integrity": "sha512-AOmsvKli5mQkorHzovVpEmXc0kEkkDl6ZQp/D3XlmnOYc4oIthRbKK3cR877447Q1yLrVu783LwwZNbqCAr3DQ==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.2.4-alpha.0_1760101856537_0.8233001066007477"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/b32fa396e33e4f98364705f8f23a01fc/cazvid-ai-nestjs-mcp-0.2.4-alpha.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 79,
+     "integrity": "sha512-AOmsvKli5mQkorHzovVpEmXc0kEkkDl6ZQp/D3XlmnOYc4oIthRbKK3cR877447Q1yLrVu783LwwZNbqCAr3DQ==",
+     "shasum": "26b080586c8c5c30cdce325886f21e47cb5103d4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFGyw9lgPnHR2lWN8cqQE6Zlol/VJuq6SeOEilVopKsRAiEAkWaSfOpCTJWTKsDUTKjfXSHk+9Go5dMO1DxjvY662qc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.2.4-alpha.0.tgz",
+     "unpackedSize": 226728
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.{ts,tsx,js,json}": "biome check --write"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "check:deprecations": "node scripts/deprecation-gates.mjs",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.4-alpha.0"
+   },
+   "0.3.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.3.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.3.0",
+    "_integrity": "sha512-G7/SG8EhE3myuUgV0WAbUWkFbHkQqfMfN855R0D62aY/oS/CKJHg+xKvCk05SHBNqW+qcZ3vA0mXXNMlkJ3uGw==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.3.0_1760180763074_0.5042253835275428"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/44ff21c616656138738e93210f725a98/cazvid-ai-nestjs-mcp-0.3.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {
+     "zod-to-json-schema": "^3.24.6"
+    },
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/platform-express": "^10.4.20",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 83,
+     "integrity": "sha512-G7/SG8EhE3myuUgV0WAbUWkFbHkQqfMfN855R0D62aY/oS/CKJHg+xKvCk05SHBNqW+qcZ3vA0mXXNMlkJ3uGw==",
+     "shasum": "1bac8c4f271053b58de3bed2bdea8d3487ee3a00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFbVFArf6etxlcW8uPRxHwBtB4nGGWYra2OYot+jBV8uAiAnX4GYRG0311M4G/Hb3upHjfFDQ6IJN+lOuKy1FwW8gg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.3.0.tgz",
+     "unpackedSize": 312929
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.json": "biome format --write",
+     "*.{ts,tsx,js}": "biome check --write",
+     ".github/.release-please-manifest.json": "echo skip"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:unit": "vitest run --coverage --exclude src/__tests__/mcp.e2e.spec.ts",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.4.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.4.0",
+    "_integrity": "sha512-uVN6jE3WBshQEIg1Jfrncnajrs5FAovz1mijRS3jrUHOwt2e02kUwWj/j6Yyuq4WqcUKWwBCdVYFnylaM0nemg==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.4.0_1760223321579_0.9227482732903232"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/e1f8824207723d8b1af2de8066b466bf/cazvid-ai-nestjs-mcp-0.4.0.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {},
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/platform-express": "^10.4.20",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 83,
+     "integrity": "sha512-uVN6jE3WBshQEIg1Jfrncnajrs5FAovz1mijRS3jrUHOwt2e02kUwWj/j6Yyuq4WqcUKWwBCdVYFnylaM0nemg==",
+     "shasum": "e7248bd9dacb9ecb939be10d8c6c2b80004c55ec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCqG0L307izMg119bvDPNiNxejgoLQB1z/Vf1Y0NSnJUgIhANatoenxuIIkxCNnvts5YQA54SrHv9/ZuzPrQDIkb5IZ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.4.0.tgz",
+     "unpackedSize": 391665
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.json": "biome format --write",
+     "*.{ts,tsx,js}": "biome check --write",
+     ".github/.release-please-manifest.json": "echo skip"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:unit": "vitest run --coverage --exclude src/__tests__/mcp.e2e.spec.ts",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_from": "file:cazvid-ai-nestjs-mcp-0.4.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@cazvid-ai/nestjs-mcp@0.4.1",
+    "_integrity": "sha512-gL5GtOBG4uSPR3GE3H12y9IfbplC2TF05DpbIV8gc9pAzUqTOFTGXm4nX/Hsv+7vK5YLom2e/I3LO8H9KNDlTQ==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nestjs-mcp_0.4.1_1760265723946_0.3233925692459225"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f08b57b1f891]",
+     "name": "bryson.tang"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/d4be33862aef73d826008142eafff959/cazvid-ai-nestjs-mcp-0.4.1.tgz",
+    "bugs": {
+     "url": "https://github.com/cazvid-ai/nestjs-mcp/issues"
+    },
+    "dependencies": {},
+    "description": "NestJS integration for declaring Model Context Protocol tools with decorators.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.2.5",
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/platform-express": "^10.4.20",
+     "@nestjs/testing": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "@types/supertest": "^6.0.3",
+     "@vitest/coverage-v8": "^3.2.4",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.2.3",
+     "reflect-metadata": "^0.1.13",
+     "supertest": "^7.1.4",
+     "typescript": "^5.4.0",
+     "vitest": "^3.2.4",
+     "zod": "^3.22.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 83,
+     "integrity": "sha512-gL5GtOBG4uSPR3GE3H12y9IfbplC2TF05DpbIV8gc9pAzUqTOFTGXm4nX/Hsv+7vK5YLom2e/I3LO8H9KNDlTQ==",
+     "shasum": "9bcb4c7fdbce63c4c6ec38ad6f860ca45b66f333",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFEE6nR+jbGwuYb2OceGDYI2qZ2uAZjj49fJ+Z83S6BDAiEA2TShCur0aU3rz1lVeqX2sfE6a+lCObsPhv2+KWejAdM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cazvid-ai/nestjs-mcp/-/nestjs-mcp-0.4.1.tgz",
+     "unpackedSize": 400315
+    },
+    "engines": {
+     "node": ">=18.18.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/cazvid-ai/nestjs-mcp#readme",
+    "keywords": [
+     "nestjs",
+     "model-context-protocol",
+     "mcp",
+     "decorators"
+    ],
+    "license": "MIT",
+    "lint-staged": {
+     "*.json": "biome format --write",
+     "*.{ts,tsx,js}": "biome check --write",
+     ".github/.release-please-manifest.json": "echo skip"
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f08b57b1f891]",
+      "name": "bryson.tang"
+     }
+    ],
+    "name": "@cazvid-ai/nestjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1",
+     "@nestjs/common": "^10.4.20",
+     "@nestjs/core": "^10.4.20",
+     "@types/express": "^4.17.21",
+     "reflect-metadata": "^0.1.13",
+     "zod": "^3.22.0"
+    },
+    "peerDependenciesMeta": {
+     "@types/express": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cazvid-ai/nestjs-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "clean": "rm -rf dist",
+     "fix": "biome check . --write",
+     "format": "biome format . --write",
+     "lint": "biome check .",
+     "test": "vitest run --coverage",
+     "test:unit": "vitest run --coverage --exclude src/__tests__/mcp.e2e.spec.ts",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit",
+     "typecheck:strict": "tsc -p tsconfig.strict.json --noEmit",
+     "verify": "pnpm format && pnpm typecheck && pnpm test"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.4.1"
+   }
+  }
+ },
+ "name": "@cazvid-ai/nestjs-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@cazvid-ai%2Fnestjs-mcp"
+}

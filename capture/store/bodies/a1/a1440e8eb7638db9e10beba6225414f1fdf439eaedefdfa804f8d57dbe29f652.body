@@ -1,0 +1,1009 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "24.38.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4725a07c3217]",
+    "name": "icedlee337"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "24.34.0",
+   "24.34.1",
+   "24.34.2",
+   "24.35.0",
+   "24.35.1",
+   "24.35.2",
+   "24.35.3",
+   "24.35.4",
+   "24.36.0",
+   "24.37.0",
+   "24.38.0",
+   "24.38.1",
+   "24.38.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@onivoro/server-mcp-llm-adapter",
+  "_rev": "13-9a8279549178eb094f9e5e870eff22e1",
+  "bugs": {
+   "url": "https://github.com/onivoro/monorepo/issues"
+  },
+  "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+  "dist-tags": {
+   "latest": "24.38.2"
+  },
+  "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "modelcontextprotocol",
+   "nestjs",
+   "llm",
+   "ai",
+   "openai",
+   "claude",
+   "anthropic",
+   "bedrock",
+   "bedrock-mantle",
+   "bedrock-converse",
+   "gemini",
+   "mistral",
+   "tool-calling",
+   "function-calling",
+   "adapter"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4725a07c3217]",
+    "name": "icedlee337"
+   }
+  ],
+  "name": "@onivoro/server-mcp-llm-adapter",
+  "readme": "# @onivoro/server-mcp-llm-adapter\n\nGeneric adapter for [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Converts MCP tool registry entries to any LLM provider's tool definition format and provides a unified execution path. Ships with prebuilt configs for AWS Bedrock Converse, AWS Bedrock Mantle, AWS Bedrock OpenAI-compatible, OpenAI, Anthropic, Google Gemini, and Mistral.\n\n## Install\n\n```bash\nnpm install @onivoro/server-mcp-llm-adapter\n```\n\n### Peer dependencies\n\n| Package | Version |\n|---------|---------|\n| `@nestjs/common` | `^10.0.0 \\|\\| ^11.0.0` |\n\n`@onivoro/server-mcp` is a hard dependency \u2014 installed automatically.\n\n## Choosing the right config\n\nConfigs map to **the API you are calling**, not the model or hosting platform. A model hosted on AWS Bedrock can be called through different APIs, each with its own tool format.\n\n| API you are calling | Config | Module method |\n|---------------------|--------|---------------|\n| AWS Bedrock **Converse / ConverseStream** | `BEDROCK_CONVERSE_CONFIG` | `forBedrockConverse()` |\n| AWS Bedrock **Mantle** (Anthropic Messages format) | `BEDROCK_MANTLE_CONFIG` | `forBedrockMantle()` |\n| AWS Bedrock **OpenAI-compatible** | `BEDROCK_OPENAI_CONFIG` | `forBedrockOpenAi()` |\n| OpenAI **Chat Completions** (also xAI, Groq, Together) | `OPENAI_CONFIG` | `forOpenAi()` |\n| Anthropic **Messages** | `CLAUDE_CONFIG` | `forClaude()` |\n| Google **Gemini** | `GEMINI_CONFIG` | `forGemini()` |\n| Mistral **La Plateforme** | `MISTRAL_CONFIG` | `forMistral()` |\n\n### Bedrock examples\n\nBedrock exposes multiple API surfaces. Each has its own tool format \u2014 pick the config that matches the API you are calling:\n\n| Scenario | Config |\n|----------|--------|\n| Any model via Bedrock **Converse / ConverseStream** | `BEDROCK_CONVERSE_CONFIG` |\n| Bedrock **Mantle** (Anthropic Messages format) | `BEDROCK_MANTLE_CONFIG` |\n| Bedrock **OpenAI-compatible** endpoint | `BEDROCK_OPENAI_CONFIG` |\n| Claude on Bedrock via **InvokeModel** | `CLAUDE_CONFIG` |\n| Mistral on Bedrock via **InvokeModel** | `MISTRAL_CONFIG` |\n\nMantle and Converse are mutually exclusive access paths \u2014 never mix them. `BEDROCK_MANTLE_CONFIG` uses the Anthropic Messages tool format (`input_schema`) while `BEDROCK_CONVERSE_CONFIG` uses the Converse `toolSpec` envelope. Similarly, `BEDROCK_OPENAI_CONFIG` uses the OpenAI function-calling format independently from `OPENAI_CONFIG` \u2014 each has its own alias key for per-provider name overrides.\n\nThe same principle applies outside Bedrock \u2014 pick the config that matches the API format, not where the model is hosted.\n\n## Usage\n\nImport `McpLlmAdapterModule` alongside whichever MCP module provides the tool registry:\n\n```typescript\nimport { Module } from '@nestjs/common';\nimport { McpRegistryModule } from '@onivoro/server-mcp';\nimport { McpLlmAdapterModule } from '@onivoro/server-mcp-llm-adapter';\nimport { EmojiToolService } from './services/emoji-tool.service';\nimport { ChatService } from './services/chat.service';\n\n@Module({\n  imports: [\n    McpRegistryModule.registerOnly(),\n    McpLlmAdapterModule.forBedrockConverse(),\n  ],\n  providers: [EmojiToolService, ChatService],\n})\nexport class AppModule {}\n```\n\nThen inject `McpLlmToolAdapter` wherever you need provider-specific functionality:\n\n```typescript\nimport { Injectable } from '@nestjs/common';\nimport { McpLlmToolAdapter } from '@onivoro/server-mcp-llm-adapter';\n\n@Injectable()\nexport class ChatService {\n  constructor(private readonly adapter: McpLlmToolAdapter) {}\n\n  async chat(userMessage: string) {\n    // Build provider tool definitions from the registry\n    const tools = this.adapter.toProviderTools();\n\n    // ... call the LLM provider with tools ...\n\n    // When the provider returns a tool call:\n    const result = await this.adapter.executeToolForProvider(\n      toolCall.name,\n      toolCall.input,\n    );\n  }\n}\n```\n\n## Batch execution\n\nLLM providers can return multiple tool calls in a single turn \u2014 OpenAI returns an array of `tool_calls`, Claude returns multiple `tool_use` content blocks, Bedrock returns multiple `toolUse` entries. This is not an MCP spec concept (the MCP protocol's `tools/call` is always a single tool per request), but it's a universal pattern at the LLM API layer that this adapter sits in front of.\n\n`executeToolsForProvider` handles the boilerplate: parallel execution via `Promise.allSettled`, independent per-call error handling (one failure doesn't block siblings), and `id` passthrough for the correlation every provider requires.\n\n```typescript\n// LLM returned multiple tool calls in one turn\nconst results = await this.adapter.executeToolsForProvider(\n  toolCalls.map(tc => ({\n    providerName: tc.name,\n    params: tc.input,\n    id: tc.id,  // OpenAI tool_call.id, Claude tool_use.id, Bedrock toolUseId\n  })),\n  authInfo,\n);\n\n// Build tool result messages for the next LLM turn\nfor (const r of results) {\n  messages.push({\n    role: 'tool',\n    tool_call_id: r.id,\n    content: r.success ? r.result : `Error: ${r.error}`,\n  });\n}\n```\n\nEach tool call goes through the full `@onivoro/server-mcp` execution pipeline independently (guards, validation, interceptors, handler) via `registry.executeToolRaw()`. The core MCP library is unchanged \u2014 the batch coordination lives entirely in the adapter.\n\n## Output schemas\n\nMCP tools can declare an `outputSchema` for structured result validation. No current LLM provider API supports per-tool output schemas in their tool definition format, so the built-in configs don't forward them. However, the adapter exposes them for consumers that need output schemas at the API call level (e.g., OpenAI `response_format`) or for custom result validation.\n\n```typescript\n// Get output schemas for tools that define them\nconst outputSchemas = this.adapter.getOutputSchemas();\n// Map<string, Record<string, unknown>> \u2014 provider tool name \u2192 JSON Schema\n\n// Use with OpenAI response_format, your own validation, etc.\nfor (const [toolName, schema] of outputSchemas) {\n  console.log(`${toolName} returns:`, schema);\n}\n```\n\nFor custom providers that support per-tool output schemas, use `formatToolWithOutput` in your config:\n\n```typescript\nconst MY_CONFIG: LlmAdapterConfig<MyToolDef> = {\n  aliasKey: 'myProvider',\n  formatTool: (name, description, inputSchema) => ({\n    name, description, inputSchema,\n  }),\n  // Called instead of formatTool when the tool has an outputSchema\n  formatToolWithOutput: (name, description, inputSchema, outputSchema) => ({\n    name, description, inputSchema, outputSchema,\n  }),\n};\n```\n\nWhen `formatToolWithOutput` is defined and the tool has an `outputSchema`, it is called instead of `formatTool`. Otherwise `formatTool` is used \u2014 existing configs are unaffected.\n\n## Custom providers\n\nUse `McpLlmAdapterModule.forProvider()` with a custom config for any provider not included out of the box:\n\n```typescript\nimport { McpLlmAdapterModule, LlmAdapterConfig } from '@onivoro/server-mcp-llm-adapter';\n\ninterface MyToolDef {\n  name: string;\n  desc: string;\n  params: Record<string, unknown>;\n}\n\nconst MY_CONFIG: LlmAdapterConfig<MyToolDef> = {\n  aliasKey: 'myProvider',\n  sanitizeName: (name) => name.toUpperCase(),\n  formatTool: (name, description, jsonSchema) => ({\n    name,\n    desc: description,\n    params: jsonSchema,\n  }),\n};\n\nMcpLlmAdapterModule.forProvider(MY_CONFIG);\n```\n\n## McpLlmToolAdapter API\n\n| Method | Description |\n|--------|-------------|\n| `toProviderTools()` | Returns `T[]` \u2014 tool definitions in the provider's format |\n| `getOutputSchemas()` | Returns `Map<string, Record<string, unknown>>` \u2014 provider tool names to output JSON Schemas (only tools with `outputSchema`) |\n| `resolveProviderToolName(providerName)` | Maps a provider-specific tool name back to the MCP tool name, or `undefined` |\n| `executeToolForProvider(providerName, params, authInfo?)` | Resolves name, executes tool, returns stringified result |\n| `executeToolCallForProvider(toolCall, authInfo?)` | Executes a single `ProviderToolCall`, returns `ProviderToolCallResult` with id passthrough |\n| `executeToolsForProvider(toolCalls, authInfo?)` | Executes multiple tool calls in parallel. Returns `ProviderToolCallResult[]` with per-call success/error |\n\n## Name handling\n\nEach config has an `aliasKey` (e.g., `'bedrock'`, `'bedrock-mantle'`, `'bedrock-openai'`, `'openai'`) used to look up per-provider name overrides from the `@McpTool` decorator's `aliases` parameter.\n\nResolution order:\n1. **Explicit alias** \u2014 `aliases[aliasKey]` if present\n2. **Sanitized name** \u2014 `sanitizeName(mcpName)` if the config defines a sanitizer\n3. **MCP name as-is** \u2014 used directly when no alias or sanitizer applies\n\n```typescript\n// Explicit alias for Bedrock Converse\n@McpTool({ name: 'insert-emojis', description: 'Insert emojis', schema, aliases: { bedrock: 'insertEmojis' } })\n\n// No alias needed for OpenAI (hyphens are valid)\n@McpTool({ name: 'insert-emojis', description: 'Insert emojis', schema })\n```\n\nProviders that require name sanitization (Bedrock Converse, Gemini) apply it automatically \u2014 hyphens are replaced with underscores.\n\n## Exports\n\n```typescript\n// Module\nMcpLlmAdapterModule                // NestJS module \u2014 forProvider(), forBedrockConverse(), forBedrockMantle(), forBedrockOpenAi(), forOpenAi(), forClaude(), forGemini(), forMistral()\n\n// Adapter\nMcpLlmToolAdapter                  // Injectable \u2014 toProviderTools(), getOutputSchemas(), resolveProviderToolName(), executeToolForProvider(), executeToolCallForProvider(), executeToolsForProvider()\nProviderToolCall                // Input type for single/batch execution \u2014 { providerName, params, id? }\nProviderToolCallResult          // Output type for single/batch execution \u2014 { providerName, id?, result?, error?, success }\n\n// Config\nLlmAdapterConfig                // Interface for custom provider configs\nLLM_ADAPTER_CONFIG              // Injection token\nresolveProviderName             // Utility: resolves provider name from metadata + config\n\n// Prebuilt configs\nBEDROCK_CONVERSE_CONFIG          // AWS Bedrock Converse API\nBEDROCK_MANTLE_CONFIG            // AWS Bedrock Mantle (Anthropic Messages format)\nBEDROCK_OPENAI_CONFIG            // AWS Bedrock OpenAI-compatible endpoint\nOPENAI_CONFIG                    // OpenAI Chat Completions API\nCLAUDE_CONFIG                    // Anthropic Messages API\nGEMINI_CONFIG                    // Google Gemini API\nMISTRAL_CONFIG                   // Mistral La Plateforme API\n\n// Shared formatters (used internally by prebuilt configs, also available for custom configs)\nformatAnthropicTool              // Anthropic Messages format \u2014 { name, description, input_schema }\nformatOpenAiTool                 // OpenAI function format \u2014 { type: 'function', function: { name, description, parameters } }\n\n// Types\nBedrockConverseToolDefinition    // { toolSpec: { name, description, inputSchema: { json } } }\nOpenAiToolDefinition             // { type: 'function', function: { name, description, parameters } }\nClaudeToolDefinition             // { name, description, input_schema }\nGeminiToolDefinition             // { name, description, parameters }\n```\n\n## Related libraries\n\n| Library | Purpose |\n|---------|---------|\n| [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp) | Transport-agnostic MCP tool registry, decorators, HTTP and stdio transports |\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/onivoro/monorepo.git"
+  },
+  "time": {
+   "24.34.0": "2026-04-22T06:02:41.835Z",
+   "24.34.1": "2026-04-22T11:13:31.799Z",
+   "24.34.2": "2026-04-22T21:32:57.161Z",
+   "24.35.0": "2026-04-23T01:59:44.555Z",
+   "24.35.1": "2026-04-24T21:25:25.627Z",
+   "24.35.2": "2026-04-27T20:25:13.391Z",
+   "24.35.3": "2026-05-09T15:39:52.313Z",
+   "24.35.4": "2026-05-09T16:14:54.101Z",
+   "24.36.0": "2026-05-09T20:36:28.618Z",
+   "24.37.0": "2026-05-10T08:21:49.348Z",
+   "24.38.0": "2026-05-10T20:58:39.356Z",
+   "24.38.1": "2026-05-12T05:05:15.314Z",
+   "24.38.2": "2026-05-15T06:33:39.680Z",
+   "created": "2026-04-22T06:02:41.595Z",
+   "modified": "2026-05-15T06:33:39.802Z"
+  },
+  "versions": {
+   "24.34.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.34.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.34.0_1776837761660_0.8012434872347036"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "Generic adapter for [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Converts MCP tool registry entries to any LLM provider's tool definition format and provides a unified execution path. Ships with prebuilt configs for AWS Bedr",
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-GaF7DtQ6qxHC4IVKo8hSP23Qa8JPSn5wL3SbXxQVJIEXfX35ZEpzAoP62WfpZEFQSsXvuC9nd81IiH49j3HNfA==",
+     "shasum": "4030591f1027e7872c4dcc4ee04f325a7b07dca3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG1yuZRO7+Wvj5ssI/IVk+4Gu5R43B2JkCb4ODD/mKmmAiEAgiHfL6FrK76sF3GCacVJZtIjfyhlHME7atikx/yGg1M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.34.0.tgz",
+     "unpackedSize": 31259
+    },
+    "gitHead": "a3f90d7ada333c6c0406e354849283c857e94c30",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.0"
+   },
+   "24.34.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.34.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.34.1_1776856411675_0.0729201743232315"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "Generic adapter for [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Converts MCP tool registry entries to any LLM provider's tool definition format and provides a unified execution path. Ships with prebuilt configs for AWS Bedr",
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-7E8vF+NNzz24QrsXqBRpnNwaWrBhVkCyD99GaW+OG68aIeEH+0mbGryHLaAb7P52ncxRPpce4xIi/Bwf5HJcEg==",
+     "shasum": "949926e6fe244d66b07be4c3d41329eca6bf9fe0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCnat32p1K7uruYyCs6TIHg/dLFMCRmsqgx09tYR9kCYwIgZrXF64C3KXSnyoEGclMTL2zFueha6/iBs+QPquX6E/4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.34.1.tgz",
+     "unpackedSize": 31443
+    },
+    "gitHead": "0f390195f2af3a71ffcef11320b58c7446f24c2c",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.1"
+   },
+   "24.34.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.34.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.34.2_1776893577011_0.3140409022555253"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "Generic adapter for [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Converts MCP tool registry entries to any LLM provider's tool definition format and provides a unified execution path. Ships with prebuilt configs for AWS Bedr",
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-0UQSVauD59rj+667eM2CbNoGky9H4v1rYRdkNrPy8114Y1XyLLWUxES2PKe6nSdAR+Mco2CXSd3xGZ5t3UnVkg==",
+     "shasum": "2a229c38ddbcde9a77f31230b4c2f2cb3a87f848",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDHsYz0GfSFo4OhXbaUF2D0dUF+sPPtvj0iZ/HoHFM5fAiBw+pR/7bp+YcMPheDSSgAIr5IYvPHIZnohXiARWUXn/w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.34.2.tgz",
+     "unpackedSize": 38140
+    },
+    "gitHead": "87bbf44de652a58cbbacca1ccc910a9a3364e288",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.2"
+   },
+   "24.35.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.35.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.35.0_1776909584424_0.6752658514402547"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "Generic adapter for [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Converts MCP tool registry entries to any LLM provider's tool definition format and provides a unified execution path. Ships with prebuilt configs for AWS Bedr",
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-wQNabe/stUGkft7K3XzjvNXMsnAtbG/7cokIN/noPCmy0eG8kpLfBwTNMkiBKN3Yi5UoLpwcyW0kvVq+WytDjg==",
+     "shasum": "895d3fce9eba030183068fc5152d601f31a2fc68",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCvF31At+NJlUQRvnRTNUXiU89U/gbzY2U+Vp+Comd1agIgc9Fl98InNPeJvUDq+5voFEmSrPP4GdgnD4t+mhRdAEY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.35.0.tgz",
+     "unpackedSize": 38195
+    },
+    "gitHead": "17f4f99fe6379903f2b2ef6e6fedc40943e0466f",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.0"
+   },
+   "24.35.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.35.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.35.1_1777065925453_0.3274721719617564"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-jcOHjwdjvIMONNMhyKQxpqvj1waQdDxYGs44/6B/+IRkGBo2wJP01bfLO63Yp4HOLVfr9l4X9jV1gLagfkg1rQ==",
+     "shasum": "ac15ad60626ba83d49c1db43a5021ba9215f4735",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDeG99NS1N8sV+mtNk8cUizwZwZMHRySFHFgE1aTxytgQIhAN5zap121twfztMeUSxVdDKwCvFYH8RFGC4N1v2Bc2A3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.35.1.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "73866e79047b0584cc29e3cd4348bc19951079ff",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.1"
+   },
+   "24.35.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.35.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.35.2_1777321513204_0.31225428023340274"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-esa6novbybxiObutGs8Mn2AsYK7DygNvCXWPdRhRG9MADlMXtADu/xcT8+sISM6cXtTNg3zHlVVtQdkfhF4nUA==",
+     "shasum": "4db8768a40ab0cce6f04692c2e824470f10d37e4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEzNuI/GKWb4SYLVeeXjQj7sBzPA+nNPKYp0rL4mGeleAiEA3NFk4Fw6kb6gCA/0PsYC81DqWwksNprYCJ6ckb1vz7Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.35.2.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "5d3419081048ddedd2810d205b1bf829634b3cc8",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.2"
+   },
+   "24.35.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.35.3",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.35.3_1778341192108_0.5032838737322458"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.3",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-2XKdYrLrM87DjWja43R9SPkyAqvFqRG1m6MYR9z7n7Cxyr3BbvTauyn75EhF3iG1XMAXt0koPB7GxwQwNo+3/g==",
+     "shasum": "922fed0686c0e01e48b5ea16b65d1a8f26c345ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD2QH1DFS+tOzRLLjAGkXqbA4gatIUJXIr/zw/abGDezAIhAP3oX0uIwyeK7yCU5qjTPCNPDb6FLeDjQ7zgCDgB6IiK"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.35.3.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "2f7d7c102d56b98f12e61e4f7ff456706828e6ac",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.3"
+   },
+   "24.35.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.35.4",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.35.4_1778343293939_0.8010293269601827"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.4",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-ImyExhkw2MxqPie4V1FTRBJ3HSS2wTjDRlFfJVbTXeID+nH0y/Ez4O6fVNCKYtZnf0vkVV8Gei8GCs/SaRqO4g==",
+     "shasum": "7bffe2f5a8a6f0c0e506ae640c1d54fb5baa1ae7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHEBuRntFC3PNxlzixx2G0J65m73OfGiTDQ0eaQPK2S4AiAU22D6sPI4FFLVINXbK+rbLaCBj+GyuTuRR2YDhH0a8A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.35.4.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "7071f6296e6fe7680b22239595c6c1a09da6f1b5",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.4"
+   },
+   "24.36.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.36.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.36.0_1778358988478_0.6497094521197859"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.36.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-1Z0LRcCkA6vh9GMPYqgKxrHgSCzwf0Y5beAdch1jZlp4nhc+B5kOdbZJEOageHwHjKij9JOQftYqxOZFnETDPQ==",
+     "shasum": "c8a81be731f7ccfccfa9f2bbb89a48f3a05d7b67",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBDHoUmDk7ctVNGBxd/uerYw6pzYbOIPKxFY8RNTl68DAiBRxrBfmbfteBJAlizF+dtqz/gSsjXwluz38XcgtQjQ8g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.36.0.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "802792e07fbe835963c83e235180988e9fdf8264",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.36.0"
+   },
+   "24.37.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.37.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.37.0_1778401309222_0.5445490921492822"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.37.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-uocoWiaw9Y+hzJIBTatU2DkPTCVXkqni9dWigCH/AVjD2g4KnTpEFrBmZ92zyh5+CfblRXALrBkvVV+f/CZnCg==",
+     "shasum": "7cff7ee37b04129431086a70bc7d9b2c387dc7a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDUW1BYPhJauPNRj2/HtRLH4Ti87QP+DWYH/4kOBjgMUgIgQTPVCetJ+Izx7eESS2T9jamORp+7BBFjSX4awKBH/Jg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.37.0.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "f77c87fe2e2b06c7c0e86761867f3353a5cbd309",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.37.0"
+   },
+   "24.38.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.38.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.38.0_1778446719210_0.12672934995382867"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-Gu7xPLGUDYJXeKQBscmlQVFMlVS64SUFUK6n2LMyUZU5pLXs9XZ2PFBANxYx7P00WWhmhA/ZyKAgLEpyWg3toA==",
+     "shasum": "30ed5e2925fc9a5625b2580cc0deed17ad32ef09",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQColmlk/ht+6ZMvsRdJT0q0v4HYf8lQKMWNArtAhXuffAIhAJRT0th3voDWA4ZONEsSj7VIHBM26PRWyXt/slo6Xubs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.38.0.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "aa60b8695d8782dc522ee2331b97d4416f119a1a",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.0"
+   },
+   "24.38.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.38.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.38.1_1778562315169_0.9986414464487265"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-aXwWby7U2cgSyapj+GT9+kY+NyvLiXjRH5Efh/JzZrMK+iYX8bvW0A9K9Ngc9SND17KHowO+HWURVpbaKpufMA==",
+     "shasum": "7559dbcc2bad774d42f87d2c39a33cf6d6270961",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEMCICS2i8W0pFRXYp3WwD2Jb1dLT1D3+fmYGH1f2EO5IidnAh9P7KalKE7M7weSgyGAjz+6m08gThtARz2azf4dpuJP"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.38.1.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "062ab9d46c0c032121077cb48cfcbb9c56eaa816",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.1"
+   },
+   "24.38.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-llm-adapter@24.38.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-llm-adapter_24.38.2_1778826819536_0.344708097159353"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "LLM provider tool format adapter for MCP \u2014 supports OpenAI, Claude, Bedrock, Gemini, and Mistral",
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-pp/8UaiMMnGRxalAaAo88rG2FTTdNkQeGN1F6DB/57hPUu3bMJQL80URbVi0zr0nOq2u1/acV0HtPEEkBczX1g==",
+     "shasum": "3ceffd386b74def8e8df0cd602ab426a95f5ecfe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC8+35F41UY2yARB20ElTiukJfEo1jT9eraB3oYMF1KpAiEA9uUD+Vf4uvKF7xiGxZdLmHoHXu03rW8TuPlTQ2gcB5s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-llm-adapter/-/server-mcp-llm-adapter-24.38.2.tgz",
+     "unpackedSize": 45406
+    },
+    "gitHead": "be9e8662b5ec38ad83510299696f8187b75c78e3",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-llm-adapter/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "llm",
+     "ai",
+     "openai",
+     "claude",
+     "anthropic",
+     "bedrock",
+     "bedrock-mantle",
+     "bedrock-converse",
+     "gemini",
+     "mistral",
+     "tool-calling",
+     "function-calling",
+     "adapter"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-llm-adapter",
+    "peerDependencies": {
+     "@nestjs/common": "^10.0.0 || ^11.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.2"
+   }
+  }
+ },
+ "name": "@onivoro/server-mcp-llm-adapter",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@onivoro%2Fserver-mcp-llm-adapter"
+}

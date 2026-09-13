@@ -1,0 +1,3126 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.1.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3ac1f7d0a787]",
+    "name": "rchaves"
+   },
+   {
+    "email": "[redacted-email:826b225b3dae]",
+    "name": "drew.langwatch"
+   },
+   {
+    "email": "[redacted-email:5c8359daacf0]",
+    "name": "0xdeafcafe-langwatch"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.1",
+   "0.0.2",
+   "0.0.3",
+   "0.0.4",
+   "0.0.5",
+   "0.1.0",
+   "0.10.0",
+   "0.10.1",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0",
+   "1.0.0",
+   "2.0.0",
+   "2.1.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@langwatch/mcp-server",
+  "_rev": "28-79b3f651bf23857998185f98e603d109",
+  "bugs": {
+   "url": "https://github.com/langwatch/langwatch/issues"
+  },
+  "description": "An MCP server for Langwatch.",
+  "dist-tags": {
+   "latest": "2.1.0"
+  },
+  "homepage": "https://github.com/langwatch/langwatch#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3ac1f7d0a787]",
+    "name": "rchaves"
+   },
+   {
+    "email": "[redacted-email:826b225b3dae]",
+    "name": "drew.langwatch"
+   },
+   {
+    "email": "[redacted-email:5c8359daacf0]",
+    "name": "0xdeafcafe-langwatch"
+   }
+  ],
+  "name": "@langwatch/mcp-server",
+  "readme": "# LangWatch MCP Server\n\nMCP server that gives AI coding agents access to LangWatch observability data, prompts, datasets, scenarios, evaluators, and documentation via the [Model Context Protocol](https://modelcontextprotocol.io/introduction).\n\n## Quick Setup\n\nFor Claude Code, run:\n\n```bash\nclaude mcp add langwatch -- npx -y @langwatch/mcp-server --apiKey your-api-key-here\n```\n\nFor Claude Code (manual) or other MCP clients (Cursor, Copilot, etc.), add an entry named `langwatch` under the `mcpServers` object of your client's MCP settings file with these fields:\n\n- `command`: `npx`\n- `args`: `-y`, then the package name `@langwatch/mcp-server` on a separate token\n- `env.LANGWATCH_API_KEY`: your LangWatch API key\n\nIn stdio mode the API key is required for observability and prompt tools, and documentation tools work without it. In HTTP mode every MCP request needs a valid key, including documentation-tool requests, because the server authenticates the request before it reaches any tool.\n\n> The config is described in prose rather than as a JSON snippet because some CLI agents (notably Gemini CLI 0.36.0 and earlier) parse `@`-prefixed runs as file paths and can crash with `ENAMETOOLONG` when a multi-line JSON snippet wraps the scoped package name in double quotes. See [#3104](https://github.com/langwatch/langwatch/issues/3104). The bash form above is safe \u2014 the package name is followed by a whitespace terminator.\n\n## Configuration\n\n| Env Var | CLI Arg | Description |\n|---------|---------|-------------|\n| `LANGWATCH_API_KEY` | `--apiKey` | API key for authentication |\n| `LANGWATCH_ENDPOINT` | `--endpoint` | API endpoint (default: `https://app.langwatch.ai`) |\n| | `--http` | Serve over HTTP and SSE instead of stdio |\n| | `--port` | HTTP port (default: `3000`) |\n| `LANGWATCH_MCP_HTTP_HOST` | `--host` | HTTP listen address (default: `127.0.0.1`) |\n| `LANGWATCH_MCP_ALLOWED_ORIGINS` | `--allowedOrigin` | Browser origins allowed to call the HTTP server |\n| `LANGWATCH_MCP_TRUST_PROXY` | | Use `X-Forwarded-For` as the rate limit key (default: off) |\n\n### HTTP mode\n\nIn HTTP mode each client brings its own API key in an `Authorization: Bearer <key>`\nheader, on every MCP request rather than only at session start. That covers\n`/mcp`, `/sse`, and `/messages`. The key is checked against the LangWatch API\nbefore a session is created and re-checked on each request, so a session id by\nitself grants no access and revoking a key stops its sessions being served\nwithin a minute. The API key is never read from a query parameter.\n\nBecause authentication happens before routing, this applies to the documentation\ntools too: unlike stdio mode, they are not reachable without a valid key.\n\nThree routes do not take the bearer. `/health` reports liveness only.\n`/.well-known/oauth-authorization-server` is the discovery document clients read\nbefore they hold a token. `/oauth/token` exchanges an API key, sent as\n`client_secret` in the form body, for a short-lived access token; it verifies\nthat key against the LangWatch API before issuing anything, and the token it\nreturns is what later MCP requests carry.\n\nThe server listens on `127.0.0.1` by default, per the MCP transport guidance for\nlocal servers. Pass `--host 0.0.0.0` to accept connections from other machines,\nand only behind a network boundary you trust.\n\nRequests carrying a browser `Origin` header are checked against an allowlist.\nLoopback origins are always allowed; anything else has to be listed:\n\n```bash\nnpx @langwatch/mcp-server --http --port 3000 \\\n  --allowedOrigin https://your-app.example.com\n```\n\n#### Running behind a proxy\n\nForwarded proxy headers resolve the external scheme that the OAuth metadata\ndocument advertises, so they are read by default.\n\nThey do not decide the rate limit. Failed authentication is limited per client\naddress, and that address comes from the socket rather than from\n`X-Forwarded-For`, so a client reaching the port directly cannot rotate a header\nto reset its own counter. Behind a real proxy every request shares the proxy's\nsocket address, which means the whole proxy is limited as one client. Set\n`LANGWATCH_MCP_TRUST_PROXY=true` there to limit per real client instead, and\nonly when the proxy overwrites `X-Forwarded-For` on the way in.\n\nThis is defense in depth, not the security boundary. API keys are verified\nagainst the LangWatch API before a session is created and re-checked on every\nrequest; the rate limit exists to make guessing expensive, not to decide who\ngets in. A spoofable rate limit does not let anyone authenticate.\n\n## Tools\n\n### Documentation\n\n| Tool | Description |\n|------|-------------|\n| `fetch_langwatch_docs` | Fetch LangWatch integration docs |\n| `fetch_scenario_docs` | Fetch Scenario agent testing docs |\n\n### Observability (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `discover_schema` | Explore available filters, metrics, aggregations, and groups |\n| `search_traces` | Search traces with filters, text query, and date range |\n| `get_trace` | Get full trace details with AI-readable formatting |\n| `get_analytics` | Query timeseries analytics data |\n\n### Prompts (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_prompts` | List all prompts |\n| `platform_get_prompt` | Get prompt with messages and version history |\n| `platform_create_prompt` | Create a new prompt |\n| `platform_update_prompt` | Update prompt or create new version |\n\n### Datasets (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_datasets` | List all datasets with record counts |\n| `platform_get_dataset` | Get dataset metadata, columns, and record preview |\n| `platform_create_dataset` | Create a new dataset with optional column definitions |\n| `platform_update_dataset` | Update dataset name or column types |\n| `platform_delete_dataset` | Archive a dataset |\n| `platform_create_dataset_records` | Add records to a dataset (max 1000 per call) |\n| `platform_update_dataset_record` | Update a single record |\n| `platform_delete_dataset_records` | Delete records by IDs (max 1000 per call) |\n\n### Scenarios (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_scenarios` | List all scenarios, or only the ones filed in a test suite |\n| `platform_get_scenario` | Get scenario details |\n| `platform_create_scenario` | Create a new scenario, optionally filed in a test suite |\n| `platform_update_scenario` | Update a scenario, or file it in another test suite |\n| `platform_archive_scenario` | Archive a scenario |\n\n### Test suites and run plans (requires API key)\n\nA test suite is a folder of scenarios. A run plan is what you run, and its\nname identifies it: running a name that exists replaces that plan's\nconfiguration, running a new name creates the plan. Running a test suite is\nsugar over a run plan, and creates or joins the plan `<suite name> <target name>`.\n\n| Tool | Description |\n|------|-------------|\n| `platform_run_plan` | Run scenarios against targets, by plan name |\n| `platform_list_run_plans` | List the run plans of the project |\n| `platform_get_run_plan` | Get the full configuration of a run plan |\n| `platform_rerun_run_plan` | Run a plan again with the configuration it holds |\n| `platform_archive_run_plan` | Archive a run plan |\n| `platform_list_test_suites` | List the test suites of the project |\n| `platform_create_test_suite` | Create a test suite |\n| `platform_get_test_suite` | Get a test suite and the scenarios filed in it |\n| `platform_rename_test_suite` | Rename a test suite |\n| `platform_archive_test_suite` | Archive a test suite and the scenarios filed in it |\n| `platform_run_test_suite` | Run every scenario of a test suite against targets |\n\n### Simulation runs (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_simulation_runs` | List simulation run results |\n| `platform_get_simulation_run` | Get one run with its conversation and verdict |\n\n### Evaluators (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_evaluators` | List all evaluators |\n| `platform_get_evaluator` | Get evaluator details |\n| `platform_create_evaluator` | Create a new evaluator |\n| `platform_update_evaluator` | Update an evaluator |\n\n### Model Providers (requires API key)\n\n| Tool | Description |\n|------|-------------|\n| `platform_list_model_providers` | List configured model providers |\n| `platform_set_model_provider` | Configure a model provider |\n\n## Output Formats\n\nSeveral tools support a `format` parameter:\n\n- **`digest`** (default) \u2014 AI-readable markdown output. Optimized for LLM consumption \u2014 compact and information-dense.\n- **`json`** \u2014 Full raw data. Useful for programmatic access or when you need the complete schema.\n\nSupported on: `search_traces`, `get_trace`, `platform_list_datasets`, `platform_get_dataset`, `platform_list_scenarios`, `platform_get_scenario`.\n\n## Usage Tips\n\n- Start with `discover_schema` to understand available filter fields and metrics.\n- Use `search_traces` to find relevant traces, then `get_trace` for full details.\n- Search returns 25 traces per page by default. Use `scrollId` from the response to paginate.\n- Analytics uses `category.name` format for metrics (e.g., `performance.completion_time`).\n- Use `create_prompt` / `update_prompt` with `createVersion: true` for safe prompt iteration.\n- Use `platform_list_datasets` then `platform_get_dataset` to browse dataset contents.\n- Dataset tools support full CRUD: create datasets, add/update/delete records, and archive datasets.\n\n## Development\n\n### Prerequisites\n\n- Node.js 18+\n- pnpm\n\n### Setup\n\n```bash\npnpm install\n```\n\n### Build\n\n```bash\npnpm build\n```\n\n### Test\n\n```bash\npnpm test        # Run all tests\npnpm test:unit   # Unit tests only\n```\n\n### Local testing\n\nBuild and point your MCP client to the local dist:\n\n```json\n{\n  \"mcpServers\": {\n    \"langwatch\": {\n      \"command\": \"node\",\n      \"args\": [\n        \"/path/to/mcp-server/dist/index.js\",\n        \"--apiKey\", \"your-api-key\",\n        \"--endpoint\", \"http://localhost:5560\"\n      ]\n    }\n  }\n}\n```\n\n## Support\n\n- [Discord Community](https://discord.gg/kT4PhDS2gH)\n- [LangWatch Docs](https://langwatch.ai/docs)\n- [Email Support](mailto:[redacted-email:acc4472f1e4d])\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/langwatch/langwatch.git"
+  },
+  "time": {
+   "0.0.1": "2025-03-14T16:34:21.434Z",
+   "0.0.2": "2025-03-14T17:15:50.716Z",
+   "0.0.3": "2025-03-14T17:26:35.326Z",
+   "0.0.4": "2025-03-15T08:15:27.050Z",
+   "0.0.5": "2025-03-20T08:41:16.045Z",
+   "0.1.0": "2025-09-22T09:48:22.538Z",
+   "0.10.0": "2026-05-29T13:35:38.858Z",
+   "0.10.1": "2026-05-31T13:59:27.166Z",
+   "0.2.0": "2025-11-07T22:22:38.113Z",
+   "0.2.1": "2025-11-08T09:35:34.959Z",
+   "0.2.2": "2025-11-13T16:38:55.675Z",
+   "0.3.0": "2025-11-15T08:26:36.567Z",
+   "0.3.1": "2025-11-15T09:08:10.119Z",
+   "0.3.2": "2025-12-17T14:45:26.750Z",
+   "0.3.3": "2025-12-18T13:22:44.364Z",
+   "0.4.0": "2026-02-08T07:06:34.337Z",
+   "0.5.0": "2026-02-20T16:38:45.345Z",
+   "0.6.0": "2026-03-13T13:18:06.333Z",
+   "0.6.1": "2026-03-13T15:27:56.543Z",
+   "0.7.0": "2026-04-16T14:03:24.948Z",
+   "0.8.0": "2026-05-13T14:54:20.661Z",
+   "0.9.0": "2026-05-22T12:26:11.876Z",
+   "1.0.0": "2026-07-24T18:28:31.811Z",
+   "2.0.0": "2026-08-07T17:22:55.398Z",
+   "2.1.0": "2026-09-12T11:18:38.301Z",
+   "created": "2025-03-14T16:34:21.122Z",
+   "modified": "2026-09-12T11:18:38.652Z"
+  },
+  "versions": {
+   "0.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.0.1",
+    "_nodeVersion": "20.18.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.0.1_1741970061190_0.2820707523712398"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "zod": "^3.22.4",
+     "zod-validation-error": "^3.3.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.0.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-GLgTyaUBEqo6MUf4bzme6JtyzbzE9aL0jn/eF3AKL9JJS9kXUPBroWmotOCeGTCFlAiHI8VctzH+GgSWM839qA==",
+     "shasum": "702a0c39ba2a893c4f7904ddf353be3aa0742e7c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEp0ilSTN23n5o8mts31QFxCjjPgZmQOkgnwjOSscKHFAiEAzL3UlKjlu4I+wB1PQ+kutYdLDY6LiUvkrFqheXSmkrg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.0.1.tgz",
+     "unpackedSize": 245350
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "fccb233b6dbc56439bac3ce17857d501c65a84d2",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js",
+     "prepublish": "npm run build",
+     "start": "tsx src/index.ts"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.1"
+   },
+   "0.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.0.2",
+    "_nodeVersion": "20.18.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.0.2_1741972550460_0.40189902638579555"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "zod": "^3.22.4",
+     "zod-validation-error": "^3.3.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.0.2"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-ajRzQQyX6StH3rIky7TzMIQftD7EFriJ5cwZvEf0jiUFsOXN3lCXGq0liSXCART/CwSej+nqzlQwTzxDDB2I3Q==",
+     "shasum": "99ba90a6c4596b2487b1161810a71fd7895d470b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIECSK5f7WUoq96h0NBQQlvV23NMBIXzBz1fGfkYVqg1IAiEA4l/Nhn0Yc+oR0JD6mysFB0jY6zh0q0bgpmWVQMOAUBQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.0.2.tgz",
+     "unpackedSize": 245492
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "b4867414036c5f8ef8a5699cf5626db413c24c2e",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "npm run build",
+     "start": "tsx src/index.ts"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.2"
+   },
+   "0.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.0.3",
+    "_nodeVersion": "20.18.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.0.3_1741973195138_0.4352679325166271"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "zod": "^3.22.4",
+     "zod-validation-error": "^3.3.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.0.3"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-g64FKoHZpbuVm+ygeQbMYTwVM46OLTAoLZ8rMrVcaBgdU8pM6hr/z62qEicFqKGZfByKQ0GDh0s1TxkQrxJ/dw==",
+     "shasum": "66385ba23ac9853bc0f884a284b83467f8f1db3b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICySqU2Vq6+M1Fuo7tZV9+XNtgtqLm3Gnd2xrwEAYsg5AiBSYkDzeVRA64+NigQ9LEPnGaVIPMITI1yGIn/XugjYWA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.0.3.tgz",
+     "unpackedSize": 245728
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "f8965abfd1c443478a5012e750f97da8e50fe768",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "npm run build",
+     "start": "tsx src/index.ts"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.3"
+   },
+   "0.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.0.4",
+    "_nodeVersion": "20.18.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.0.4_1742026526860_0.2239123656811981"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "yargs": "^17.7.2",
+     "zod": "^3.22.4",
+     "zod-validation-error": "^3.3.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.0.4"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-iPGLwId29w3nE3aBaMW6BiBzU9dUJP38S6pTldkr2w0EtLR7WQ3+cZifWSNqeoHOBMTF7Z4OSyTxNLPvP8AMcw==",
+     "shasum": "b466e482575d34bf4a1b3196cb2c72df14fd1607",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCbsqBhvJS3ODQjOBGuRgbDiJrUGsMbrBQLYjKf02bfrAIhAPi15mlMhLYXSsLkygcfvau61YiuJ1/V362dcQ37DbBU"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.0.4.tgz",
+     "unpackedSize": 436268
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "5d1d29bf3002c1078c49789c11158c35ced77b8b",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "npm run build",
+     "start": "tsx src/index.ts"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.4"
+   },
+   "0.0.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.0.5",
+    "_nodeVersion": "20.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.0.5_1742460075835_0.15999920819651892"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "yargs": "^17.7.2",
+     "zod": "^3.22.4",
+     "zod-validation-error": "^3.3.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.0.5"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-gGHirYAlxvVcKdZAwqR+9v0iwdcIr/SF4EAr101ED2pOmaC/sPFIfO1H5OEpH8kRmeKA+j5Jf0cYd5uvp9ZLJQ==",
+     "shasum": "e87fbffdc57594f2265a43a8407618f39320f03e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD3U5BXdj0Y0AsJSdnsG1wB7qUxNiTNBAIoAfKP8Xi0kQIhAO7nw1E3lc6tK3iVACtGTp/Ox5uCggqIeyg6pC5fUprJ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.0.5.tgz",
+     "unpackedSize": 442806
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "5f76d23b3c633560d250a0f0ffb11228946fe6dc",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "npm run build",
+     "start": "tsx src/index.ts"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.5"
+   },
+   "0.1.0": {
+    "_from": "file:langwatch-mcp-server-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.1.0",
+    "_integrity": "sha512-o9/ws9mvClhulV/4Kom6XQhtd6yUmWyHw8aYqCnb1HA0N60ieNJRDLQS1BUM9PzGrp5aMLO4rOrXi4jI8yu0ag==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1758534502315_0.5643911653756675"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/7ba474fbe4d46e0a82d35d9f8fc4cf36/langwatch-mcp-server-0.1.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@langwatch/scenario": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.1.0"
+     },
+     "fileCount": 59,
+     "integrity": "sha512-o9/ws9mvClhulV/4Kom6XQhtd6yUmWyHw8aYqCnb1HA0N60ieNJRDLQS1BUM9PzGrp5aMLO4rOrXi4jI8yu0ag==",
+     "shasum": "617fb956bc249dc0b08817e0a5ef86201ed420a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDUS9/GHch6AiILo3dQvqY4kEALtD2QX83R0Ol591woBAiEA46biCQNGyapcuYnplXpm3jVdT7cLEqqlcripk+j584M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 1278482
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.10.0": {
+    "_from": "file:langwatch-mcp-server-0.10.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.10.0",
+    "_integrity": "sha512-zp3u1tNsizLPjKaJ/6CUOWk3qrLXv5u5Ty3R7l6pA3wyvzIMkTPhfAIE6/rkV1DJ6a6qQ3mM/aEen4mveuk2GQ==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1780061738631_0.03252445101891466"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/4fe5755bfa4a978e382150bcacb0eaa3/langwatch-mcp-server-0.10.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.217.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.119",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.161",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^10.2.1",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.10.0"
+     },
+     "fileCount": 237,
+     "integrity": "sha512-zp3u1tNsizLPjKaJ/6CUOWk3qrLXv5u5Ty3R7l6pA3wyvzIMkTPhfAIE6/rkV1DJ6a6qQ3mM/aEen4mveuk2GQ==",
+     "shasum": "91bd7c17426929dd0f933b8b63004d694e69130b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGaUIJqvEOG/sDiQMsiYgvxuwCZvQ0JE04QAHdmhhTBCAiBdpl7fJLCVyX1yqtIypIYZ4C/GA4oz2K9gCCMSo7cr2A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 4101466
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.10.1": {
+    "_from": "file:langwatch-mcp-server-0.10.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.10.1",
+    "_integrity": "sha512-cRVXTKSworPqKFYq21bllyzya1A4vm7q/G22KyDiEBjpIqa5Ha/4aGDtbJ1Oxsjeb4zdHeWsYbXF7d4L2Chv6w==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.1_1780235966987_0.6744316954165135"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/9bf26a63526ec8f8d69714150464b1bb/langwatch-mcp-server-0.10.1.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.217.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.119",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.161",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^10.2.1",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.10.1"
+     },
+     "fileCount": 237,
+     "integrity": "sha512-cRVXTKSworPqKFYq21bllyzya1A4vm7q/G22KyDiEBjpIqa5Ha/4aGDtbJ1Oxsjeb4zdHeWsYbXF7d4L2Chv6w==",
+     "shasum": "f0546111f60cd915cfd37069403a2d00e8039cb4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF7yIkdjj1rFc+gWFvmhUFatH7pNgveWD9hhk9JkpihDAiEAs8jWMQUmW3XuMX+k34F4gxA2xKZzWSMsgF08JPKQQmI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.10.1.tgz",
+     "unpackedSize": 4144834
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.1"
+   },
+   "0.2.0": {
+    "_from": "file:langwatch-mcp-server-0.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.2.0",
+    "_integrity": "sha512-Xv/PsEs+z+8sdwAH92E+VOZtGs8ECk0qAURRxAiLND0+hMdRSoZTastjtx2uNrg9SziFrWkXh7CZXZl02dyYTw==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1762554157908_0.897703461455607"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/8584adc44282e99fb1f8e64ef3cc4fa9/langwatch-mcp-server-0.2.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@langwatch/scenario": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.2.0"
+     },
+     "fileCount": 59,
+     "integrity": "sha512-Xv/PsEs+z+8sdwAH92E+VOZtGs8ECk0qAURRxAiLND0+hMdRSoZTastjtx2uNrg9SziFrWkXh7CZXZl02dyYTw==",
+     "shasum": "105c248f5d62dd7b40fa5981daee42480011d6de",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCC6I0JLO/rQJ4C4+rKwTHserYzPjb3AFuQcopb8nkAhAIhAIurO9FjnLU1scPpnCuuI+35f8HC6fVAvrNGCldTqurV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 1275231
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_from": "file:langwatch-mcp-server-0.2.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.2.1",
+    "_integrity": "sha512-H122che+TI54f8P8NtxNv3q/yLBzXQooHo4v6tnYK4FvaeRiOmkr3hK6nceCLt9N3XfU0gfmJEflhV5gDVT/JA==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1762594534718_0.08599920940316541"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/edddfe68c6186cc2f45eafa07fbe5967/langwatch-mcp-server-0.2.1.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@langwatch/scenario": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.2.1"
+     },
+     "fileCount": 59,
+     "integrity": "sha512-H122che+TI54f8P8NtxNv3q/yLBzXQooHo4v6tnYK4FvaeRiOmkr3hK6nceCLt9N3XfU0gfmJEflhV5gDVT/JA==",
+     "shasum": "f38fa77d85da6ba9a6f765d4d090e15e11d87f14",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCvl+L/slSqobDP4GwMwo3q/mjJ6Q+L4JfRcbm3mqKfLQIgIZi2f0psH/D4b4p63q+jcPMWjF8++OTtE777SdTYYbY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 1276545
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_from": "file:langwatch-mcp-server-0.2.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.2.2",
+    "_integrity": "sha512-E5u1CSZO/1KzUlyIDmaIJjB5BOQprvjVq2PBKPSH/j8U8SEZATnD2Pq7f4MFpOOsPIWd+SYqXDgwJHU64ZcOPQ==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.2_1763051935411_0.9214138523747091"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/89c0ddfca3207c2f344c0884d4cb7cd6/langwatch-mcp-server-0.2.2.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@langwatch/scenario": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "langwatch": "^0.1.6",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.2.2"
+     },
+     "fileCount": 59,
+     "integrity": "sha512-E5u1CSZO/1KzUlyIDmaIJjB5BOQprvjVq2PBKPSH/j8U8SEZATnD2Pq7f4MFpOOsPIWd+SYqXDgwJHU64ZcOPQ==",
+     "shasum": "d1049b2abdaade578aeb9495ccf8d216b1412666",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCO2SmxflbNXhAt/aLhdmGHk3/2icO/5SdIkuG3AsACBAIhAIVCyspLBShgaZwff9FNpg+C22jGHlOM9Qy4NF0glaes"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.2.2.tgz",
+     "unpackedSize": 1277235
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_from": "file:langwatch-mcp-server-0.3.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.3.0",
+    "_integrity": "sha512-ss1jiHzQR6UbpZrveipLg2Kenc8FAnYF651vFvOokkouZDIv6XErwyfewzQaAOTTxeMkyAU8kC6/sO5h/4yC5A==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1763195196288_0.7363077408694056"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/7a265cc73ca2009c72c1416226c8868e/langwatch-mcp-server-0.3.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.3.0"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-ss1jiHzQR6UbpZrveipLg2Kenc8FAnYF651vFvOokkouZDIv6XErwyfewzQaAOTTxeMkyAU8kC6/sO5h/4yC5A==",
+     "shasum": "cb534616ba1405d9bba9aa2a5c974cf28f807b56",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGEA720il9//v8lfTGT0ZUPnJwVZ7oSQP7n/DsZlnkOZAiEA6W6mI3weIs2vq0KNhVqYPQw56tdxUk4rYuYIh/iTpFE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 1069757
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_from": "file:langwatch-mcp-server-0.3.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.3.1",
+    "_integrity": "sha512-qefDY4Ht65Ax/iu4adA7Z7d9TATURcKdGhxP4jWnmE6tqOy98tA/l0xz3SKnfFidnTg62rys2awIumlz++0/EA==",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.1_1763197689880_0.4248438017210716"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ac1f7d0a787]",
+     "name": "rchaves"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/tmp/f4c932660724e2bfcab0c9bf10291465/langwatch-mcp-server-0.3.1.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.3.1"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-qefDY4Ht65Ax/iu4adA7Z7d9TATURcKdGhxP4jWnmE6tqOy98tA/l0xz3SKnfFidnTg62rys2awIumlz++0/EA==",
+     "shasum": "55231154393569023ebd0b1a3f180cee82e71cac",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID/1+w+MRBgBCLLRwf4+Ax/kdldEYMtt34MhGQW2nqqjAiBY5VJlFECOFarezyl7uRRxEWScVA6IJZtgSyS6ZGgUAg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.3.1.tgz",
+     "unpackedSize": 1070750
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.3.2",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.2_1765982726574_0.8548785115263331"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.3.2"
+     },
+     "fileCount": 54,
+     "integrity": "sha512-1Eg1iYafeox4AnmdVCiqY5iGyhr/WzsPOVHgOuHHmVBJLF0jajZAsEcUN6Yn8N0S2hMJ8gcWVXnYPh9HsZThlQ==",
+     "shasum": "41fb1f7f7363efe8de4ef12f9d073d146ec7f685",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAQFuCyANa7SQbjN7hxdYbBXGaysixD212Vymo5JilPAAiEAyU4bEfej915H1CStmQS0YLOFvASog52dln4eCzkbDO4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.3.2.tgz",
+     "unpackedSize": 531600
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "gitHead": "3696d95bda6c4f870a9cf8c01f52dbbe3cbe13cd",
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_from": "file:langwatch-mcp-server-0.3.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.3.3",
+    "_integrity": "sha512-OOGruoj0H/oTkhMhH3Ks3sPfMXcgdVQd9U+vY3wx3eSi6qctKSoAeOkFK8IRIoZSbZt5KzRYfDd/DeGxf3I9nQ==",
+    "_nodeVersion": "24.12.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.3_1766064164168_0.2569011003459556"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "_resolved": "/tmp/9af19c072adc84c202f549dce709fbff/langwatch-mcp-server-0.3.3.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.3.3"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-OOGruoj0H/oTkhMhH3Ks3sPfMXcgdVQd9U+vY3wx3eSi6qctKSoAeOkFK8IRIoZSbZt5KzRYfDd/DeGxf3I9nQ==",
+     "shasum": "5f8a074a7deb2703ce7fd52a944a012d02144b4e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDER584EkX8tgbwsTCmXlOylq2pz++pEPn/zm8eyqZ3tQIgOIHjjn3ZLtjVtHLkmXY3J5fYi9oJeK9APMvvw+MBb+k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.3.3.tgz",
+     "unpackedSize": 1071388
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.3"
+   },
+   "0.4.0": {
+    "_from": "file:langwatch-mcp-server-0.4.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.4.0",
+    "_integrity": "sha512-G/e2D55tPDYEiowmxgIeNHdtrL0symPuGrK+3cln1kY2mGX0/BMdu8hoO2flXxqRmGr6L6103m9dX8Wc9cKpoQ==",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1770534394153_0.14897010563358593"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "_resolved": "/tmp/2d5e2d4cfa190a46f86ce77d009a3cfe/langwatch-mcp-server-0.4.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^1.0.111",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.21.5",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.4.0"
+     },
+     "fileCount": 103,
+     "integrity": "sha512-G/e2D55tPDYEiowmxgIeNHdtrL0symPuGrK+3cln1kY2mGX0/BMdu8hoO2flXxqRmGr6L6103m9dX8Wc9cKpoQ==",
+     "shasum": "3a43b77527c5dedb02779a9328eb11eed46ba6c1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCM3zt3DHCxyj2xIRcd+WJaI5/55MUJxC/lV9+nFo6xTwIhAOCJOeudWUSyyshS50PpcTj2IahXMtr/a6+FSk0zfM/0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 1486635
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_from": "file:langwatch-mcp-server-0.5.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.5.0",
+    "_integrity": "sha512-Wz7NHV9Nud/HP+mi4snN8VY1XYVq2ETP2rWXV3X8qKLj6bzM7VkhFGPOVH4K0NeHUYIuvW2kfwMe0452jMO4Vg==",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1771605525135_0.06842139399168667"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "_resolved": "/tmp/cf350379c831c914b204b9cbc18d08c3/langwatch-mcp-server-0.5.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.7.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^3.25.76",
+     "zod-validation-error": "^3.5.3"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^2.0.15",
+     "@anthropic-ai/claude-code": "^2.1.7",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.3.0",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^5.0.40",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^4.9.5",
+     "typescript-eslint": "^7.11.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.5.0"
+     },
+     "fileCount": 126,
+     "integrity": "sha512-Wz7NHV9Nud/HP+mi4snN8VY1XYVq2ETP2rWXV3X8qKLj6bzM7VkhFGPOVH4K0NeHUYIuvW2kfwMe0452jMO4Vg==",
+     "shasum": "523d88479c2690b7e1d5bb0a632daef789783477",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDXKojNyugSI+scY/dNCGqhXq4uQTVA1IY5H6/rd6bhPQIhAIq3E+YsmEL3cVYakfugPMO/VmzsK3j6J0fRFYi2JLjs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 1925262
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_from": "file:langwatch-mcp-server-0.6.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.6.0",
+    "_integrity": "sha512-bK7dzhE3t2YMRHGvWra4S+IX/q2Zd3JFQkASoPXtBUshFXdxs2b8DjQlOQB65LRIvgQUnZ2kG283Yna1HaM3Wg==",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1773407886095_0.3611859202863017"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/tmp/d2ea97bcece4902be474b6cb36d86f47/langwatch-mcp-server-0.6.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.72",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.6.0"
+     },
+     "fileCount": 157,
+     "integrity": "sha512-bK7dzhE3t2YMRHGvWra4S+IX/q2Zd3JFQkASoPXtBUshFXdxs2b8DjQlOQB65LRIvgQUnZ2kG283Yna1HaM3Wg==",
+     "shasum": "d4a1b3561977f962258e28cef3fc89d04dfc17a3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCuiQStb6cc+raYRd3E2M7gA2AI96YeLgurWpISiKAEDAIhAJRHCSXSznf/GsM3t3Gi+IUgR/kpIRQHp9Kh8V1wjGtQ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 2631370
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_from": "file:langwatch-mcp-server-0.6.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.6.1",
+    "_integrity": "sha512-ERawRGkoJoPwaOTfCcgWi8Km7ebrAioKeQMncqJ5S7UoHgUMjSlm02MetqIfRdWR14Q9pUsRTA0KjQQl8tLROQ==",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1773415676374_0.2470436806314975"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/tmp/16d1c8b2eca017f47f20e41cfa40da48/langwatch-mcp-server-0.6.1.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.72",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.6.1"
+     },
+     "fileCount": 157,
+     "integrity": "sha512-ERawRGkoJoPwaOTfCcgWi8Km7ebrAioKeQMncqJ5S7UoHgUMjSlm02MetqIfRdWR14Q9pUsRTA0KjQQl8tLROQ==",
+     "shasum": "4dc248240f5604d4addc6852a846406034d017bf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDCusoQeJwsu4x8Qcp40fHA3apuHMpLAfPxFSv5Ie8YkQIgOKeex6kf+BoeJhFTHng16VdPFn+6VCQdGO3xKRqn+bU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 2631617
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_from": "file:langwatch-mcp-server-0.7.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.7.0",
+    "_integrity": "sha512-uJ0o9cnJCD46t/Nu33/Du+zj3HqLxLlcKYbQcPUJatjEmAXl5u7FonUz3wtFPEdbephNl3hGdMUOr0atAuqMqA==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1776348204769_0.9223469759976715"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/94f1bb7213f645268881694a8d3829cb/langwatch-mcp-server-0.7.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.204.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.72",
+     "@eslint/js": "^9.4.0",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/express": "^5.0.6",
+     "@types/node": "^16.0.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^8.57.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.7.0"
+     },
+     "fileCount": 340,
+     "integrity": "sha512-uJ0o9cnJCD46t/Nu33/Du+zj3HqLxLlcKYbQcPUJatjEmAXl5u7FonUz3wtFPEdbephNl3hGdMUOr0atAuqMqA==",
+     "shasum": "44eeb2206f64472cd5df9d4310e62fb99b75d24e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICvKl8cMupjiriE675mLoIJyhAJPXxd8Z7a3ApT6o9guAiEA4AIpVFRFx9Rgz3W6vxwxkeRX7CdryftU/CNbjjKA5tk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 4559776
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_from": "file:langwatch-mcp-server-0.8.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.8.0",
+    "_integrity": "sha512-ZejwIBolntom2fEU7Hu6QmasyW8/BOn9rkr5LOPIsAOJ2XFUZx0YJiux7FVdyFdloyThmdoEEULz4bCnfS1dYA==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1778684060353_0.12465396967975684"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/783b0070687915263eaa0c242b10a663/langwatch-mcp-server-0.8.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.217.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.119",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^10.2.1",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.8.0"
+     },
+     "fileCount": 209,
+     "integrity": "sha512-ZejwIBolntom2fEU7Hu6QmasyW8/BOn9rkr5LOPIsAOJ2XFUZx0YJiux7FVdyFdloyThmdoEEULz4bCnfS1dYA==",
+     "shasum": "d9d4ae7c0bc058c88953d911a3c28bb6af69d712",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDQH3bIUgbfQ3+Ikpl2n2ocdaOwnpBMBW+vxA0CI0/55QIhAMgoP2h7akRsPAt7zTRmdg6t24Rz4Ykn8sHYOpqAP2gT"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 3948148
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_from": "file:langwatch-mcp-server-0.9.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@0.9.0",
+    "_integrity": "sha512-Cyvych4jtK/JGmcAMBuDrgEQjfvB88qvm1ecMGVr3M7qTjUOIia8ODGpuFGpsFM9otygZfyQ0706vRAMy7gIlA==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1779452771682_0.38418372117173627"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/2cb5750829f757a8acfb0db10daf3b36/langwatch-mcp-server-0.9.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.217.0",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "vitest": "^3.2.4",
+     "yargs": "^17.7.2",
+     "zod": "^4.3.6",
+     "zod-validation-error": "^5.0.0"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "^2.1.119",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@types/debug": "^4.1.12",
+     "@types/eslint__js": "^8.42.3",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20250911.1",
+     "ai": "^6.0.161",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.25.0",
+     "eslint": "^10.2.1",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@0.9.0"
+     },
+     "fileCount": 235,
+     "integrity": "sha512-Cyvych4jtK/JGmcAMBuDrgEQjfvB88qvm1ecMGVr3M7qTjUOIia8ODGpuFGpsFM9otygZfyQ0706vRAMy7gIlA==",
+     "shasum": "9cfc3876174cb5d4e86e74fde40c8c4501cb3c5d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGHkJP+TlLWkiKbBKYHyqPswz8dfsjXJCgErEjLt3NPSAiAZT3COgXYTjlUmuD6WE+KLiC/xrp7V3B6fv7ygFKs5dQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 4073843
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   },
+   "1.0.0": {
+    "_from": "file:langwatch-mcp-server-1.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@1.0.0",
+    "_integrity": "sha512-KBv4sBrmPKBYV+vC4NaCztMsxtK7GLeITvdgmwUYPtV8Qvn+NEd087PDT66zpaHBUEKQVUPNeQLWSs0ZOMNpyQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.0_1784917711615_0.10118126159133833"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/e11ea022cc6ad31a03f25aa4edff216d/langwatch-mcp-server-1.0.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.3.6"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "2.1.202",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/handled-error": "0.1.0",
+     "@langwatch/redaction": "0.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@langwatch/ssrf": "0.0.1",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.219.0",
+     "@types/debug": "^4.1.13",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20260705.1",
+     "ai": "^6.0.161",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.28.1",
+     "eslint": "^10.2.1",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0",
+     "vitest": "^4.1.8",
+     "yargs": "^18.0.0",
+     "zod-validation-error": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@1.0.0"
+     },
+     "fileCount": 247,
+     "integrity": "sha512-KBv4sBrmPKBYV+vC4NaCztMsxtK7GLeITvdgmwUYPtV8Qvn+NEd087PDT66zpaHBUEKQVUPNeQLWSs0ZOMNpyQ==",
+     "shasum": "505f9b6f8dd1723a4ff8d7202334e3a101f4b832",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCjUprUa9dykNBjfgIpwosBBqqmDafiJGtFb4L/WJw0dAIhAMiT4UvoAG1875y80vfY24B2pydMockJHJ83IydKhCZ+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-1.0.0.tgz",
+     "unpackedSize": 6281144
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0"
+   },
+   "2.0.0": {
+    "_from": "file:langwatch-mcp-server-2.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@2.0.0",
+    "_integrity": "sha512-DDBptgFwO2vFYJJLP4vnAWsfq8rud3ysQr8jHUz/cbXw5Gox6R9ZUIjAynAgiBfC2jgfZlbPXYBJpMySHEpTYA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.0.0_1786123375207_0.46578058037384173"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/277e878c690b999e46ec9c6454a0dbdf/langwatch-mcp-server-2.0.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.3.6"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "2.1.202",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/handled-error": "0.1.0",
+     "@langwatch/redaction": "0.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@langwatch/ssrf": "0.0.1",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.219.0",
+     "@types/debug": "^4.1.13",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/yargs": "^17.0.33",
+     "@typescript/native-preview": "7.0.0-dev.20260705.1",
+     "ai": "^6.0.161",
+     "chalk": "^5.6.2",
+     "date-fns": "^4.1.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.28.1",
+     "eslint": "^10.2.1",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.55.0",
+     "vitest": "^4.1.8",
+     "yargs": "^18.0.0",
+     "zod-validation-error": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@2.0.0"
+     },
+     "fileCount": 258,
+     "integrity": "sha512-DDBptgFwO2vFYJJLP4vnAWsfq8rud3ysQr8jHUz/cbXw5Gox6R9ZUIjAynAgiBfC2jgfZlbPXYBJpMySHEpTYA==",
+     "shasum": "270465dde7b7e1280b82b8b574682f6dae66a4cc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDgWXxbWt4ku9gP9es7xP8xxglWgpGWtJYkb9uRtYlsgAIgGCLfSINtrD+qiAQTehy+GWnhfP6c0fpSZ/cLZyoDIz4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-2.0.0.tgz",
+     "unpackedSize": 6435909
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.1.0": {
+    "_from": "file:langwatch-mcp-server-2.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@langwatch/mcp-server@2.1.0",
+    "_integrity": "sha512-3KEpdvgZWxfZZCMWIyW0e7BwFGdImlvb7SHqyIKyncsN/LsRU4EybbG36xY1AZccrpklG1s8U+nOB6S9aASwHQ==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.1.0_1789211918099_0.37500366325203904"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:ae14aa33-c394-4ee5-90f6-e3fbd7792fc9"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/tmp/654d2c70d49779f0887339eb68791be4/langwatch-mcp-server-2.1.0.tgz",
+    "author": "",
+    "bin": {
+     "langwatch-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/langwatch/langwatch/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.3.6"
+    },
+    "description": "An MCP server for Langwatch.",
+    "devDependencies": {
+     "@ai-sdk/anthropic": "^3.0.44",
+     "@anthropic-ai/claude-code": "2.1.228",
+     "@eslint/js": "^10.0.1",
+     "@langwatch/handled-error": "0.1.0",
+     "@langwatch/redaction": "0.0.1",
+     "@langwatch/scenario": "^0.4.6",
+     "@langwatch/ssrf": "0.0.1",
+     "@opentelemetry/context-async-hooks": "^2.1.0",
+     "@opentelemetry/sdk-node": "^0.221.0",
+     "@types/debug": "^4.1.13",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.2.0",
+     "@types/yargs": "^17.0.33",
+     "ai": "^6.0.161",
+     "chalk": "^6.0.0",
+     "date-fns": "^4.1.0",
+     "dotenv": "^17.2.2",
+     "esbuild": "^0.28.1",
+     "eslint": "^10.2.1",
+     "express": "^5.2.1",
+     "node-pty": "^1.0.0",
+     "tsup": "^8.1.0",
+     "tsx": "^4.20.5",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.55.0",
+     "vitest": "^4.1.8",
+     "yargs": "^18.0.0",
+     "zod-validation-error": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@langwatch%2fmcp-server@2.1.0"
+     },
+     "fileCount": 288,
+     "integrity": "sha512-3KEpdvgZWxfZZCMWIyW0e7BwFGdImlvb7SHqyIKyncsN/LsRU4EybbG36xY1AZccrpklG1s8U+nOB6S9aASwHQ==",
+     "shasum": "e7811fac48abe8a5c746a3518c0215f8ac13001c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCtTnRWurUM8WHDKLvqlxMUObznPjWtRHENAt3NZf3LewIgDimSNa4Wma+Pt6srYVF+3za+yO2+/vJKRF0Wzj6Z2Dk="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCKaFnnnXywiMgQMpuPxh4gsJ+yoTlefL2kUmAu8UB9qQIhALqZVXbY1MWYvFg/lg7U+/WKNblCFpQZg5iZKlqCn5Nl"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@langwatch/mcp-server/-/mcp-server-2.1.0.tgz",
+     "unpackedSize": 6747699
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+     },
+     "./config": {
+      "default": "./dist/config.js",
+      "import": "./dist/config.js",
+      "require": "./dist/config.js",
+      "types": "./src/config.d.ts"
+     },
+     "./create-mcp-server": {
+      "default": "./dist/create-mcp-server.js",
+      "import": "./dist/create-mcp-server.js",
+      "require": "./dist/create-mcp-server.js",
+      "types": "./src/create-mcp-server.d.ts"
+     }
+    },
+    "homepage": "https://github.com/langwatch/langwatch#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ac1f7d0a787]",
+      "name": "rchaves"
+     },
+     {
+      "email": "[redacted-email:826b225b3dae]",
+      "name": "drew.langwatch"
+     },
+     {
+      "email": "[redacted-email:5c8359daacf0]",
+      "name": "0xdeafcafe-langwatch"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@langwatch/mcp-server",
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/langwatch/langwatch.git"
+    },
+    "scripts": {
+     "build": "tsup && node build.js",
+     "prepublish": "pnpm run build",
+     "start": "tsx src/index.ts",
+     "test": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.1.0"
+   }
+  }
+ },
+ "name": "@langwatch/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@langwatch%2Fmcp-server"
+}

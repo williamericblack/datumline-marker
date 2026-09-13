@@ -1,0 +1,543 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.2.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@ni-c/smtp-mcp",
+  "_rev": "7-593e443c691b99b4914499494b9a12da",
+  "author": {
+   "name": "Willi Thiel"
+  },
+  "bugs": {
+   "url": "https://github.com/ni-c/smtp-mcp/issues"
+  },
+  "description": "MCP server that sends mail over SMTP, gated behind an allowlist and a human confirmation",
+  "dist-tags": {
+   "latest": "0.2.0"
+  },
+  "homepage": "https://smtp-mcp.ni-c.de",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "smtp",
+   "email",
+   "mail",
+   "nodemailer",
+   "send"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "name": "@ni-c/smtp-mcp",
+  "readme": "# smtp-mcp\n\n<!-- badges: start -->\n\n[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/smtp-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/smtp-mcp/actions/workflows/ci.yml)\n[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ni-c/smtp-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/ni-c/smtp-mcp)\n<a href=\"https://socket.dev/npm/package/@ni-c/smtp-mcp\"><img src=\"https://socket.dev/api/badge/npm/package/@ni-c/smtp-mcp\" alt=\"Socket supply-chain report\" height=\"20\"></a>\n[![Glama score](https://glama.ai/mcp/servers/ni-c/smtp-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ni-c/smtp-mcp)\n<br>\n[![npm version](https://img.shields.io/npm/v/%40ni-c%2Fsmtp-mcp)](https://www.npmjs.com/package/@ni-c/smtp-mcp)\n[![container image](https://img.shields.io/badge/ghcr.io-ni--c%2Fsmtp--mcp-4f46e5?logo=docker&logoColor=white)](https://github.com/ni-c/smtp-mcp/pkgs/container/smtp-mcp)\n[![HTTP via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-4f46e5?logo=modelcontextprotocol&logoColor=white)](https://mcp-hub.ni-c.de)\n<br>\n[![docs](https://img.shields.io/badge/docs-smtp--mcp.ni--c.de-4f46e5?logo=readthedocs&logoColor=white)](https://smtp-mcp.ni-c.de)\n[![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)\n<!-- badges: end -->\n\nA [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for\n[SMTP](https://datatracker.ietf.org/doc/html/rfc5321), the protocol every mail server speaks to\naccept a message for delivery.\n\nLets MCP clients like Claude Code, Claude Desktop or Codex send, reply to and forward mail from\none configured address \u2014 with a human approving every message.\n\nSeven tools is the ceiling, not the floor: `SMTP_ALLOW_TOOLS=essential` registers a curated five\ninstead, and a model picks the right tool far more reliably from five than from seven \u2014 see\n[choosing which tools load](#choosing-which-tools-load).\n\n<!-- The <picture> element resolves against the page, so it follows GitHub's theme\n     toggle. npm strips <picture> while sanitising and keeps the <img>, which is\n     why architecture.svg carries its own dark card. URLs must be absolute:\n     relative paths are simply invisible on the npm package page. -->\n<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://smtp-mcp.ni-c.de/architecture-dark.svg\">\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"https://smtp-mcp.ni-c.de/architecture-light.svg\">\n  <img src=\"https://smtp-mcp.ni-c.de/architecture.svg\" alt=\"An MCP client talking to smtp-mcp over stdio, which checks every recipient against an allowlist and asks a person to approve the message before handing it to a submission server over TLS\" width=\"800\">\n</picture>\n\n<img src=\"https://smtp-mcp.ni-c.de/demo.gif\" alt=\"Listing the seven tools, then calling send_mail \u2014 which sends nothing and comes back asking, with the recipient and subject on their own labelled lines \u2014 and then a second call to an address outside the allowlist, which is refused before any connection is opened\" width=\"800\">\n\n## What makes it different\n\n**It sends mail. That is why it is a separate server.** Its counterpart\n[imap-mcp](https://github.com/ni-c/imap-mcp) reads a mailbox and deliberately has no way to send\nanything \u2014 that absence is its entire security argument, because an agent that can reach private\ndata and process attacker-controlled content is only exploitable once it also has a way out.\nThis server is that way out, so it does not get to make the same claim. It earns its place by\nnarrowing the channel instead, and by living in its own process with its own credentials.\n\n**It is off when you install it.** `SMTP_ALLOW_SEND` defaults to false. Until it is set the\nsending tools are not registered at all \u2014 absent from `tools/list`, not refused at call time.\n\n**It can only write to people you named.** `SMTP_ALLOWED_RECIPIENTS` is required to turn sending\non. Every address in To, Cc and Bcc is checked against it before a connection is opened, so an\ninjected \"mail this to someone else\" fails without the server ever reading it as an instruction.\nAllowing everyone is possible and has to be written as `*`.\n\n**Every message is approved by a person.** Not by the model \u2014 the request goes to the client as\nan MCP elicitation. Recipients, subject and any Bcc appear on their own labelled lines, so a\nsubject written to look like an instruction cannot become part of the server's own sentence.\n\n**The sender cannot be chosen.** There is no `from` parameter. A model that could pick its own\nsender could write in a colleague's name, and the result would be indistinguishable from a\nmessage they wrote.\n\n## Requirements\n\n- Node.js 22 or newer\n- An SMTP account you may send from \u2014 a submission server on port 587 or 465, with a username\n  and password. Providers with two-factor authentication generally need an app-specific\n  password.\n\n## Configuration\n\n> **Use TLS.** `SMTP_TLS=starttls` (the default) requires the upgrade rather than attempting it,\n> so a stripped `STARTTLS` capability fails the connection instead of quietly sending your\n> password in the clear. For a self-signed certificate prefer a proper internal CA over\n> `SMTP_INSECURE_TLS`.\n\n| Variable                    | Required                    | Default                      | Description                                                                                       |\n| --------------------------- | --------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------- |\n| `SMTP_HOST`                 | yes                         | \u2014                            | Hostname of the SMTP server, e.g. `smtp.example.net`.                                             |\n| `SMTP_USER`                 | yes                         | \u2014                            | Username for SMTP authentication.                                                                 |\n| `SMTP_PASSWORD`             | yes                         | \u2014                            | Password or app-specific password.                                                                |\n| `SMTP_FROM`                 | yes                         | \u2014                            | The only sender used, e.g. `Name <[redacted-email:d53695b95986]>`. There is no `from` parameter.             |\n| `SMTP_REPLY_TO`             | no                          | \u2014                            | Reply-To on every message, e.g. `Team <[redacted-email:5cdfabd0e195]>`. Unset means replies go to `SMTP_FROM`. |\n| `SMTP_PORT`                 | no                          | 587 / 465 / 25               | Depends on `SMTP_TLS`.                                                                            |\n| `SMTP_TLS`                  | no                          | `starttls`                   | `starttls`, `implicit` or `none`. Never opportunistic.                                            |\n| `SMTP_ALLOW_SEND`           | no                          | `false`                      | Set to `true` to register the sending tools.                                                      |\n| `SMTP_ALLOWED_RECIPIENTS`   | with `SMTP_ALLOW_SEND=true` | \u2014                            | Comma-separated addresses and `@domains`. `*` allows anyone.                                      |\n| `SMTP_MAX_RECIPIENTS`       | no                          | `10`                         | Distinct recipients across To, Cc and Bcc in one message.                                         |\n| `SMTP_MAX_SENDS_PER_HOUR`   | no                          | `20`                         | Sliding hourly cap.                                                                               |\n| `SMTP_MAX_MESSAGE_BYTES`    | no                          | `10485760`                   | Size ceiling on the composed message.                                                             |\n| `SMTP_MAX_ATTACHMENT_BYTES` | no                          | `5242880`                    | Size ceiling on one attachment.                                                                   |\n| `SMTP_ATTACHMENT_DIR`       | no                          | \u2014                            | Directory attachments are read from. Unset means no attachments.                                  |\n| `SMTP_ATTACHMENT_TYPES`     | no                          | document and image allowlist | Comma-separated content types that may be attached. `text/html` and `application/zip` are opt-in. |\n| `SMTP_SIGNATURE`            | no                          | \u2014                            | Text appended below the standard `-- ` delimiter.                                                 |\n| `SMTP_AUDIT_LOG`            | no                          | \u2014                            | File the audit lines are appended to, in addition to stderr.                                      |\n| `SMTP_ALLOW_TOOLS`          | no                          | \u2014                            | Tool names, a prefix with one trailing `*`, or `essential`.                                       |\n| `SMTP_DENY_TOOLS`           | no                          | \u2014                            | Removed after `SMTP_ALLOW_TOOLS` is applied.                                                      |\n| `SMTP_INSECURE_TLS`         | no                          | `false`                      | Accept self-signed certificates.                                                                  |\n| `ELICITATION`               | no                          | `true`                       | `false` replaces the approval dialog with the two-call token. **Not prefixed.**                   |\n\nTwo defaults are worth reading twice, because they are the opposite of what the rest of this\nfamily does:\n\n- **`SMTP_ALLOW_SEND` is off.** A freshly installed smtp-mcp can compose and preview messages\n  and cannot send any.\n- **An unset `SMTP_ALLOWED_RECIPIENTS` is a startup error, not \"anyone\".** Treating a missing\n  line as permission is how an accident becomes a delivered message. Write `*` if you mean it.\n\n### Choosing which tools load\n\n`SMTP_ALLOW_TOOLS` decides what is registered, `SMTP_DENY_TOOLS` is subtracted from it. Both take\ncomma-separated tool names or a prefix with a single trailing `*`. A filtered tool is never\nbuilt \u2014 it does not appear in `tools/list` and answers a call with \"not found\", the same as a\nsending tool while the send gate is closed. Nothing is advertised and then refused.\n\n```sh\nSMTP_ALLOW_TOOLS=essential          # the curated five\nSMTP_ALLOW_TOOLS='get_server_info,preview_mail'\nSMTP_DENY_TOOLS=forward_mail        # everything else, minus forwarding\n```\n\n`essential` is `get_server_info`, `validate_recipients`, `preview_mail`, `send_mail` and\n`reply_mail`. `forward_mail` is left out: forwarding carries somebody else's content and\nattachments outward, which is the call that most deserves to be switched on deliberately.\n\nAn entry that matches no tool aborts startup and lists the real names. A tool quietly missing\nfrom `tools/list` is invisible \u2014 nobody traces an absence back to an environment variable.\n\n## Installation\n\n### Claude Code\n\n```sh\nclaude mcp add smtp -- npx -y @ni-c/smtp-mcp\n```\n\n### Claude Desktop\n\n```json\n{\n  \"mcpServers\": {\n    \"smtp\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/smtp-mcp\"],\n      \"env\": {\n        \"SMTP_HOST\": \"smtp.example.net\",\n        \"SMTP_USER\": \"[redacted-email:d53695b95986]\",\n        \"SMTP_PASSWORD\": \"app-specific-password\",\n        \"SMTP_FROM\": \"Your Name <[redacted-email:d53695b95986]>\",\n        \"SMTP_ALLOW_SEND\": \"true\",\n        \"SMTP_ALLOWED_RECIPIENTS\": \"@example.net\"\n      }\n    }\n  }\n}\n```\n\n### Codex\n\n```toml\n[mcp_servers.smtp]\ncommand = \"npx\"\nargs = [\"-y\", \"@ni-c/smtp-mcp\"]\n\n[mcp_servers.smtp.env]\nSMTP_HOST = \"smtp.example.net\"\nSMTP_USER = \"[redacted-email:d53695b95986]\"\nSMTP_PASSWORD = \"app-specific-password\"\nSMTP_FROM = \"Your Name <[redacted-email:d53695b95986]>\"\nSMTP_ALLOW_SEND = \"true\"\nSMTP_ALLOWED_RECIPIENTS = \"@example.net\"\n```\n\n### Docker\n\n```sh\ndocker run --rm -i \\\n  -e SMTP_HOST=smtp.example.net \\\n  -e SMTP_USER=[redacted-email:d53695b95986] \\\n  -e SMTP_PASSWORD=app-specific-password \\\n  -e SMTP_FROM='Your Name <[redacted-email:d53695b95986]>' \\\n  -e SMTP_ALLOW_SEND=true \\\n  -e SMTP_ALLOWED_RECIPIENTS=@example.net \\\n  ghcr.io/ni-c/smtp-mcp\n```\n\n### Through mcp-hub\n\nA client that cannot spawn a local process \u2014 ChatGPT connectors, Claude on the web,\nCursor, LibreChat \u2014 reaches smtp-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one\ncontainer serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login\nbehind a single password and long-lived tokens for the clients that cannot do OAuth. Its\n`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of\nthem without N\u00d7tool schemas in the model's context, and it speaks both protocol revisions\n\u2014 a question this server asks travels through it to the person at the far end.\n\nIts `/config/mcp.json` uses Claude Code's format, so the entry is the one you already\nhave:\n\n```json\n{\n  \"mcpServers\": {\n    \"smtp-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/smtp-mcp\"],\n      \"env\": {\n        \"SMTP_HOST\": \"smtp.example.net\",\n        \"SMTP_USER\": \"[redacted-email:d53695b95986]\",\n        \"SMTP_PASSWORD\": \"\u2026\",\n        \"SMTP_FROM\": \"Your Name <[redacted-email:d53695b95986]>\",\n        \"SMTP_ALLOW_TOOLS\": \"essential\"\n      },\n      \"denyTools\": [\"send_mail\", \"reply_mail\"]\n    }\n  }\n}\n```\n\n`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not\nthe same thing as `*_ALLOW_TOOLS` in `env` \u2014 the difference, and the mistake it invites,\nare in the [client guide](https://smtp-mcp.ni-c.de/guide/clients#through-mcp-hub).\n\n## Tools\n\nAlways registered. None of these can put a message on the wire.\n\n| Tool                  | What it does                                                                                   |\n| --------------------- | ---------------------------------------------------------------------------------------------- |\n| `get_server_info`     | The endpoint, the fixed sender, the allowlist, the limits, and whether sending is on at all.   |\n| `validate_recipients` | Which addresses this server may write to, and why the others are refused. No connection made.  |\n| `preview_mail`        | Builds exactly the message `send_mail` would build and shows it. Runs every check a send runs. |\n| `test_connection`     | Connects, negotiates TLS, authenticates, disconnects. Sends nothing; at most once every 10 s.  |\n\nRegistered only with `SMTP_ALLOW_SEND=true`. \ud83d\udc64 marks the ones that ask a human before acting.\n\n| Tool              | What it does                                                                     |\n| ----------------- | -------------------------------------------------------------------------------- |\n| `send_mail` \ud83d\udc64    | Sends a new message.                                                             |\n| `reply_mail` \ud83d\udc64   | Sends a reply that threads under the original, deriving `Re: ` from the subject. |\n| `forward_mail` \ud83d\udc64 | Forwards a message to new recipients, quoting the original verbatim.             |\n\n### Structured output\n\nEvery tool declares an `outputSchema` and answers with `structuredContent`\nalongside the text block, so a client can use the result without parsing prose:\n\n```jsonc\n{\n  \"sent\": true,\n  \"already_sent\": false,\n  \"message_id\": \"<b1c9\u2026@example.net>\",\n  \"accepted\": [\"[redacted-email:0b109be00697]\", \"[redacted-email:83eee6d172b8]\"],\n  \"rejected\": [],\n  \"bytes\": 1284,\n  \"sends_remaining_this_hour\": 9,\n  \"note\": \"The SMTP server accepted the message. It cannot be recalled.\",\n}\n```\n\n`preview_mail` is the one tool that carries `untrusted: true` and\n`source: \"smtp\"` as fields: a quoted original was written by whoever sent it,\nand anyone in the world can send mail. Its text block keeps the nonce fence \u2014\nthe structured half states the same fields so a client is not made to parse it.\nEverything else here reports this server's own configuration or the outcome of\nits own send, where the marker would be a false claim about who wrote it.\n\n## Not exposed, on purpose\n\n- **A `from` parameter.** The sender is `SMTP_FROM` and nothing else.\n- **A way to skip the confirmation.** No `force`, no \"trusted caller\" mode. An option to turn\n  the gate off would be the first thing a prompt injection reaches for.\n- **Reading mail.** That is [imap-mcp](https://github.com/ni-c/imap-mcp). Keeping the two in\n  separate processes with separate credentials is most of what makes either of them safe.\n- **Arbitrary headers.** Threading uses `in_reply_to` and `references`; there is no passthrough\n  for header names, because that is header injection with extra steps.\n- **DKIM signing.** A submission server signs for you. A private signing key in an environment\n  variable is a worse trade than it looks.\n\n## Safety\n\n- **Sending is off by default and the tools do not exist until it is on.**\n- **Every recipient is checked against an allowlist** before a connection is opened, in To, Cc\n  and Bcc alike.\n- **Every message is approved by a human**, through MCP elicitation. The two-call token fallback\n  says plainly that it is not the same thing.\n- **A confirmation is bound to the exact message**: a SHA-256 fingerprint over the sorted\n  recipient list and a digest of the content, so an approval cannot be spent on a wider list or\n  on different text.\n- **The dialog shows the message**, not only the envelope: the body, the quoted original and the\n  HTML part, each with its length in characters. Everything else here binds who a message goes\n  to; this is what binds what it says.\n- **Bcc recipients get their own labelled line** in the dialog. A hidden recipient a human does\n  not see is the ideal exfiltration channel.\n- **Confirmation text never quotes caller-chosen values into the server's own sentence.**\n- **The same message is not sent twice.** An approval proves that somebody agreed to a message,\n  not that they agreed to it again, so a message the SMTP server accepted is remembered for as\n  long as an approval for it could still be redeemed.\n- **Outgoing HTML is stripped** of scripts, event handlers, remotely loaded images and unsafe URL\n  schemes \u2014 and every removal is reported, never silent. Markup that cannot be cleaned with\n  confidence is **refused** rather than repaired.\n- **A quoted original is passed on unchanged**, with any prompt-injection shapes it matches named\n  in the dialog.\n- **Attachments come only from `SMTP_ATTACHMENT_DIR`**, past an extension allowlist, a symlink\n  refusal and a magic-byte check.\n- **Every accepted message is recorded** on stderr and optionally in a file. Never the body.\n\nSee [SECURITY.md](SECURITY.md) for the reasoning, and for what none of this covers.\n\n## Documentation\n\nThe full guide, tool reference and security notes live at\n**[smtp-mcp.ni-c.de](https://smtp-mcp.ni-c.de)** (source in [`docs/`](docs/)).\n\n## Development\n\n```sh\nnpm install\nnpm test\nnpm run build\n```\n\nThere is a throwaway Mailpit sandbox in `test/integration/`. Develop\nagainst it rather than a real mailbox: this server's job is to put messages on the wire, and a\ntest run that goes wrong sends real mail to real people.\n\n```sh\ndocker compose -f test/integration/compose.yml up -d --wait\nnpm run build && npm run test:integration\n```\n\n## Releasing\n\nTagging `vX.Y.Z` on `main` runs the release workflow: it checks the tag matches `package.json`,\npublishes to npm with provenance through Trusted Publishing, pushes a multi-arch image to GHCR\nwith an SBOM, creates the GitHub release from the CHANGELOG section, and submits the version to\nthe MCP Registry.\n\n## Contributing\n\nIssues, discussions and pull requests are welcome \u2014 see\n[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use\n[private reporting](https://github.com/ni-c/smtp-mcp/security/advisories/new)\nrather than a public issue; the policy is in [SECURITY.md](SECURITY.md).\n\n## License\n\n[MIT](LICENSE) \u00a9 Willi Thiel\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ni-c/smtp-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-09-03T22:10:40.103Z",
+   "0.1.0-rc.1": "2026-09-03T21:42:59.740Z",
+   "0.1.1": "2026-09-05T22:13:52.085Z",
+   "0.1.2": "2026-09-06T21:48:08.764Z",
+   "0.2.0": "2026-09-07T18:02:37.632Z",
+   "created": "2026-09-03T21:42:47.180Z",
+   "modified": "2026-09-07T18:02:37.942Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/smtp-mcp@0.1.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/smtp-mcp_0.1.0_1788473439965_0.4143306383132235"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7972e2a1-ac0f-4593-8ded-8e2da249432a"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "smtp-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/smtp-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.0",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "nodemailer": "^9.1.0",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server that sends mail over SMTP, gated behind an allowlist and a human confirmation",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@types/nodemailer": "^8.0.1",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fsmtp-mcp@0.1.0"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-FPYpXj+EyVAoiN6IYi4JWnsZX110h5ZQC9EoqgZd5pyT6+GZMbIII7EyoMmA1s3gR+K7MEOfHLGbo5oyIYC2gg==",
+     "shasum": "2b33c6294cea60e27c07d8adda9c41c3a3aa2440",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIENU1qdA20+VDo11z2Z8LyA82bm79mNi2RI4h5uiPqqRAiEAgzH2qxkU8RKaA+Pe0PJP45qhjya28eIXh5bdJ/9Nf7I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/smtp-mcp/-/smtp-mcp-0.1.0.tgz",
+     "unpackedSize": 240632
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "c5d5bff9e2011fcdef01094793f42ef4a919f7dd",
+    "homepage": "https://smtp-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "smtp",
+     "email",
+     "mail",
+     "nodemailer",
+     "send"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/smtp-mcp",
+    "name": "@ni-c/smtp-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/smtp-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/smtp-mcp@0.1.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/smtp-mcp_0.1.1_1788646431923_0.6153919860910129"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7972e2a1-ac0f-4593-8ded-8e2da249432a"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "smtp-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/smtp-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.0",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "nodemailer": "^9.1.0",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server that sends mail over SMTP, gated behind an allowlist and a human confirmation",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@types/nodemailer": "^8.0.1",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fsmtp-mcp@0.1.1"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-AMV/BYFRpKn66j4UpUD/NAKKK8C+jhRbFs6NXbs6Wgm1So8OeE0hMdG7FZrsrzxxvROKgwx+q/8ryY2mY9NQrg==",
+     "shasum": "53a106793c8898c259d162a99671be9e635a9bef",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC5D2hbyehapnf3LbEAc5Jn66BG9nEo9fzQ1M6Mu+LwvgIhAPKmMSMxdCDx9LbCpGlVqoC77sQhP/seIcLmpnSDUs6+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/smtp-mcp/-/smtp-mcp-0.1.1.tgz",
+     "unpackedSize": 241327
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "4aad1345ec143a6964e4bcb3567e617746e31b87",
+    "homepage": "https://smtp-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "smtp",
+     "email",
+     "mail",
+     "nodemailer",
+     "send"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/smtp-mcp",
+    "name": "@ni-c/smtp-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/smtp-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/smtp-mcp@0.1.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/smtp-mcp_0.1.2_1788731288609_0.14901481880469358"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7972e2a1-ac0f-4593-8ded-8e2da249432a"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "smtp-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/smtp-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.1",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "nodemailer": "^9.1.0",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server that sends mail over SMTP, gated behind an allowlist and a human confirmation",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@types/nodemailer": "^8.0.1",
+     "@vitest/coverage-v8": "5.0.0",
+     "fast-check": "^4.9.0",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.3.0/svg-asset-set-0.3.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fsmtp-mcp@0.1.2"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-b5rWcUlsughwMYwJqmtYxcwdp4hFHH4YwRG4DuaYY4B10KjgDZamtSmUfrJw8SO5Oyh3YHQYVsX7gc+CJ0wHuw==",
+     "shasum": "1d689387b2cecb58eea7c6abee34374a7205dab4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC1Xj0n8BZ2McoXGP2XKHL2YbufYapvkh7pdBNe/xLaygIgeySn9OliUdNDNP0LiYi0zBcdEyT7xz/thSuTiLHCpPc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/smtp-mcp/-/smtp-mcp-0.1.2.tgz",
+     "unpackedSize": 252346
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "3499bc7ef91d4a1f8a293a77e32077fd4e94e807",
+    "homepage": "https://smtp-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "smtp",
+     "email",
+     "mail",
+     "nodemailer",
+     "send"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/smtp-mcp",
+    "name": "@ni-c/smtp-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/smtp-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/smtp-mcp@0.2.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/smtp-mcp_0.2.0_1788804157489_0.056792931778003375"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7972e2a1-ac0f-4593-8ded-8e2da249432a"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "smtp-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/smtp-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.2",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "nodemailer": "^9.1.0",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server that sends mail over SMTP, gated behind an allowlist and a human confirmation",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@types/nodemailer": "^8.0.1",
+     "@vitest/coverage-v8": "5.0.0",
+     "fast-check": "^4.9.0",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.3.0/svg-asset-set-0.3.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fsmtp-mcp@0.2.0"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-Tsrd5q/XL1Og1KpucniEFtxhaGgrY2OIg+k8F+GnOipndq5jj1q5nnyDjPuv7p6gwYLhSSSaYb5alImQue02fA==",
+     "shasum": "399a448b1be655a35767fc04cb047ff07fe87870",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCU+TyJynPNBOuJRX2YTdj6Oe2cUHYDBWZDDT9j/oOPYAIhAJOU1qeCZRrjicbaSzqt7RsJHe7zSFhRb8Z/y6UYPmV3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/smtp-mcp/-/smtp-mcp-0.2.0.tgz",
+     "unpackedSize": 255839
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "9b49f25e7bddd59215c1a365f4e3d373d0d353e5",
+    "homepage": "https://smtp-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "smtp",
+     "email",
+     "mail",
+     "nodemailer",
+     "send"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/smtp-mcp",
+    "name": "@ni-c/smtp-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/smtp-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   }
+  }
+ },
+ "name": "@ni-c/smtp-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ni-c%2Fsmtp-mcp"
+}

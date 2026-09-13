@@ -1,0 +1,1008 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.4.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6c7c5c77f172]",
+    "name": "curtisbliu"
+   },
+   {
+    "email": "[redacted-email:b89801256f36]",
+    "name": "kelson.warner"
+   },
+   {
+    "email": "[redacted-email:127377e0ded4]",
+    "name": "sdk.dev"
+   },
+   {
+    "email": "[redacted-email:cd2658f190bd]",
+    "name": "eric_amplitude"
+   },
+   {
+    "email": "[redacted-email:c146dd7efa7b]",
+    "name": "daniel-graham-amplitude"
+   },
+   {
+    "email": "[redacted-email:585e1bc11e04]",
+    "name": "jjwang123"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.4.0",
+   "0.4.1",
+   "0.4.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@amplitude/mcp-analytics",
+  "_rev": "8-917c93ae9d3baddb5f78754fa2e03c30",
+  "bugs": {
+   "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+  },
+  "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+  "dist-tags": {
+   "alpha": "0.2.0",
+   "latest": "0.4.2"
+  },
+  "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+  "keywords": [
+   "amplitude",
+   "mcp",
+   "model-context-protocol",
+   "analytics",
+   "tracking"
+  ],
+  "maintainers": [
+   {
+    "email": "[redacted-email:6c7c5c77f172]",
+    "name": "curtisbliu"
+   },
+   {
+    "email": "[redacted-email:b89801256f36]",
+    "name": "kelson.warner"
+   },
+   {
+    "email": "[redacted-email:127377e0ded4]",
+    "name": "sdk.dev"
+   },
+   {
+    "email": "[redacted-email:cd2658f190bd]",
+    "name": "eric_amplitude"
+   },
+   {
+    "email": "[redacted-email:c146dd7efa7b]",
+    "name": "daniel-graham-amplitude"
+   },
+   {
+    "email": "[redacted-email:585e1bc11e04]",
+    "name": "jjwang123"
+   }
+  ],
+  "name": "@amplitude/mcp-analytics",
+  "readme": "# @amplitude/mcp-analytics\n\nAmplitude MCP Analytics SDK \u2014 Model Context Protocol server usage tracking for Amplitude Analytics.\n\n> **Status:** Preview. Server and tool instrumentation, the default event set,\n> identity resolution, and custom events are available now. Transport and\n> correlation handling (stdio and Streamable HTTP, across protocol revisions) is\n> handled for you under the hood.\n\n## Install\n\nThere are two ways to set up: let a coding agent do it, or follow this README manually.\n\n**Option 1 \u2014 agent-assisted** Install the\n[`instrument-mcp-server` skill](https://github.com/amplitude/builder-skills/tree/main/engineering-skills/skills/instrument-mcp-server)\n(part of the [builder-skills](https://github.com/amplitude/builder-skills)\n`engineering-skills` plugin) and ask your agent to instrument your MCP server \u2014\nit walks through this README for you, plus the recommended rationale and UTM\nsteps.\n\n**Option 2 \u2014 manual**\n\n```bash\npnpm add @amplitude/mcp-analytics @amplitude/analytics-node @modelcontextprotocol/sdk\n```\n\n`@amplitude/analytics-node` and `@modelcontextprotocol/sdk` are peer\ndependencies \u2014 your MCP server already depends on the latter. Any\n`@modelcontextprotocol/sdk` from `1.14.0` up is supported, including versions\n`1.21.0`+, which changed how `McpServer` reports a failed `tools/call`; the\ndefault events mean the same thing across that whole range.\n\n## Quick start\n\n```ts\nimport { createMcpAnalytics } from '@amplitude/mcp-analytics';\n\nconst analytics = createMcpAnalytics({\n  apiKey: process.env.AMPLITUDE_API_KEY!,\n  serverName: 'my-mcp-server',\n  serverVersion: '1.0.0',\n});\n\n// Bind the server (enables analytics + emits connection events), then wrap your\n// tool handlers. Order matters: instrumentServer() must run before connect().\nanalytics.instrumentServer(server, { authType: 'oauth' });\n\nserver.tool(\n  'search_docs',\n  schema,\n  analytics.instrumentTool(\n    async (args, extra) => doSearch(args), // your handler, unchanged\n    { name: 'search_docs' },\n  ),\n);\n\nawait server.connect(transport);\n```\n\nTo reuse an Amplitude client you already own, pass it instead of `apiKey`:\n\n```ts\ncreateMcpAnalytics({ amplitude, serverName: '...', serverVersion: '...' });\n```\n\n## Instrumenting your server\n\nTwo steps, both wrap things you already have \u2014 no handler signatures change.\n\n**`instrumentServer(server, options?)`** binds the SDK to your MCP server. It\nauto-detects the transport, captures the client/server handshake, and emits the\ndefault connection events. Call it **before** `server.connect()` \u2014 that's when\nthe transport becomes available. It's idempotent and returns the same server.\n\n**`instrumentTool(handler, meta)`** wraps a tool handler. The returned function\nhas the exact same shape as the one you pass in (`(args, extra)` with a schema,\n`(extra)` without), so it drops straight into `server.tool(...)`. On each call it\nemits `[MCP] Tool Call Response` with timing, error, and size details.\n\n```ts\nanalytics.instrumentServer(server);\nserver.tool('search', schema, analytics.instrumentTool(\n  async (args, extra) => doSearch(args),\n  { name: 'search', owner: 'docs-team', extra: { 'feature flag': 'new-ranker' } },\n));\n```\n\n> **`instrumentTool` requires `instrumentServer`.** If the server was never\n> bound, the wrapper is a **no-op passthrough**: your handler runs untouched,\n> nothing is emitted, and a one-time warning is logged. Instrumenting a tool can\n> never change its behavior.\n\n## Default events\n\nOnce a server is bound and its tools wrapped, the SDK emits these automatically:\n\n| Event | When | Notable properties |\n| -- | -- | -- |\n| `[MCP] Session Initialized` | The `initialize` handshake (every transport) | client/server identity, `[MCP] Transport`, `[MCP] Auth Type` |\n| `[MCP] Session Ended` | Close of a connection that outlived one request (stdio + legacy Streamable HTTP) | `[MCP] Session Duration` |\n| `[MCP] Tools Listed` | A `tools/list` request | `[MCP] Tool Count`, `[MCP] Tool Names` (capped), `[MCP] Response Duration`, `[MCP] Response Size` |\n| `[MCP] Tool Call Response` | Every instrumented tool call | `[MCP] Is Error`, `[MCP] Error Message`/`[MCP] Error Code`/`[MCP] Error Type`/`[MCP] Error HTTP Status`, `[MCP] Response Duration`, `[MCP] Request Size`, `[MCP] Response Size`, `[MCP] Rationale` (opt-in, see below) |\n| `[MCP] Tool Call Rejected` | A `tools/call` request that fails before any tool callback runs (unknown/disabled tool, input-schema validation) | `[MCP] Attempted Tool Name` (unvalidated input \u2014 kept off `[MCP] Tool Name`), `[MCP] Rejection Reason` (`unknown_tool`/`disabled_tool`/`schema_validation`/`unrecognized`), `[MCP] Error Message`, `[MCP] Response Duration`, `[MCP] Response Size`, `[MCP] Response HTTP Status` |\n\nAll event names and properties are prefixed `[MCP] ` so they never collide with\nsame-named events/properties from other Amplitude SDKs on the same project.\n\nThis table is a summary. The full reference \u2014 every property and when it's\npresent, identity resolution, transport nuances, and the error taxonomy \u2014\nlives in [`docs/events.md`](./docs/events.md).\n\nA protocol *session* only exists on stdio and on Streamable HTTP where the\ntransport mints a session id. Two distinct cases look \"stateless\" and behave\ndifferently:\n\n- **Sessionless transport mode** (`sessionIdGenerator: undefined`, protocol\n  `2025-11-25` and earlier) still performs the `initialize` handshake, so\n  `[MCP] Session Initialized` fires with `[MCP] Session ID: no-session`.\n  `[MCP] Session Ended` does not, since the connection lives and dies inside\n  one request and would report no meaningful duration.\n- **Protocol revision `2026-07-28`** removes the handshake entirely, so neither\n  session event fires. Client identity moves to per-request `_meta`, which this\n  SDK already reads. The revision is implemented by the **v2** SDK package set\n  (`@modelcontextprotocol/{core,server,client}` 2.0.0), not by\n  `@modelcontextprotocol/sdk` 1.x, which tops out at `2025-11-25`.\n\nNothing is fabricated in either case. Every event also carries the shared\ncontext properties (identity, client/server, transport, trace correlation).\n\n### Client name on stateless servers\n\nThrough protocol `2025-11-25` the client's `clientInfo` rides only on the\n`initialize` request, so on a sessionless or serverless host \u2014 where each\nrequest gets a fresh `McpServer` \u2014 nothing on a `tools/call` identifies the\nclient. (Revision `2026-07-28` fixes this at the protocol level by putting\nclient identity in every request's `_meta`, which this SDK reads \u2014 but that\nrevision is implemented by the v2 SDK packages, not by\n`@modelcontextprotocol/sdk` 1.x, and even there it is only a SHOULD.) Two\nthings help today:\n\n- `[MCP] OAuth Client ID` is emitted from `authInfo.clientId` on every\n  authenticated request with no host-side state. It names a client\n  *registration* rather than a product, so it is kept out of\n  `[MCP] Client Name`.\n- `resolveClientInfo` supplies the name per request, typically from a token\n  claim (an authorization server already knows `client_name` from dynamic\n  client registration):\n\n```ts\nanalytics.instrumentServer(server, {\n  resolveClientInfo: ({ authInfo }) => ({ name: authInfo?.client_name as string }),\n});\n```\n\nSee [`docs/events.md`](./docs/events.md#client-identity) for the full\nprecedence order.\n\n## Identity\n\n`user_id` must match whatever you already send to Amplitude for the same user.\nThe SDK never guesses it from auth \u2014 you provide it, via whichever path fits:\n\n```ts\n// 1. Bound with the server. Scoped to that binding \u2014 hosts that build one\n//    McpServer per request can pass per-request values safely; concurrent\n//    bindings never overwrite each other.\nanalytics.instrumentServer(server, {\n  userId: 'user-123',\n  tenant: { groupType: 'org id', groupValue: '456' },\n});\n\n// 2. Per request, inside a handler (wins over everything else).\nanalytics.instrumentTool(async (args, extra) => {\n  analytics.setIdentity({ userId: myAuth.getLoginId(extra) });\n  return doWork(args);\n}, { name: 'search' });\n\n// 3. Opt-in, derived from the request's authInfo (you map the claims).\nanalytics.instrumentTool(handler, { name: 'search' }, {\n  resolveIdentity: (authInfo) => ({ userId: authInfo?.sub as string }),\n});\n```\n\nResolution order (first match wins): `setIdentity()` \u2192 `resolveIdentity()` \u2192\n`instrumentServer` options \u2192 correlation anchor \u2192 an anonymous floor. When no\nexplicit identity is supplied but a correlation anchor exists (a stdio process,\na legacy session id, or a propagated W3C trace context), the SDK emits accurate\naggregate-only data under a synthetic `device_id` derived from that anchor \u2014\nnever a polluting placeholder, never a fabricated user.\n\nIf there is no anchor either \u2014 the fully stateless case with no identity and no\ntenant \u2014 each request would mint a brand-new random `device_id` with no\ncross-call stitching, so those events are **dropped by default** rather than\ninflating your user counts (see [`docs/events.md`](./docs/events.md)). Opt in to\nemit them as anonymous, aggregate-only data with `emitAnonymousEvent: true`:\n\n```ts\nimport { MCPAnalyticsConfig } from '@amplitude/mcp-analytics';\n\nnew MCPAnalyticsConfig({ emitAnonymousEvent: true });\n```\n\n## Rationale\n\nAgent clients often supply a free-text rationale for a tool call (\"why I'm\ncalling this tool\"). If your server receives one \u2014 as a tool argument, in\n`_meta`, a header, or however your convention works \u2014 pass it to the SDK and\nit is emitted as the reserved `[MCP] Rationale` property on the tool-call\nevent and on every tool-scope custom event of the same invocation:\n\n```ts\nanalytics.instrumentTool(async (args, extra) => {\n  if (typeof args.rationale === 'string') {\n    analytics.setRationale(args.rationale);\n  }\n  return doWork(args);\n}, { name: 'search' });\n```\n\nThe SDK never reads rationale out of tool inputs itself: it is content-bearing\nfree text, so emitting it is an explicit opt-in, and where it lives is your\nconvention. Callable at any depth inside an instrumented handler (like\n`setIdentity`); truncated to 1000 characters; last write wins. Omitted\nentirely when never set.\n\n## Error HTTP status\n\nWhen a tool call fails on a thrown error that carries an HTTP status\n(`err.status` or `err.statusCode` \u2014 the common Node conventions), the\ntool-call event includes `[MCP] Error HTTP Status`. This is the status of the\nfailure the tool hit (an upstream API response, an HTTP-shaped error), NOT the\nMCP transport status \u2014 per the MCP spec, tool failures are returned in-band,\nso the transport typically answers 200 even when this property is a 4xx/5xx.\n\nFor error shapes the SDK can't sniff, set it explicitly when building the\nerror: `analytics.toolError(ctx, { code, message, httpStatus: 502 })`.\n\nRelated but distinct: `[MCP] Response HTTP Status` is the transport-level\nstatus of the HTTP response itself. The instrumented-tool wrapper never emits\nit (dispatched tool calls answer 200; the wrapper emits before the response is\nwritten). The default `[MCP] Tool Call Rejected` event carries it on\nStreamable HTTP (protocol-level rejections answer 200 with the error in the\nJSON-RPC body). For events you emit yourself, set `responseHttpStatus` on the\ncontext's `request` info before calling `trackToolEvent`.\n\n## Choosing what's captured\n\nAll default events are on by default. Toggle them with `autocapture` \u2014 a boolean\nfor everything, or an object to control families independently:\n\n```ts\nimport { createMcpAnalytics, MCPAnalyticsConfig } from '@amplitude/mcp-analytics';\n\ncreateMcpAnalytics({\n  apiKey: process.env.AMPLITUDE_API_KEY!,\n  serverName: 'my-mcp-server',\n  serverVersion: '1.0.0',\n  config: new MCPAnalyticsConfig({\n    autocapture: { serverEvents: false }, // keep tool-call events, drop connection events\n  }),\n});\n```\n\n`autocapture: false` disables all default events; `{ serverEvents, toolCalls }`\ntoggles each family. `toolCalls` covers both `[MCP] Tool Call Response` and\n`[MCP] Tool Call Rejected`. `serverEvents` can be split further with\n`sessionLifecycle` (`[MCP] Session Initialized`/`Ended`) and `toolsListed`\n(`[MCP] Tools Listed`) \u2014 e.g. servers built per HTTP request typically want\n`{ sessionLifecycle: false, toolsListed: true }`, since their transports close\nat the end of every request rather than at session end. Custom events (below)\nare unaffected.\n\n### Redacting error messages\n\n`[MCP] Error Message` carries free text the SDK didn't compose \u2014 a failing tool's\nown message, or the MCP SDK's input-validation text, which quotes the rejected\nargument value. Either may contain end-user data. `sanitizeErrorMessage` rewrites\nor drops it before emission, on every event that carries it:\n\n```ts\ncreateMcpAnalytics({\n  apiKey: process.env.AMPLITUDE_API_KEY!,\n  serverName: 'my-mcp-server',\n  serverVersion: '1.0.0',\n  config: new MCPAnalyticsConfig({\n    sanitizeErrorMessage: (message) =>\n      message.replace(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/g, '<email>'),\n  }),\n});\n```\n\nReturn `null` to omit the property entirely. `[MCP] Error Code` and\n`[MCP] Error Type` are unaffected, so failures stay segmentable. The text sent to\nthe client never changes. See\n[Redacting `[MCP] Error Message`](docs/events.md#redacting-mcp-error-message).\n\n## Context (`ctx`)\n\nEvery tracked event carries a per-invocation context object. You can construct\none and pass it explicitly to the tracking APIs, or expose it via\n`runWithContext` so deeper call stacks can read it through `getCurrentContext()`.\n\n```ts\nimport {\n  createServerContext,\n  createToolContext,\n  runWithContext,\n} from '@amplitude/mcp-analytics/context';\n\nconst serverCtx = createServerContext({\n  server: { name: 'my-mcp-server', version: '1.0.0' },\n  transport: 'stdio',\n});\n\nconst toolCtx = createToolContext(serverCtx, { name: 'search_docs' });\n\nrunWithContext(toolCtx, () => {\n  // getCurrentContext() is available here if needed\n});\n```\n\nTypes and helpers are also re-exported from the main entry\n(`@amplitude/mcp-analytics`).\n\nYou usually don't build `ctx` by hand \u2014 `instrumentServer` / `instrumentTool`\nconstruct and inject it for you. Reach for these factories when emitting events\noutside an instrumented handler.\n\n## Custom event properties\n\nEvery event carries a set of **reserved** properties the SDK derives from the\ncontext \u2014 identity, session/trace correlation, client/server identity, and (for\ntool events) the tool metadata. You can attach your own properties on top of\nthese from two places:\n\n- **`extra`** \u2014 an enrichment bag carried on the context. Put domain values at\n  the server scope (`extra` in `instrumentServer` options) or on a tool (`extra`\n  in the tool metadata) and they ride along on every event derived from that\n  scope \u2014 including the default events.\n- **`properties`** \u2014 the per-call argument to `trackServerEvent` /\n  `trackToolEvent`, for values specific to that one event.\n\n### Precedence\n\nWhen the same key appears in more than one place, the merge order is fixed \u2014\nlater sources overwrite earlier ones:\n\n```\nreserved (SDK-derived)  <  extra (context bag)  <  properties (per call)\n```\n\n- A **`properties`** value wins over anything with the same key \u2014 including a\n  reserved property (the explicit, per-call value is the most intentional one).\n- An **`extra`** value overrides a reserved property but loses to `properties`.\n- On the **default events**, the SDK's outcome values (`[MCP] Is Error`,\n  `[MCP] Response Duration`, \u2026) ride as per-call `properties`, so a colliding\n  `extra` key can't overwrite them.\n\nReserved names all carry the `[MCP] ` prefix \u2014 avoid it in your own keys and\ncollisions never arise.\n\n### Dropping the `extra` bag\n\n`extra` properties are included by default. To omit them for a single event,\npass `{ dropExtraProps: true }`:\n\n```ts\nanalytics.trackToolEvent(ctx, 'my event', { foo: 'bar' }, { dropExtraProps: true });\n```\n\nValues are sent as provided \u2014 the SDK does not escape or redact them. Apply any\noutput encoding where the data is rendered.\n\n## Architecture decisions\n\n### Separate repo from `@amplitude/ai`\n\nMCP server analytics is a distinct product from agent analytics. Different\naudience (MCP server operators vs. agent developers), different domain model\n(server / session / tool invocation vs. agent / turn / message), and a\ndifferent release cadence. Keeping the repos separate lets each evolve on\nits own timeline without coupling unrelated breaking changes.\n\n### `-node` suffix\n\nNode/TypeScript only for v1. A Python SDK may follow; the suffix leaves\nroom without forcing a future rename.\n\n### Mimic `@amplitude/ai` for DX, not for the domain model\n\nBuild tooling (tsdown, vitest, biome), repo layout, constructor shape, mock\ntest client, subpath exports, and release pipeline all mirror Amplitude-AI-Node\nso contributors moving between the two repos see familiar patterns. The\ndomain model \u2014 events, properties, identity, context \u2014 is MCP-native and\nintentionally does not reuse agent vocabulary.\n\n### Vendor the core, no hard dependency\n\nA small set of shared, low-level utilities (the delivery proxy + hooks,\nserverless flush accounting) is vendored from `@amplitude/ai` rather than\ntaken as a dependency. This keeps the two packages independent at runtime \u2014\nno shared package, no version coupling \u2014 while reusing battle-tested code.\nContributor notes on the vendoring policy live in `VENDORED.md`.\n\n## Development\n\n```bash\npnpm install\npnpm build\npnpm test\npnpm lint\n```\n\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+  },
+  "time": {
+   "0.1.0": "2026-06-23T12:04:54.304Z",
+   "0.2.0": "2026-06-25T10:05:37.094Z",
+   "0.2.1": "2026-06-30T18:24:12.163Z",
+   "0.3.0": "2026-07-14T21:13:13.123Z",
+   "0.4.0": "2026-07-24T20:06:34.920Z",
+   "0.4.1": "2026-08-07T16:41:16.283Z",
+   "0.4.2": "2026-09-11T19:16:54.984Z",
+   "created": "2026-06-23T12:04:53.983Z",
+   "modified": "2026-09-11T19:16:55.168Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.1.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.1.0_1782216294158_0.4410501638598099"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.2",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.14.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 80,
+     "integrity": "sha512-rkjH9mgKSEcgOh4cYj5qTscuHQI5CWJEsIAtGavp94A9mpzzlOsap/P9/sXN2eE0FmPD89qtXFhvL7a8wypltQ==",
+     "shasum": "766fcf8c8b1399a551ec24b7b7bfdb7e943ab3b4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDrkJvZ7qm1zCM4i7HLforQcGN8AYdw3uPMbTNZyt0MzQIhAMyZlwAhT2PNvphEeRPQFFIYHoKCyS8mu/sNE6ah1o+X"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.1.0.tgz",
+     "unpackedSize": 192882
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "7ecd12a675e32b632bcccf1e7474eedc8808d751",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.2.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.2.0_1782381936951_0.7862622592302595"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.2",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.14.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 91,
+     "integrity": "sha512-IMTnZnQgZxZTkVvq1MsuNZuHrxxlFa1sO4UVBBAEIF3k6//kr6u/wTGV3GSwGG8p3q3DTaNVhgsKb+xpCWO0fA==",
+     "shasum": "41fcdfbd138bf7e205555dfb46276bb818101bfb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD1jHw+NO8svDmhSHaXxU+aVCaFOv0hn+lAVZn2ke6a8gIgdev2mMjdPYv025gRg0Sx8x3KbGfV6cYtCMVq7CUaiBE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.2.0.tgz",
+     "unpackedSize": 234011
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "c53084c87672d96aa352fdbd608fe8f8c7af423f",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.2.1",
+    "_nodeVersion": "22.23.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.2.1_1782843852034_0.102623247528292"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.14.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 91,
+     "integrity": "sha512-OsLVY1ZiuP0Hu68rmsM3eJ5+IhLn2KDPdvuuu4PqNES+gAM++Q7GYl76JoJYm+CQS+5o2YfXOnXUwyxyMT0k/g==",
+     "shasum": "a3a9c96e661becc73466eef58bd6f371f6771886",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCHmY4PJh0WGKjMm31tAyXPboLcBE2Sw05s/ZoPsd98tgIhAMi3ntixvQIMMb1mMwM5T9nPnyUPJilWBkXMN06VuaZb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.2.1.tgz",
+     "unpackedSize": 234011
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "e062fcfe76d6136afb1edc3f7e0e6c1f492da922",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:cd2658f190bd]",
+      "name": "eric_amplitude"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.3.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.3.0_1784063592959_0.941844403253222"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.14.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 93,
+     "integrity": "sha512-OjWJ82iQm/5JCjcJKGGYNuCgvwYItr9LITnC9P9MF3V5t/+GRJHALBs2IrBHAGNHbW1mb2SBRs5jOBRkAcJ+eA==",
+     "shasum": "403f6f8eb07486321cf8c9258669678b598328d9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBLTdaYF9+h64LoysrGbX/I1VwF8pDgYDdZh0gP3rjSdAiBzERQmnH5Xkw7wLsGKkgp16+an4eClBj6y7dY/p1YA5Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.3.0.tgz",
+     "unpackedSize": 269833
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "1a53e4d036315cd4e27aa98c1ee31857c1627bde",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:cd2658f190bd]",
+      "name": "eric_amplitude"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.4.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.4.0_1784923594711_0.7120753859983382"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.14.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 97,
+     "integrity": "sha512-/YwizP2CzCi1IpSJZmdPysERhxEspd+XNB9reyw3kmEqKjMP7CHcn7nUB0lYOEMr+Uw72OILBTIQbpWuGJ5x5w==",
+     "shasum": "d8af9722dee5b54a796c43df4ccd14ea04838228",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG/dmpJxwYvducIGm7KgOhrilYFTe8N8eDtNQG1AhhAyAiEA9OjGWlR9Pkp/eUF3Ibkryle3b7/rdqFvGDhjiwh8b+k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.4.0.tgz",
+     "unpackedSize": 294053
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "7ca4b8fd8ce17a8f76e33ae2f4c6c66b9c5a908e",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:cd2658f190bd]",
+      "name": "eric_amplitude"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.4.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.4.1_1786120876129_0.8327074669781345"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0",
+     "zod": "3.25.76"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-Z9b0QPVfN934QfgM5asZr9kSCTY8vGsN/KGGmveS1zrzBExmCTmrnE3AVuGLEQAnyFkaVVrKkto5rq5Kduld/A==",
+     "shasum": "1377c44aecdc7b2c019af33bb70d8e31c662d454",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDwX6UbzcNsutc8bjalZqsmnPMD0hFUwD2GSokBoQhrIQIgecHGbwxZNbhll3fSJzZ9IvCguTGU76zG5evYcvJC2yI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.4.1.tgz",
+     "unpackedSize": 326814
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "c1cbb4034da4c22ee4705dc2709a9779c46c1219",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:cd2658f190bd]",
+      "name": "eric_amplitude"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.1"
+   },
+   "0.4.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@amplitude/mcp-analytics@0.4.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-analytics_0.4.2_1789154214886_0.6671409428686552"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:127377e0ded4]",
+     "name": "sdk.dev"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node/issues"
+    },
+    "description": "Amplitude MCP Analytics SDK - MCP server usage tracking for Amplitude Analytics",
+    "devDependencies": {
+     "@amplitude/analytics-node": "1.3.5",
+     "@biomejs/biome": "1.9.4",
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "@types/node": "^25.9.2",
+     "@vitest/coverage-v8": "4.0.14",
+     "rimraf": "5.0.5",
+     "tsdown": "0.18.4",
+     "typescript": "5.9.3",
+     "vitest": "4.1.0",
+     "zod": "3.25.76"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 103,
+     "integrity": "sha512-7ym0K2UcfDZAt7BLZi+avL1sbDLev7tANtAqn/yS0G2WnR4fRRNk3KFAtY+JGhDpzZHzlDOc/IBDQMYmYGhQKg==",
+     "shasum": "53bf5fa98ad0842ff98ead4f62adae0bd3d6b19b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAM1/05182XdcmLQT5ow3pmeRIxVKQDSlfsf9aywaOrqAiEA48u9Hfma4c7/o73c+8v75jmyoHLeUKcT53aSSCEiN/E="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD8jGi72L8TSUGB9XzjTL6MXBOxT2A7CHv9geUBp28BIwIgKjwJRUJKk3yaZiqolsrUbbFjhxatRGGLW2CoKT3NLoU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amplitude/mcp-analytics/-/mcp-analytics-0.4.2.tgz",
+     "unpackedSize": 366079
+    },
+    "exports": {
+     ".": "./dist/index.js",
+     "./client": "./dist/client.js",
+     "./config": "./dist/config.js",
+     "./context": "./dist/context.js",
+     "./exceptions": "./dist/exceptions.js",
+     "./package.json": "./package.json",
+     "./testing": "./dist/testing.js",
+     "./tracking": "./dist/tracking.js",
+     "./types": "./dist/types.js"
+    },
+    "gitHead": "55137e36f505d2f910788de149bd3e0a0132cb6e",
+    "homepage": "https://github.com/amplitude/Amplitude-MCP-Analytics-Node#readme",
+    "keywords": [
+     "amplitude",
+     "mcp",
+     "model-context-protocol",
+     "analytics",
+     "tracking"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6c7c5c77f172]",
+      "name": "curtisbliu"
+     },
+     {
+      "email": "[redacted-email:b89801256f36]",
+      "name": "kelson.warner"
+     },
+     {
+      "email": "[redacted-email:127377e0ded4]",
+      "name": "sdk.dev"
+     },
+     {
+      "email": "[redacted-email:cd2658f190bd]",
+      "name": "eric_amplitude"
+     },
+     {
+      "email": "[redacted-email:c146dd7efa7b]",
+      "name": "daniel-graham-amplitude"
+     },
+     {
+      "email": "[redacted-email:585e1bc11e04]",
+      "name": "jjwang123"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@amplitude/mcp-analytics",
+    "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+    "peerDependencies": {
+     "@amplitude/analytics-node": ">=1.3.0",
+     "@modelcontextprotocol/sdk": ">=1.14.0"
+    },
+    "peerDependenciesMeta": {
+     "@amplitude/analytics-node": {
+      "optional": false
+     },
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "pnpm": {
+     "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+     ]
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/amplitude/Amplitude-MCP-Analytics-Node.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rimraf dist",
+     "lint": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+     "lint:fix": "biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+     "test": "vitest",
+     "test:coverage": "vitest run --coverage",
+     "test:typescript": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.2"
+   }
+  }
+ },
+ "name": "@amplitude/mcp-analytics",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@amplitude%2Fmcp-analytics"
+}

@@ -1,0 +1,487 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.9",
+  "maintainers": [
+   {
+    "email": "[redacted-email:f9e9b1fe92c1]",
+    "name": "lamasu"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.1.8",
+   "0.1.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@delightfulchorus/integration-mcp-proxy",
+  "_rev": "5-cd844f6c6078d15fb07eb04b1ff07069",
+  "author": {
+   "name": "Chorus contributors"
+  },
+  "bugs": {
+   "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+  },
+  "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+  "dist-tags": {
+   "latest": "0.1.9"
+  },
+  "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+  "keywords": [
+   "chorus",
+   "chorus-integration",
+   "workflow",
+   "mcp",
+   "model-context-protocol",
+   "proxy",
+   "integration",
+   "n8n-alternative"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:f9e9b1fe92c1]",
+    "name": "lamasu"
+   }
+  ],
+  "name": "@delightfulchorus/integration-mcp-proxy",
+  "readme": "# @delightfulchorus/integration-mcp-proxy\n\nForward Chorus operations to **any external MCP server**. One integration, the whole MCP ecosystem \u2014 point this at GitHub's official MCP server, the `@modelcontextprotocol/server-filesystem` reference, your own custom SSE server, whatever. No per-service glue code required.\n\nThe MCP registry lives at https://registry.modelcontextprotocol.io and the reference servers at https://github.com/modelcontextprotocol/servers. There are 500+ public servers as of April 2026; every one of them becomes a Chorus integration the moment you add it to `mcp-servers.json`.\n\n## Operations\n\n| Name         | What it does                                            |\n|--------------|----------------------------------------------------------|\n| `list-tools` | Ask a configured MCP server what tools it exposes        |\n| `call`       | Invoke one of those tools with arguments                 |\n\n## Configuration: `mcp-servers.json`\n\nConfigure upstream MCP servers via JSON, resolved in this order (first match wins):\n\n1. Runtime-passed config (`ctx.config.mcpServers`, e.g. from a workflow definition)\n2. Local file: `./chorus/mcp-servers.json` (resolved from your cwd)\n3. User-global: `~/.chorus/mcp-servers.json`\n\n### Example 1 \u2014 GitHub MCP server (stdio + env-substituted secret)\n\n```json\n{\n  \"servers\": {\n    \"github\": {\n      \"transport\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-github\"],\n      \"env\": {\n        \"GITHUB_PERSONAL_ACCESS_TOKEN\": \"{{env.GITHUB_TOKEN}}\"\n      }\n    }\n  }\n}\n```\n\nThen in your shell or deployment env:\n\n```bash\nexport GITHUB_TOKEN=ghp_...\n```\n\nOr use the per-server override (see **Security** below):\n\n```bash\nexport CHORUS_MCP_GITHUB_GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...\n```\n\n### Example 2 \u2014 Filesystem MCP server (stdio, no auth)\n\n```json\n{\n  \"servers\": {\n    \"fs\": {\n      \"transport\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/tmp/chorus-scratch\"]\n    }\n  }\n}\n```\n\n### Example 3 \u2014 Remote SSE MCP server (custom)\n\n```json\n{\n  \"servers\": {\n    \"my-api\": {\n      \"transport\": \"sse\",\n      \"url\": \"https://mcp.example.com/sse\",\n      \"headers\": {\n        \"Authorization\": \"Bearer {{env.MY_API_TOKEN}}\"\n      }\n    }\n  }\n}\n```\n\n## Calling it from a workflow\n\n```ts\n// List what GitHub's MCP server exposes\nconst tools = await workflow.step(\"github\", \"mcp-proxy\", \"list-tools\", {\n  serverId: \"github\"\n});\n// \u2192 { tools: [{ name: \"search_issues\", ... }, { name: \"create_issue\", ... }, ...] }\n\n// Call one\nconst result = await workflow.step(\"search\", \"mcp-proxy\", \"call\", {\n  serverId: \"github\",\n  tool: \"search_issues\",\n  args: { owner: \"LamaSu\", repo: \"chorus\", query: \"bug\" }\n});\n// \u2192 { result: { content: [{ type: \"text\", text: \"...\" }] } }\n```\n\n## Adding a new upstream server\n\n1. Find it in the registry: https://registry.modelcontextprotocol.io \u2014 or browse the reference list at https://github.com/modelcontextprotocol/servers.\n2. Add an entry to `chorus/mcp-servers.json` (or `~/.chorus/mcp-servers.json`). Use `transport: \"stdio\"` for npm/binary servers, `transport: \"sse\"` for remote HTTP-streamed ones.\n3. Put any secrets in env \u2014 either via `{{env.VAR}}` placeholders, or the `CHORUS_MCP_<server>_<var>` override pattern.\n4. Call `list-tools` once in a workflow step to discover what you can do.\n\n## Security: env-var pattern (no secrets in config files)\n\nTwo ways to keep tokens out of your repo:\n\n### `{{env.VAR}}` substitution (works in `env`, `headers`, `args`, `url`)\n\n```json\n{ \"env\": { \"GITHUB_PERSONAL_ACCESS_TOKEN\": \"{{env.GITHUB_TOKEN}}\" } }\n```\n\nReads `process.env.GITHUB_TOKEN` at resolve time. Missing vars become the empty string \u2014 never a crash \u2014 so you get a clean MCP-server auth error rather than a config-parse stack trace.\n\n### Per-server overrides (recommended for prod)\n\n```bash\nCHORUS_MCP_<SERVER>_<VAR>\n```\n\nThis **wins over** any `{{env.VAR}}` placeholder and means you never have to share one env var with two different upstream MCP servers. For example with the `github` serverId and a `GITHUB_PERSONAL_ACCESS_TOKEN` key:\n\n```bash\nexport CHORUS_MCP_GITHUB_GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...\n```\n\nNon-alphanumeric characters in the serverId / var name are normalized to `_`, so `my-server` + `some.var` \u2192 `CHORUS_MCP_MY_SERVER_SOME_VAR`.\n\n## Error model\n\n| Error code            | Retryable | Meaning                                                         |\n|-----------------------|-----------|------------------------------------------------------------------|\n| `MCP_UNKNOWN_SERVER`  | false     | `serverId` isn't in any config source                            |\n| `MCP_TOOL_NOT_FOUND`  | false     | The upstream server doesn't expose that tool                    |\n| `MCP_TOOL_ERROR`      | false     | Tool returned `isError: true` (app-level error)                 |\n| `MCP_TIMEOUT`         | true      | Call exceeded `timeoutMs` (default 30s)                         |\n| `NETWORK_ERROR`       | true      | Subprocess / SSE transport died \u2014 pool evicts + next call retries |\n\n## Design notes\n\n- **Lazy + pooled**: The first call to `list-tools` / `call` for a given `serverId` spawns the subprocess or opens the SSE connection. Subsequent calls in the same process reuse the live client.\n- **Pool eviction on death**: If the transport dies mid-call, we throw `NETWORK_ERROR retryable:true` and drop the pool entry so the next call reconnects.\n- **Tool discovery on `call`**: Before invoking `callTool`, we check `listTools` output to produce a friendly `MCP_TOOL_NOT_FOUND` instead of whatever the upstream server happens to throw.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "integrations/mcp-proxy",
+   "type": "git",
+   "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+  },
+  "time": {
+   "0.1.3": "2026-04-18T05:07:33.535Z",
+   "0.1.4": "2026-04-18T21:45:17.338Z",
+   "0.1.5": "2026-04-18T21:50:58.757Z",
+   "0.1.8": "2026-04-22T20:51:48.921Z",
+   "0.1.9": "2026-04-22T21:13:20.822Z",
+   "created": "2026-04-18T05:07:33.278Z",
+   "modified": "2026-04-22T21:13:21.122Z"
+  },
+  "versions": {
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@delightfulchorus/integration-mcp-proxy@0.1.3",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/integration-mcp-proxy_0.1.3_1776488853379_0.8370524825472969"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f9e9b1fe92c1]",
+     "name": "lamasu"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "name": "Chorus contributors"
+    },
+    "bugs": {
+     "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+    },
+    "dependencies": {
+     "@delightfulchorus/core": "*",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^3.23.0"
+    },
+    "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-Pz0oGfRfT3vVm9WPNLvjV4s/nJ0/PHNvYg/X4h+KilL57HP69agdaTZjYygetwucRO1Z7gzrWKU2xibgeid2mQ==",
+     "shasum": "5a1521d2fea6081c3563dc813c17ccf15d16079b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDDs0x536ykIU0aOj6VLIVAtiT8eVO3bXy1q3NFVVtfoQIhAL+zV8mNryv7rGTTU9cpstKmX2S4tpFadrJW+bqNPo5t"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@delightfulchorus/integration-mcp-proxy/-/integration-mcp-proxy-0.1.3.tgz",
+     "unpackedSize": 21889
+    },
+    "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+    "keywords": [
+     "chorus",
+     "chorus-integration",
+     "workflow",
+     "mcp",
+     "model-context-protocol",
+     "proxy",
+     "integration",
+     "n8n-alternative"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f9e9b1fe92c1]",
+      "name": "lamasu"
+     }
+    ],
+    "name": "@delightfulchorus/integration-mcp-proxy",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "integrations/mcp-proxy",
+     "type": "git",
+     "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format esm --dts --clean",
+     "prepublishOnly": "npm run build && npm test",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@delightfulchorus/integration-mcp-proxy@0.1.4",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/integration-mcp-proxy_0.1.4_1776548717204_0.38894491875813064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f9e9b1fe92c1]",
+     "name": "lamasu"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Chorus contributors"
+    },
+    "bugs": {
+     "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+    },
+    "dependencies": {
+     "@delightfulchorus/core": "*",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^3.23.0"
+    },
+    "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-34l33oTOmtS24/be/ZQ8sF6B/3auh17//NgCdXdTOeK3T4cE7wX+DkMH7l3iK8TzKO5hBvZx315OpTRqrJdhZg==",
+     "shasum": "40466e80b99e62d0a3dae2ca592ace5e5c6a0b10",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCys9o+8W+ePVORRr4+vLkvXWALGtQwgHelcLMHbIrTJAIhAOKRnW3qagczee5EP15FSLDKSk7OCgYVPw7NnTkSpJS2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@delightfulchorus/integration-mcp-proxy/-/integration-mcp-proxy-0.1.4.tgz",
+     "unpackedSize": 33485
+    },
+    "gitHead": "54a652f3a6e67ee58d45fcda90ce2005397da763",
+    "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+    "keywords": [
+     "chorus",
+     "chorus-integration",
+     "workflow",
+     "mcp",
+     "model-context-protocol",
+     "proxy",
+     "integration",
+     "n8n-alternative"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f9e9b1fe92c1]",
+      "name": "lamasu"
+     }
+    ],
+    "name": "@delightfulchorus/integration-mcp-proxy",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "integrations/mcp-proxy",
+     "type": "git",
+     "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format esm --dts --clean",
+     "prepublishOnly": "npm run build && npm test",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@delightfulchorus/integration-mcp-proxy@0.1.5",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/integration-mcp-proxy_0.1.5_1776549058622_0.2853962832672503"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f9e9b1fe92c1]",
+     "name": "lamasu"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Chorus contributors"
+    },
+    "bugs": {
+     "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+    },
+    "dependencies": {
+     "@delightfulchorus/core": "*",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^3.23.0"
+    },
+    "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+    "directories": {},
+    "dist": {
+     "fileCount": 4,
+     "integrity": "sha512-nOOnFY4k3cOLeZyN7oRYskq6/Cs7ISQYEM10Lkg83D9MWg7dfLA3f1ihsRM+SLmZDaXt8hrDdW/fc0vZwYS6Uw==",
+     "shasum": "ac1f861dbacfc810a3ca1ae96a8fc294c763a230",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAWwP/dMqDwo+i84JohBov7ppJjZ3UJL+eB8cuiO5YYxAiBXN0llB5GLJ9ZJItYklbtalCqX9fnIUaFqMOwHYH0jiA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@delightfulchorus/integration-mcp-proxy/-/integration-mcp-proxy-0.1.5.tgz",
+     "unpackedSize": 33485
+    },
+    "gitHead": "5ceddc5e13975da34f3e3057ae6cce4ca5cd96b5",
+    "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+    "keywords": [
+     "chorus",
+     "chorus-integration",
+     "workflow",
+     "mcp",
+     "model-context-protocol",
+     "proxy",
+     "integration",
+     "n8n-alternative"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f9e9b1fe92c1]",
+      "name": "lamasu"
+     }
+    ],
+    "name": "@delightfulchorus/integration-mcp-proxy",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "integrations/mcp-proxy",
+     "type": "git",
+     "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format esm --dts --clean",
+     "prepublishOnly": "npm run build && npm test",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.5"
+   },
+   "0.1.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@delightfulchorus/integration-mcp-proxy@0.1.8",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/integration-mcp-proxy_0.1.8_1776891108781_0.5820477472925758"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:14438978-fb5f-47c3-94ec-d84578e3df6a"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "name": "Chorus contributors"
+    },
+    "bugs": {
+     "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+    },
+    "dependencies": {
+     "@delightfulchorus/core": "*",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^3.23.0"
+    },
+    "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@delightfulchorus%2fintegration-mcp-proxy@0.1.8"
+     },
+     "fileCount": 4,
+     "integrity": "sha512-j0mVPvyDXqlcuzsTEQY+Vl/cY4nn+5WxjORNBi/KbXZZ4UGHIL3PfSBy3HYrzaBGUU0LtFc5QLkloMpQzPwAew==",
+     "shasum": "ab27730ecb8171ff3c4f64f01255be0675b31d64",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmGgH2fKuYvRDmOBr/me3K+0WOQFXgJ8qsVzeSJ5jI/AIgDihUEGDKVQQF3eywEHCTW7AXE5b8Bq+9MhfwRTlV1Ug="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@delightfulchorus/integration-mcp-proxy/-/integration-mcp-proxy-0.1.8.tgz",
+     "unpackedSize": 33509
+    },
+    "gitHead": "e585817a54a79e5cbd712ed6b2ba13cbacafb30d",
+    "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+    "keywords": [
+     "chorus",
+     "chorus-integration",
+     "workflow",
+     "mcp",
+     "model-context-protocol",
+     "proxy",
+     "integration",
+     "n8n-alternative"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f9e9b1fe92c1]",
+      "name": "lamasu"
+     }
+    ],
+    "name": "@delightfulchorus/integration-mcp-proxy",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true,
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "integrations/mcp-proxy",
+     "type": "git",
+     "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format esm --dts --clean",
+     "prepublishOnly": "npm run build && npm test",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@delightfulchorus/integration-mcp-proxy@0.1.9",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/integration-mcp-proxy_0.1.9_1776892400665_0.5559263693931951"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:14438978-fb5f-47c3-94ec-d84578e3df6a"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "name": "Chorus contributors"
+    },
+    "bugs": {
+     "url": "https://github.com/LamaSu/federated-workflow-runtime/issues"
+    },
+    "dependencies": {
+     "@delightfulchorus/core": "*",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^3.23.0"
+    },
+    "description": "Proxy integration: forward Chorus operations to any external MCP server (GitHub, Postgres, Filesystem, Exa, etc.)",
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@delightfulchorus%2fintegration-mcp-proxy@0.1.9"
+     },
+     "fileCount": 4,
+     "integrity": "sha512-CjFSs/5sO+3hP52fr8crGkNryXRb70l0t9kVPsLdASYW5eCLInrrOtCWSZ9799L9ZfHZ2sGJG1ZYBfuSlq14Kw==",
+     "shasum": "9ee53b90b2ff40d1e5e7da76c0860b4cef5c7811",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEfWOO7m0r0EvHXOlXGnVbOANYhEWXyu2efVSOTC3ST0AiBgI0unD4H73QgQ5p7jtc/4FhtaLjrTYzn6dyExmOu8Bg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@delightfulchorus/integration-mcp-proxy/-/integration-mcp-proxy-0.1.9.tgz",
+     "unpackedSize": 33509
+    },
+    "gitHead": "92baf098b8b83467d1a26c720e7c8b8adffa7703",
+    "homepage": "https://github.com/LamaSu/federated-workflow-runtime#readme",
+    "keywords": [
+     "chorus",
+     "chorus-integration",
+     "workflow",
+     "mcp",
+     "model-context-protocol",
+     "proxy",
+     "integration",
+     "n8n-alternative"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f9e9b1fe92c1]",
+      "name": "lamasu"
+     }
+    ],
+    "name": "@delightfulchorus/integration-mcp-proxy",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true,
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "integrations/mcp-proxy",
+     "type": "git",
+     "url": "git+https://github.com/LamaSu/federated-workflow-runtime.git"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --format esm --dts --clean",
+     "prepublishOnly": "npm run build && npm test",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.9"
+   }
+  }
+ },
+ "name": "@delightfulchorus/integration-mcp-proxy",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@delightfulchorus%2Fintegration-mcp-proxy"
+}

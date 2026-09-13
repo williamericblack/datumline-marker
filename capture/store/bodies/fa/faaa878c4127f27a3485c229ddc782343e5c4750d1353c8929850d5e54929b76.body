@@ -1,0 +1,538 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0404d00a5d41]",
+    "name": "_mme"
+   },
+   {
+    "email": "[redacted-email:bb7b134cfcd7]",
+    "name": "copilotkit"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.1",
+   "0.0.2",
+   "0.0.3",
+   "0.1.0",
+   "0.1.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@ag-ui/mcp-apps-middleware",
+  "_rev": "5-fca69843dfd10bd15fc647c57966e9be",
+  "author": {
+   "name": "Markus Ecker"
+  },
+  "bugs": {
+   "url": "https://github.com/ag-ui-protocol/ag-ui/issues"
+  },
+  "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+  "dist-tags": {
+   "latest": "0.1.1"
+  },
+  "homepage": "https://github.com/ag-ui-protocol/ag-ui#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0404d00a5d41]",
+    "name": "_mme"
+   },
+   {
+    "email": "[redacted-email:bb7b134cfcd7]",
+    "name": "copilotkit"
+   }
+  ],
+  "name": "@ag-ui/mcp-apps-middleware",
+  "readme": "# @ag-ui/mcp-apps-middleware\n\nMCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.\n\n## Installation\n\n```bash\nnpm install @ag-ui/mcp-apps-middleware\n# or\npnpm add @ag-ui/mcp-apps-middleware\n```\n\n## Usage\n\n```typescript\nimport { MCPAppsMiddleware } from \"@ag-ui/mcp-apps-middleware\";\n\nconst agent = new YourAgent().use(\n  new MCPAppsMiddleware({\n    mcpServers: [\n      {\n        type: \"http\",\n        url: \"http://localhost:3001/mcp\",\n        serverId: \"weather-server\",\n      },\n    ],\n  }),\n);\n```\n\n## Features\n\n- Discovers UI-enabled tools from MCP servers\n- Injects tools into the agent's tool list\n- Executes tool calls and emits activity snapshots with resource URIs\n- Supports proxied MCP requests for frontend resource fetching\n\n## Configuration\n\n```typescript\ninterface MCPAppsMiddlewareConfig {\n  mcpServers?: MCPClientConfig[];\n  discoveryFailureMode?: \"continue\" | \"throw\"; // Default: \"continue\"\n}\n\ntype MCPClientConfig =\n  | {\n      type: \"http\";\n      url: string;\n      headers?: Record<string, string>;\n      serverId?: string;\n    }\n  | {\n      type: \"sse\";\n      url: string;\n      headers?: Record<string, string>;\n      serverId?: string;\n    };\n```\n\n### Server ID\n\nThe optional `serverId` field provides a stable identifier for the server. This is useful when:\n\n- Server URLs may change (e.g., different environments)\n- You want human-readable server identification\n- Frontend code needs to reference servers by name\n\nIf `serverId` is not provided, the server is identified by an MD5 hash of its transport `type` and `url` only.\n\n## Activity Snapshot\n\nThe middleware emits activity snapshots with the following structure:\n\n```typescript\n{\n  type: \"ACTIVITY_SNAPSHOT\",\n  activityType: \"mcp-apps\",\n  content: {\n    result: MCPToolCallResult,     // Result from the tool execution\n    resourceUri: string,           // URI of the UI resource to fetch\n    serverHash: string,            // MD5 hash of transport type and URL only\n    serverId?: string,           // Server ID (if configured)\n    toolInput: Record<string, unknown>  // Arguments passed to the tool\n  },\n  replace: true\n}\n```\n\nThe frontend should fetch the resource content via proxied MCP request using `resourceUri` and either `serverHash` or `serverId`.\n\n## Proxied MCP Requests\n\nThe middleware supports proxied MCP requests from the frontend. Pass a `ProxiedMCPRequest` in `forwardedProps.__proxiedMCPRequest`:\n\n```typescript\ninterface ProxiedMCPRequest {\n  serverHash: string; // MD5 hash of transport type and URL only\n  serverId?: string; // Optional server ID for lookup\n  method: string; // MCP method (e.g., \"resources/read\", \"tools/call\")\n  params?: Record<string, unknown>;\n}\n```\n\nServer lookup prefers `serverId` if provided, falling back to `serverHash`.\n\n## Exported Utilities\n\n```typescript\nimport {\n  MCPAppsActivityType, // \"mcp-apps\" constant\n  getServerHash, // Hash transport type and URL; excludes headers\n} from \"@ag-ui/mcp-apps-middleware\";\n```\n\n## Proxy connections\n\nRequires `@modelcontextprotocol/sdk >=1.15.0`. Version 1.15.0 is the first release\nwith custom `fetch` support in both HTTP and SSE client transports, and it includes\nHTTP `terminateSession()`. These APIs enforce the origin guard and session cleanup.\nThe lockfile pins this package's SDK to 1.15.0 so CI tests the minimum supported version.\n\nThe middleware accepts only `tools/call`, `resources/read`, `notifications/message`, and `ping` from an iframe proxy request.\nIt rejects other methods before it connects to the MCP server.\nHTTP discovery, tool calls, and proxy requests delete their MCP sessions before closing the client.\nSession deletion uses its own three-second abort signal so cleanup can run after a failed handshake aborts the SDK signal.\nIf a server rejects session deletion or does not respond within three seconds, the client still closes and preserves the original operation result.\n\nServer hashes exclude headers so browser-visible references do not contain a checksum of credentials.\nThis changes hashes for servers configured with headers. Recreate activity messages after upgrading;\nuse stable `serverId` values for references that must survive configuration changes.\nIf multiple configurations share a transport type and URL, each must have a distinct `serverId`.\nHash-only requests for that endpoint are rejected because they cannot identify the intended credential scope.\n\nMCP connections do not follow redirects, and transport requests must stay on the configured origin.\nURLs must use HTTP(S) and must not contain embedded user credentials.\n\nDiscovery continues past unavailable servers by default. Set `discoveryFailureMode: \"throw\"`\nto stop before invoking the agent if any configured server cannot provide its tools.\nProxy responses and thrown discovery errors omit raw upstream response bodies.\nServer-side diagnostics include `serverId`, the credential-free server hash, and the\noriginal error in both discovery modes and on proxy failures. Treat these logs as\noperator-only data: upstream errors can include private response bodies.\n\n## Tool visibility\n\nDiscovery reads `_meta.ui.resourceUri`, with `_meta[\"ui/resourceUri\"]` as a legacy fallback.\nWhen `_meta.ui.visibility` is omitted, tools remain visible to the model by default.\nAn explicit visibility list must include `\"model\"` for model-facing discovery.\nTools marked `[\"app\"]` stay hidden from the model and remain callable through the iframe proxy.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ag-ui-protocol/ag-ui.git"
+  },
+  "time": {
+   "0.0.1": "2025-12-05T12:39:48.591Z",
+   "0.0.2": "2026-01-13T11:57:42.527Z",
+   "0.0.3": "2026-01-15T15:44:53.182Z",
+   "0.1.0": "2026-09-10T20:53:28.348Z",
+   "0.1.1": "2026-09-11T18:19:27.449Z",
+   "created": "2025-12-05T12:39:48.381Z",
+   "modified": "2026-09-11T18:19:27.812Z"
+  },
+  "versions": {
+   "0.0.1": {
+    "_from": "file:ag-ui-mcp-apps-middleware-0.0.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@ag-ui/mcp-apps-middleware@0.0.1",
+    "_integrity": "sha512-GndsrxBr12Ji/Ioa4zYALbmEGD7cglExIwL7wlco3/PVyqk1WsjybxRNyDj+p9NQh2HJ3s/ctEJWGxwVUyC+fw==",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-apps-middleware_0.0.1_1764938388444_0.8436880567405862"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0404d00a5d41]",
+     "name": "_mme"
+    },
+    "_npmVersion": "10.9.3",
+    "_resolved": "/private/var/folders/0t/pq2_7rn97834lcsvc_qy4t8r0000gn/T/3743d3d08919a71ca21c2ac6cb20bd50/ag-ui-mcp-apps-middleware-0.0.1.tgz",
+    "author": {
+     "name": "Markus Ecker"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+    "devDependencies": {
+     "@ag-ui/client": "0.0.42-alpha.3",
+     "@types/node": "^20.11.19",
+     "rxjs": "7.8.1",
+     "tsup": "^8.0.2",
+     "typescript": "^5.3.3",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-GndsrxBr12Ji/Ioa4zYALbmEGD7cglExIwL7wlco3/PVyqk1WsjybxRNyDj+p9NQh2HJ3s/ctEJWGxwVUyC+fw==",
+     "shasum": "f80f240549ac5d31a8f19d1df5d0a1db647265c6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5gXECBL0ZesJjYL1J3+0kvxRbGuhvlJpKrgUhvoRhFwIhANcRH4wH3ZI7aeVTUpVJ69RX9LKJTq12ajZ6Tj0UUYcY"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ag-ui/mcp-apps-middleware/-/mcp-apps-middleware-0.0.1.tgz",
+     "unpackedSize": 78709
+    },
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0404d00a5d41]",
+      "name": "_mme"
+     },
+     {
+      "email": "[redacted-email:bb7b134cfcd7]",
+      "name": "copilotkit"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@ag-ui/mcp-apps-middleware",
+    "peerDependencies": {
+     "@ag-ui/client": ">=0.0.40",
+     "rxjs": "7.8.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist",
+     "dev": "tsup --watch",
+     "link:global": "pnpm link --global",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit",
+     "unlink:global": "pnpm unlink --global"
+    },
+    "sideEffects": false,
+    "types": "./dist/index.d.ts",
+    "version": "0.0.1"
+   },
+   "0.0.2": {
+    "_from": "file:ag-ui-mcp-apps-middleware-0.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@ag-ui/mcp-apps-middleware@0.0.2",
+    "_integrity": "sha512-EMHm65hs3aNfoCpxZ1RYDLvZejmit0yipvzg39jwKrGTzqvB3CZuZUenDS9o2eWu2PZIvcFuvU15nEwH7SZb8A==",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-apps-middleware_0.0.2_1768305462382_0.06318223350785312"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0404d00a5d41]",
+     "name": "_mme"
+    },
+    "_npmVersion": "10.9.3",
+    "_resolved": "/private/var/folders/0t/pq2_7rn97834lcsvc_qy4t8r0000gn/T/e30a517851d414915b500930e7aa9962/ag-ui-mcp-apps-middleware-0.0.2.tgz",
+    "author": {
+     "name": "Markus Ecker"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+    "devDependencies": {
+     "@ag-ui/client": "0.0.42",
+     "@types/node": "^20.11.19",
+     "rxjs": "7.8.1",
+     "tsup": "^8.0.2",
+     "typescript": "^5.3.3",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-EMHm65hs3aNfoCpxZ1RYDLvZejmit0yipvzg39jwKrGTzqvB3CZuZUenDS9o2eWu2PZIvcFuvU15nEwH7SZb8A==",
+     "shasum": "656847e8b8dee89a2bb4aa3ed28498433d9fe6b4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDE5tPjrR5xT6tH25WvkCXNml9iaSD2uXavdh9BXEYS6AIgULuwyTFEInsXZ7mxcc5eeuh7sRPurX4OVJ5GypbAMoA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ag-ui/mcp-apps-middleware/-/mcp-apps-middleware-0.0.2.tgz",
+     "unpackedSize": 78122
+    },
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0404d00a5d41]",
+      "name": "_mme"
+     },
+     {
+      "email": "[redacted-email:bb7b134cfcd7]",
+      "name": "copilotkit"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@ag-ui/mcp-apps-middleware",
+    "peerDependencies": {
+     "@ag-ui/client": ">=0.0.40",
+     "rxjs": "7.8.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist",
+     "dev": "tsup --watch",
+     "link:global": "pnpm link --global",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit",
+     "unlink:global": "pnpm unlink --global"
+    },
+    "sideEffects": false,
+    "types": "./dist/index.d.ts",
+    "version": "0.0.2"
+   },
+   "0.0.3": {
+    "_from": "file:ag-ui-mcp-apps-middleware-0.0.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@ag-ui/mcp-apps-middleware@0.0.3",
+    "_integrity": "sha512-Z+NZQXj4J+Y/2PLNsiyhNzRWFtTT2sAoC5dztoAlIsdfzvLvYEa52YGdHesNTN85JJqaIrYxQ8e31IBpKjrnoA==",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-apps-middleware_0.0.3_1768491893035_0.6495460920799365"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0404d00a5d41]",
+     "name": "_mme"
+    },
+    "_npmVersion": "10.9.3",
+    "_resolved": "/private/var/folders/0t/pq2_7rn97834lcsvc_qy4t8r0000gn/T/1a698e4249bcf7358c58f0c86badbe6f/ag-ui-mcp-apps-middleware-0.0.3.tgz",
+    "author": {
+     "name": "Markus Ecker"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "rxjs": "7.8.1"
+    },
+    "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+    "devDependencies": {
+     "@ag-ui/client": "0.0.43",
+     "@types/node": "^20.11.19",
+     "rxjs": "7.8.1",
+     "tsup": "^8.0.2",
+     "typescript": "^5.3.3",
+     "vitest": "^2.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-Z+NZQXj4J+Y/2PLNsiyhNzRWFtTT2sAoC5dztoAlIsdfzvLvYEa52YGdHesNTN85JJqaIrYxQ8e31IBpKjrnoA==",
+     "shasum": "27a1c2976a3b48ae58ef1707251a1792d8725a28",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID33+0CFlJqcZAGfpgigDn9bnnbiC8ctEuF38R1ByO2fAiEAnbEuc3mTFgHrKZOckiCkjHTVVBeUsHETJRG4cGjOjD4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ag-ui/mcp-apps-middleware/-/mcp-apps-middleware-0.0.3.tgz",
+     "unpackedSize": 78122
+    },
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0404d00a5d41]",
+      "name": "_mme"
+     },
+     {
+      "email": "[redacted-email:bb7b134cfcd7]",
+      "name": "copilotkit"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@ag-ui/mcp-apps-middleware",
+    "peerDependencies": {
+     "@ag-ui/client": ">=0.0.40"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist",
+     "dev": "tsup --watch",
+     "link:global": "pnpm link --global",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit",
+     "unlink:global": "pnpm unlink --global"
+    },
+    "sideEffects": false,
+    "types": "./dist/index.d.ts",
+    "version": "0.0.3"
+   },
+   "0.1.0": {
+    "_from": "file:ag-ui-mcp-apps-middleware-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@ag-ui/mcp-apps-middleware@0.1.0",
+    "_integrity": "sha512-q5t5aEwa0lbkOAeRnZ0Mzg4AgQx+vUPBf6+wo+cVT5Cyx1QZfAlZ6ikwW5kcwazQ4it2dlHFkfyXbXb2XtXBMQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-apps-middleware_0.1.0_1789073608244_0.24821929622087002"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:928efd20-d9d2-41db-a36a-be3b5e64fd26"
+     }
+    },
+    "_npmVersion": "11.15.0",
+    "_resolved": "/home/runner/work/ag-ui/ag-ui/middlewares/mcp-apps-middleware/ag-ui-mcp-apps-middleware-0.1.0.tgz",
+    "author": {
+     "name": "Markus Ecker"
+    },
+    "bugs": {
+     "url": "https://github.com/ag-ui-protocol/ag-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0"
+    },
+    "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+    "devDependencies": {
+     "@ag-ui/client": "0.0.59",
+     "@arethetypeswrong/cli": "^0.17.4",
+     "@types/node": "^20.11.19",
+     "@vitest/coverage-istanbul": "^4.0.18",
+     "publint": "^0.3.12",
+     "rxjs": "7.8.1",
+     "tsdown": "^0.20.1",
+     "typescript": "^5.3.3",
+     "vitest": "^4.0.18"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ag-ui%2fmcp-apps-middleware@0.1.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-q5t5aEwa0lbkOAeRnZ0Mzg4AgQx+vUPBf6+wo+cVT5Cyx1QZfAlZ6ikwW5kcwazQ4it2dlHFkfyXbXb2XtXBMQ==",
+     "shasum": "1b72ecb92cb8b938a7b1b54200a1d1f70843d835",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIERTxs9ovji7wJ51C1gfjWQDT15WwyvgrVwkbk5IH/4QAiEAgXP+AfVRGj6/YZCFpqZs/d/1gPVoMqFs1UNdhwmxTqg="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB5/TG9tu6uo5vY0aegfhieXrCRix9TRbVQhKIg6bthQAiAuQbd7n7T3zOB08HcdLmFoijdNAn2mlBsmk8Fwkx/jzA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ag-ui/mcp-apps-middleware/-/mcp-apps-middleware-0.1.0.tgz",
+     "unpackedSize": 96534
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/ag-ui-protocol/ag-ui#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0404d00a5d41]",
+      "name": "_mme"
+     },
+     {
+      "email": "[redacted-email:bb7b134cfcd7]",
+      "name": "copilotkit"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@ag-ui/mcp-apps-middleware",
+    "peerDependencies": {
+     "@ag-ui/client": ">=0.0.40",
+     "rxjs": "7.8.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ag-ui-protocol/ag-ui.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "git clean -fdX --exclude=\"!.env\"",
+     "dev": "tsdown --watch",
+     "link:global": "pnpm link --global",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:exports": "publint --strict && attw --pack",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit",
+     "unlink:global": "pnpm unlink --global"
+    },
+    "sideEffects": false,
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_from": "file:ag-ui-mcp-apps-middleware-0.1.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@ag-ui/mcp-apps-middleware@0.1.1",
+    "_integrity": "sha512-bX02Hly+9oKTsBT+4RG7ntY9HSF1O+ysRHgXbkKY+ZNVYTCrtpiwgzUfQ1MqMPhBLbZUaVBh9uNfLVxU0maaNQ==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-apps-middleware_0.1.1_1789150767306_0.12586029858918613"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:928efd20-d9d2-41db-a36a-be3b5e64fd26"
+     }
+    },
+    "_npmVersion": "11.15.0",
+    "_resolved": "/home/runner/work/ag-ui/ag-ui/middlewares/mcp-apps-middleware/ag-ui-mcp-apps-middleware-0.1.1.tgz",
+    "author": {
+     "name": "Markus Ecker"
+    },
+    "bugs": {
+     "url": "https://github.com/ag-ui-protocol/ag-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0"
+    },
+    "description": "MCP Apps middleware for AG-UI that enables UI-enabled tools from MCP (Model Context Protocol) servers.",
+    "devDependencies": {
+     "@ag-ui/client": "0.0.59",
+     "@arethetypeswrong/cli": "^0.17.4",
+     "@types/node": "^20.11.19",
+     "@vitest/coverage-istanbul": "^4.0.18",
+     "publint": "^0.3.12",
+     "rxjs": "7.8.1",
+     "tsdown": "^0.20.1",
+     "typescript": "^5.3.3",
+     "vitest": "^4.0.18"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ag-ui%2fmcp-apps-middleware@0.1.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-bX02Hly+9oKTsBT+4RG7ntY9HSF1O+ysRHgXbkKY+ZNVYTCrtpiwgzUfQ1MqMPhBLbZUaVBh9uNfLVxU0maaNQ==",
+     "shasum": "40b7f5e22a9f22cc04c8d635a49752e128cf9988",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCKTll9S9gW7lwbyLBSwmg37L7dCNprH1QZZqi0LzGyKgIhAPBfkowkP/bAyl/CJuBMkQ4yzj+Feak9/CIIrP3l4I6e"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCagPkisHwUE2By4hTiPbZhXZunGE4TnzGxNciLQwmHEwIhAJbQH7N/+lrX2LmqVodbwyyhvTykfpeguzk+QybV+PGV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ag-ui/mcp-apps-middleware/-/mcp-apps-middleware-0.1.1.tgz",
+     "unpackedSize": 96678
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+     },
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/ag-ui-protocol/ag-ui#readme",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0404d00a5d41]",
+      "name": "_mme"
+     },
+     {
+      "email": "[redacted-email:bb7b134cfcd7]",
+      "name": "copilotkit"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@ag-ui/mcp-apps-middleware",
+    "peerDependencies": {
+     "@ag-ui/client": ">=0.0.40",
+     "rxjs": "7.8.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ag-ui-protocol/ag-ui.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "git clean -fdX --exclude=\"!.env\"",
+     "dev": "tsdown --watch",
+     "link:global": "pnpm link --global",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:exports": "publint --strict && attw --pack",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit",
+     "unlink:global": "pnpm unlink --global"
+    },
+    "sideEffects": false,
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   }
+  }
+ },
+ "name": "@ag-ui/mcp-apps-middleware",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ag-ui%2Fmcp-apps-middleware"
+}

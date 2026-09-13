@@ -1,0 +1,2771 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5682fdcc7ea0]",
+    "name": "jspahrsummers"
+   },
+   {
+    "email": "[redacted-email:1dd9aa386783]",
+    "name": "pcarleton"
+   },
+   {
+    "email": "[redacted-email:adbb23ff7cdd]",
+    "name": "fweinberger"
+   },
+   {
+    "email": "[redacted-email:c4810881fded]",
+    "name": "thedsp"
+   },
+   {
+    "email": "[redacted-email:08c12cb983d2]",
+    "name": "ashwin-ant"
+   },
+   {
+    "email": "[redacted-email:d74683c36241]",
+    "name": "ochafik-ant"
+   },
+   {
+    "email": "[redacted-email:cef9df5daadb]",
+    "name": "cliffhall"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.4.1",
+   "0.4.2",
+   "1.0.0",
+   "1.0.1",
+   "1.1.0",
+   "1.1.1",
+   "1.1.2",
+   "1.2.0",
+   "1.2.1",
+   "1.2.2",
+   "1.3.0",
+   "1.3.1",
+   "1.3.2",
+   "1.4.0",
+   "1.5.0",
+   "1.6.0",
+   "1.7.0",
+   "1.7.1",
+   "1.7.2",
+   "1.7.3",
+   "1.7.4",
+   "1.7.5",
+   "2.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@modelcontextprotocol/server-pdf",
+  "_rev": "26-34a02be93093466752d4ff5d9e5e1636",
+  "bugs": {
+   "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+  },
+  "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+  "dist-tags": {
+   "latest": "2.0.0"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5682fdcc7ea0]",
+    "name": "jspahrsummers"
+   },
+   {
+    "email": "[redacted-email:1dd9aa386783]",
+    "name": "pcarleton"
+   },
+   {
+    "email": "[redacted-email:adbb23ff7cdd]",
+    "name": "fweinberger"
+   },
+   {
+    "email": "[redacted-email:c4810881fded]",
+    "name": "thedsp"
+   },
+   {
+    "email": "[redacted-email:08c12cb983d2]",
+    "name": "ashwin-ant"
+   },
+   {
+    "email": "[redacted-email:d74683c36241]",
+    "name": "ochafik-ant"
+   },
+   {
+    "email": "[redacted-email:cef9df5daadb]",
+    "name": "cliffhall"
+   }
+  ],
+  "name": "@modelcontextprotocol/server-pdf",
+  "readme": "# PDF Server\n\n![Screenshot](screenshot.png)\n\nAn interactive PDF viewer using [PDF.js](https://mozilla.github.io/pdf.js/). Supports local files and remote URLs from academic sources (arxiv, biorxiv, zenodo, etc).\n\n## MCP Client Configuration\n\nAdd to your MCP client configuration (stdio transport):\n\n```json\n{\n  \"mcpServers\": {\n    \"pdf\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"--silent\",\n        \"--registry=https://registry.npmjs.org/\",\n        \"@modelcontextprotocol/server-pdf\",\n        \"--stdio\"\n      ]\n    }\n  }\n}\n```\n\n### Local Development\n\nTo test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):\n\n```json\n{\n  \"mcpServers\": {\n    \"pdf\": {\n      \"command\": \"bash\",\n      \"args\": [\n        \"-c\",\n        \"cd ~/code/ext-apps/examples/pdf-server && npm run build >&2 && node dist/index.js --stdio\"\n      ]\n    }\n  }\n}\n```\n\n## What This Example Demonstrates\n\n### 1. Chunked Data Through Size-Limited Tool Calls\n\nOn some host platforms, tool calls have size limits, so large PDFs cannot be sent in a single response. This example streams PDFs in chunks using HTTP Range requests:\n\n**Server side** (`server.ts`):\n\n```typescript\n// Returns chunks with pagination metadata\n{\n  (bytes, offset, byteCount, totalBytes, hasMore);\n}\n```\n\n**Client side** (`mcp-app.ts`):\n\n```typescript\n// Load in chunks with progress\nwhile (hasMore) {\n  const chunk = await app.callServerTool({\n    name: \"read_pdf_bytes\",\n    arguments: { url, offset },\n  });\n  chunks.push(base64ToBytes(chunk.bytes));\n  offset += chunk.byteCount;\n  hasMore = chunk.hasMore;\n  updateProgress(offset, chunk.totalBytes);\n}\n```\n\n### 2. Model Context Updates\n\nThe viewer keeps the model informed about what the user is seeing:\n\n```typescript\napp.updateModelContext({\n  content: [\n    {\n      type: \"text\",\n      text: `PDF viewer | \"${title}\" | Current Page: ${page}/${total}\\n\\nPage content:\\n${pageText}`,\n    },\n  ],\n});\n```\n\nThis enables the model to answer questions about the current page or selected text.\n\n### 3. Display Modes: Fullscreen vs Inline\n\n- **Inline mode**: App requests height changes to fit content\n- **Fullscreen mode**: App fills the screen with internal scrolling\n\n```typescript\n// Request fullscreen\napp.requestDisplayMode({ mode: \"fullscreen\" });\n\n// Listen for mode changes\napp.ondisplaymodechange = (mode) => {\n  if (mode === \"fullscreen\") enableScrolling();\n  else disableScrolling();\n};\n```\n\n### 4. External Links (openLink)\n\nThe viewer demonstrates opening external links (e.g., to the original arxiv page):\n\n```typescript\ntitleEl.onclick = () => app.openLink(sourceUrl);\n```\n\n### 5. View Persistence\n\nPage position is saved per-view using `viewUUID` and localStorage.\n\n### 6. Dark Mode / Theming\n\nThe viewer syncs with the host's theme using CSS `light-dark()` and the SDK's theming APIs:\n\n```typescript\napp.onhostcontextchanged = (ctx) => {\n  if (ctx.theme) applyDocumentTheme(ctx.theme);\n  if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);\n};\n```\n\n## Usage\n\n```bash\n# Default: loads a sample arxiv paper\nbun examples/pdf-server/main.ts\n\n# Load local files (converted to file:// URLs)\nbun examples/pdf-server/main.ts ./docs/paper.pdf /path/to/thesis.pdf\n\n# Load from URLs\nbun examples/pdf-server/main.ts https://arxiv.org/pdf/2401.00001.pdf\n\n# Mix local and remote\nbun examples/pdf-server/main.ts ./local.pdf https://arxiv.org/pdf/2401.00001.pdf\n\n# stdio mode for MCP clients\nbun examples/pdf-server/main.ts --stdio ./papers/\n```\n\n### Additional Flags\n\n- `--debug` \u2014 Enable verbose server-side logging.\n- `--enable-interact` \u2014 Enable the `interact` tool in HTTP mode (see [Deployment](#deployment)). Not needed for stdio.\n- `--writeable-uploads-root` \u2014 Allow saving annotated PDFs back to files under client roots named `uploads` (Claude Desktop mounts attachments there; writes are refused by default).\n\n## Deployment\n\nThe `interact` tool relies on an in-memory command queue (server enqueues \u2192 viewer polls). This constrains how the server can be deployed:\n\n- **stdio** (Claude Desktop) \u2014 `interact` is always enabled. The server runs as a single long-lived process, so the in-memory queue works.\n- **HTTP, single instance** \u2014 Pass `--enable-interact` to opt in. Works as long as all requests land on the same process.\n- **HTTP, stateless / multi-instance** \u2014 `interact` will not work. Commands enqueued on one instance are invisible to viewers polling another. Leave the flag off; the tool will not be registered.\n\n## Security: Client Roots\n\nMCP clients may advertise **roots** \u2014 `file://` URIs pointing to directories on the client's file system. The server uses these to allow access to local files under those directories.\n\n- **Stdio mode** (`--stdio`): Client roots are **always enabled** \u2014 the client is typically on the same machine (e.g. Claude Desktop), so the roots are safe.\n- **HTTP mode** (default): Client roots are **ignored** by default \u2014 the client may be remote, and its roots would be resolved against the server's filesystem. To opt in, pass `--use-client-roots`:\n\n```bash\n# Trust that the HTTP client is local and its roots are safe\nbun examples/pdf-server/main.ts --use-client-roots\n```\n\nWhen roots are ignored the server logs:\n\n```\n[pdf-server] Client roots are ignored (default for remote transports). Pass --use-client-roots to allow the client to expose local directories.\n```\n\n## Allowed Sources\n\n- **Local files**: Must be passed as CLI arguments (or via client roots when enabled)\n- **Remote URLs**: arxiv.org, biorxiv.org, medrxiv.org, chemrxiv.org, zenodo.org, osf.io, hal.science, ssrn.com, and more\n\n## Tools\n\n| Tool             | Visibility | Purpose                                                             |\n| ---------------- | ---------- | ------------------------------------------------------------------- |\n| `list_pdfs`      | Model      | List available local files and origins                              |\n| `display_pdf`    | Model + UI | Display interactive viewer                                          |\n| `interact`\u00b9      | Model      | Navigate, annotate, search, extract pages, fill forms, save to file |\n| `read_pdf_bytes` | App only   | Stream PDF data in chunks                                           |\n| `save_pdf`       | App only   | Save annotated PDF back to local file                               |\n\n\u00b9 stdio only by default; in HTTP mode requires `--enable-interact` \u2014 see [Deployment](#deployment).\n\n## Example Prompts\n\nAfter the model calls `display_pdf`, it receives the `viewUUID` and a description of all capabilities. Here are example prompts and follow-ups that exercise annotation features:\n\n### Annotating\n\n> **User:** Show me the Attention Is All You Need paper\n>\n> _Model calls `display_pdf` \u2192 viewer opens_\n>\n> **User:** Highlight the title and add an APPROVED stamp on the first page.\n>\n> _Model calls `interact` with `highlight_text` for the title and `add_annotations` with a stamp_\n\n> **User:** Can you annotate this PDF? Mark important sections for me.\n>\n> _Model calls `interact` with `get_text` to read content first, then `add_annotations` with highlights/notes_\n\n> **User:** Add a note on page 1 saying \"Key contribution\" at position (200, 500), and highlight the abstract.\n>\n> _Model calls `interact` with `add_annotations` containing a `note` and either `highlight_text` or a `highlight` annotation_\n\n### Navigation & Search\n\n> **User:** Search for \"self-attention\" in the paper.\n>\n> _Model calls `interact` with action `search`, query `\"self-attention\"`_\n\n> **User:** Go to page 5.\n>\n> _Model calls `interact` with action `navigate`, page `5`_\n\n### Page Extraction\n\n> **User:** Give me the text of pages 1\u20133.\n>\n> _Model calls `interact` with action `get_text`, intervals `[{start:1, end:3}]`_\n\n> **User:** Take a screenshot of the first page.\n>\n> _Model calls `interact` with action `get_screenshot`, page `1`_\n\n### Stamps & Form Filling\n\n> **User:** Stamp this document as CONFIDENTIAL on every page.\n>\n> _Model calls `interact` with `add_annotations` containing `stamp` annotations on each page_\n\n> **User:** Fill in the \"Name\" field with \"Alice\" and \"Date\" with \"2026-02-26\".\n>\n> _Model calls `interact` with action `fill_form`, fields `[{name:\"Name\", value:\"Alice\"}, {name:\"Date\", value:\"2026-02-26\"}]`_\n\n### Saving\n\n> **User:** Save the annotated version as `/docs/contract-signed.pdf`.\n>\n> _Model calls `interact` with action `save_as`, path `/docs/contract-signed.pdf`. Fails if the file exists; pass `overwrite: true` to replace. The target path must be under a mounted directory root._\n\n> **User:** Save my changes back to the file.\n>\n> _Model calls `interact` with action `save_as`, `overwrite: true` (no `path`). Overwrites the original \u2014 same writability gate as the viewer's save button. Only works for local files; remote PDFs need an explicit `path`._\n\n## Testing\n\n### E2E Tests (Playwright)\n\n```bash\n# Run annotation E2E tests (renders annotations in a real browser)\nnpx playwright test tests/e2e/pdf-annotations.spec.ts\n\n# Run all PDF server tests\nnpx playwright test -g \"PDF Server\"\n```\n\n### API Prompt Discovery Tests\n\nThese tests verify that Claude can discover and use annotation capabilities by calling the Anthropic Messages API with the tool schemas. They are **disabled by default** \u2014 skipped unless `ANTHROPIC_API_KEY` is set:\n\n```bash\nANTHROPIC_API_KEY=sk-ant-... npx playwright test tests/e2e/pdf-annotations-api.spec.ts\n```\n\nThe API tests simulate a conversation where `display_pdf` has already been called, then send a follow-up user message and verify the model uses annotation actions (or at least the `interact` tool). Three scenarios are tested:\n\n| Scenario             | User prompt                                                       | Expected model behavior                    |\n| -------------------- | ----------------------------------------------------------------- | ------------------------------------------ |\n| Direct annotation    | \"Highlight the title and add an APPROVED stamp\"                   | Uses `highlight_text` or `add_annotations` |\n| Capability discovery | \"Can you annotate this PDF?\"                                      | Uses interact or mentions annotations      |\n| Specific notes       | \"Add a note saying 'Key contribution' and highlight the abstract\" | Uses `interact` tool                       |\n\n## Architecture\n\n```\nserver.ts                  # MCP server + tools\nmain.ts                    # CLI entry point\nsrc/\n\u251c\u2500\u2500 mcp-app.ts             # Interactive viewer UI (PDF.js)\n\u251c\u2500\u2500 pdf-annotations.ts     # Annotation types, diff model, PDF import/export\n\u2514\u2500\u2500 pdf-annotations.test.ts # Unit tests for annotation module\n```\n\n## Key Patterns Shown\n\n| Pattern                       | Implementation                                                 |\n| ----------------------------- | -------------------------------------------------------------- |\n| App-only tools                | `_meta: { ui: { visibility: [\"app\"] } }`                       |\n| Chunked responses             | `hasMore` + `offset` pagination                                |\n| Model context                 | `app.updateModelContext()`                                     |\n| Display modes                 | `app.requestDisplayMode()`                                     |\n| External links                | `app.openLink()`                                               |\n| View persistence              | `viewUUID` + localStorage                                      |\n| Theming                       | `applyDocumentTheme()` + CSS `light-dark()`                    |\n| Annotations                   | DOM overlays synced with proper PDF annotation dicts           |\n| Annotation import             | Load existing PDF annotations via PDF.js `getAnnotations()`    |\n| Diff-based persistence        | localStorage stores only additions/removals vs PDF baseline    |\n| Proper PDF export             | pdf-lib low-level API creates real `/Type /Annot` dictionaries |\n| Save to file                  | App-only `save_pdf` tool writes annotated bytes back to disk   |\n| Dirty flag                    | `*` prefix on title when unsaved local changes exist           |\n| Command queue                 | Server enqueues \u2192 client polls + processes                     |\n| File download                 | `app.downloadFile()` for annotated PDF                         |\n| Floating panel with anchoring | Magnetic corner-snapping panel for annotation list             |\n| Drag, resize, rotate          | Interactive annotation handles with undo/redo                  |\n| Keyboard shortcuts            | Ctrl+Z/Y (undo/redo), Ctrl+S (save), Ctrl+F (search), \u2318Enter   |\n\n### Annotation Types\n\nSupported annotation types (synced with PDF.js):\n\n| Type            | Properties                                                         | PDF Subtype  |\n| --------------- | ------------------------------------------------------------------ | ------------ |\n| `highlight`     | `rects`, `color?`, `content?`                                      | `/Highlight` |\n| `underline`     | `rects`, `color?`                                                  | `/Underline` |\n| `strikethrough` | `rects`, `color?`                                                  | `/StrikeOut` |\n| `note`          | `x`, `y`, `content`, `color?`                                      | `/Text`      |\n| `rectangle`     | `x`, `y`, `width`, `height`, `color?`, etc.                        | `/Square`    |\n| `circle`        | `x`, `y`, `width`, `height`, `color?`, etc.                        | `/Circle`    |\n| `line`          | `x1`, `y1`, `x2`, `y2`, `color?`                                   | `/Line`      |\n| `freetext`      | `x`, `y`, `content`, `fontSize?`, `color?`                         | `/FreeText`  |\n| `stamp`         | `x`, `y`, `label`, `color?`, `rotation?`                           | `/Stamp`     |\n| `image`         | `x`, `y`, `width`, `height`, `imageData?`/`imageUrl?`, `rotation?` | `/Stamp`     |\n\n## Dependencies\n\n- `pdfjs-dist`: PDF rendering and annotation import (frontend only)\n- `pdf-lib`: Client-side PDF modification \u2014 creates proper PDF annotation dictionaries for export\n- `@modelcontextprotocol/ext-apps`: MCP Apps SDK\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "examples/pdf-server",
+   "type": "git",
+   "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+  },
+  "time": {
+   "0.4.1": "2026-01-15T20:51:03.053Z",
+   "0.4.2": "2026-01-26T14:46:17.242Z",
+   "1.0.0": "2026-01-26T17:36:07.353Z",
+   "1.0.1": "2026-01-26T22:38:28.347Z",
+   "1.1.0": "2026-02-22T01:24:22.661Z",
+   "1.1.1": "2026-02-24T02:43:16.820Z",
+   "1.1.2": "2026-02-25T15:34:06.230Z",
+   "1.2.0": "2026-03-06T15:56:45.762Z",
+   "1.2.1": "2026-03-10T17:49:02.414Z",
+   "1.2.2": "2026-03-10T19:22:51.840Z",
+   "1.3.0": "2026-03-23T20:22:54.015Z",
+   "1.3.1": "2026-03-23T20:23:18.612Z",
+   "1.3.2": "2026-03-27T17:54:20.003Z",
+   "1.4.0": "2026-04-02T03:38:25.323Z",
+   "1.5.0": "2026-04-02T09:13:56.793Z",
+   "1.6.0": "2026-04-14T15:26:33.242Z",
+   "1.7.0": "2026-04-21T15:22:20.942Z",
+   "1.7.1": "2026-04-27T15:20:59.262Z",
+   "1.7.2": "2026-05-15T18:04:12.969Z",
+   "1.7.3": "2026-06-01T11:35:20.419Z",
+   "1.7.4": "2026-06-05T14:38:24.465Z",
+   "1.7.5": "2026-07-23T11:30:02.373Z",
+   "2.0.0": "2026-09-08T18:36:52.738Z",
+   "created": "2026-01-15T20:51:02.649Z",
+   "modified": "2026-09-08T18:36:53.102Z"
+  },
+  "versions": {
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@0.4.1",
+    "_nodeVersion": "22.21.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_0.4.1_1768510262823_0.9080053504379719"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^0.4.1",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.0.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-0iYvy/tvQ7pBRkA5bG+y8KpLdiImDmW1ybBo5NS36iME1N0BjkUha/RnAhbKD+u9CWvF497VXjKCTqbqb7xYgw==",
+     "shasum": "3df65071bd42b5f14810bd516118d4121926de0c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEon3HuxYrDspdUzqy0M25fKW7NujFBGrLZAi5FIl+CaAiEAwc3qpo8k+vsRxX2z1lL8TbqBNiqgrTW4JmPmDBO7130="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-0.4.1.tgz",
+     "unpackedSize": 6222334
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "8c3b1daf7ec2ff88132827a16b6d8674e1e5b448",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "0.4.1"
+   },
+   "0.4.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@0.4.2",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_0.4.2_1769438776784_0.3291595243102887"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "../..",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@0.4.2"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-gGrrzoaaFBP6GbgsplyE3eFqyG0qlrLAJ1OOB6WfTNpjgyEgDm1m3TvHIabZMEnRR2lzZGsx7Rw13S/z1nRAcQ==",
+     "shasum": "0fa7da6d3f27732fa1bb44f69fc3b7c8f78b73b9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC034U/6L5uDsliAag2fkwfSw4fFJgCkhp6VdTvfgsVsAiEA1sh7FsLW4jnfdPBh/kOvbVqMgS2OJfjxY8jNT3EImFk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-0.4.2.tgz",
+     "unpackedSize": 6223864
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "2d4311a25d73d12be387b9837faa75a95e0f4a26",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "0.4.2"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.0.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.0.0_1769448967108_0.3331459044101357"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "../..",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.0.0"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-TZYhDWPuKnRADuHz3YzUE47Z2ipdnyLxgJs35ySnn1j+JXAIvJj/fb/haK9QU2jt6grn3fqA/1ZfJpbtLMz7Dw==",
+     "shasum": "9a56e736f9927088bee8946882dad3ad5af61373",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDpTM0RS2tRtsN2flowNAP3usVKcgIuJwF9QlmN1d8lUQIhAM7euIz/ZMmFhoW9hAvT56mzSwmPy+RJIjFbwo+sjact"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.0.0.tgz",
+     "unpackedSize": 6224211
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "298e884ec3f02daba085acdb02042d73bd00b355",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.0.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.0.1_1769467108117_0.6528425244231051"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.0.1"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-zKqSQdfzErOuG9X7gjUZblTtwxmR3KmGQEFW7plwIVwlGvNC1Wx6bHmlgovQjxY4qxBme6pDS6vtdvRdMxzGTA==",
+     "shasum": "ecb1b0141ec4535c58eb71833119c5a9b6045dd2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH2MW17PqWO3B+pdmSKuiF8iRH/VVHOe1tsUOk/D6b6uAiEA+b89SeNqbN1tltfSCDtjwq3X10Q9x/8vJ/0hDSitwWM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.0.1.tgz",
+     "unpackedSize": 6224499
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "605e31b6c5b2665b95e83c49d23bd2bb2aa73aff",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.0.1"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.1.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.1.0_1771723462460_0.06918346588849356"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.1.0"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-fyKEn+8kTsfLnYGJ+iiYzhMNMMXCAOxGCHsntQrkGPb5+ewn0l21w50cgfnCNlknDJ16x267Ag/twVEOWaRaKw==",
+     "shasum": "35154cfa5c0cbde1b5644434cd3e799cb6d097ae",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDWdiF7LTTu4FtFdLTKHI+APQAEJTbgXnYvIum6VCgURwIgSTf+Xhd1NSlpEVPjfgvOPD/dDpXsCzuhBHFta4Njk9w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.1.0.tgz",
+     "unpackedSize": 6241430
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "5bbf2778821217fe757b653ea84caf4cbf364d81",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.1.0"
+   },
+   "1.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.1.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.1.1_1771900996630_0.28123106962617084"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.1.1"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-rfQXEGC7wbnPcdgjNhusTkc9zj9xv8sLIHcJNg39Hfvb/zYzx/yfEn8JNGuCwEREhjr23yWEg/Yjkv8mFRE9yA==",
+     "shasum": "dc2c792ffd5d174670caf852687908838566dc98",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCpApkoH7ikYPDxzPu+QU1ZL/oOekRplT3dFgjvAIxlJwIhAM8R60oJuLKDI+NaHGyqi/f+00oiLB1a63mfThiHgnsN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.1.1.tgz",
+     "unpackedSize": 6239322
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "ec389f473b7d6107a003f820a1c39a7eddbbfc3d",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.1.1"
+   },
+   "1.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.1.2",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.1.2_1772033646019_0.09267096201626468"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.1.2"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-FeDuLdABDJQRkQNMeqtKWkusKvLxt/+kYxFXTEgZqKKtair/qO+0gGRmq16EosG9Gb7dWvVhL0KKerVAsvgMgQ==",
+     "shasum": "206e86fec8464ca9edc9b2cf3d74ea55b1d9277c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDK0mvGMmyzd3LmeCtHxI9UfSVhBKhl+rYyA55mTQRqIQIhAJtoGWjX/ivaTM1bbHRyliE+6f5T/QTCqI5/DkKqRINt"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.1.2.tgz",
+     "unpackedSize": 6246207
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "5373f01d6f55114ec0a3eb9c864fea6f233589bc",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.1.2"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.2.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.2.0_1772812605547_0.6794281459115115"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.2.0"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-xFr1br4061kCPOQTZkZialfLyQJrBku+Mh1VoeorIDAtHq7PPfY8KaQnxlTtSM7m0QCm8HG1okuAYlYBVvy4cQ==",
+     "shasum": "f9849c95f43a2c4e4d4e35bf1091179f1a2fa5a3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCARO0aOSXYg5rSAb92nSpHk+6pM5kW9UsHSKgRpKifWwIhAIwqC+DDwAV0yvkB562CGjiqukQm69446KOCwTrbhpzs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.2.0.tgz",
+     "unpackedSize": 6249641
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "6b12fff1d0ab151a3b8cea44b3910465e2285f05",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.2.0"
+   },
+   "1.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.2.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.2.1_1773164942205_0.5745856415958328"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.2.1"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-m0QMTUhkitPfpu95qT9c0xy2CTepnB9ljRW95MwjStsJGeuqRVZh7UgaXqfF0YumCCl2fRStGSXxZqLdYa5G1A==",
+     "shasum": "e10b7f16e834cda56eb8bb359992b99633e00051",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFpuvWiPvXzBZpD7aOKpsWBHCWrTQhEpZk/cQkBnYt4YAiEA3MazbfVfciV3tcNnq2rB3H/OlyAmNIkm1zz3tDth+u8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.2.1.tgz",
+     "unpackedSize": 5646376
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "1aa3c9c106666345b82f1bd5d4d21a5ee14ba1db",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.2.1"
+   },
+   "1.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.2.2",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.2.2_1773170571558_0.7210388916438148"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.2.2"
+     },
+     "fileCount": 6,
+     "integrity": "sha512-DmvTNkGOmFl7FNhF+mGen1pveW/Z6mnFyWMjifvsfrI/NveaAmKj/ebx/GMY2kHJMsEWo4QV3dAWNebqOm+d6A==",
+     "shasum": "8550f41e9f23a66f8f24b52748b7938ab779d2fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDpo1YyAt2aWuPJ6DrmA2V24jNXILOn9knWlZ3K+Tk06gIhAOdYTOkdrplG9bKEmKbgj/LuRltRRQx8I4KRTqlE+N8K"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.2.2.tgz",
+     "unpackedSize": 5646375
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "704b6e0af9ec1b3d4a351f12fb2596d2da1e0818",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.2.2"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.3.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.3.0_1774297373752_0.4268245360850387"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.3.0"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-HM77Z/b89HNbWFewDiyN9HWFFYvn33DPMVoLdFNVz1YZzXvQWUeSpwIQXpv2SLgVRRxsA1UbNE7U764LXaUdgA==",
+     "shasum": "2bb8dade70d79205b7fa745475e1cac6a2ef507a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFqKdarcctL0iJvtRiPCtloxwIAy/xl8pxJHPNXNqN+eAiAkk1an3c9HsN9LmWhysITDq1nKvlLOgdOyQ+7smc9i7g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.3.0.tgz",
+     "unpackedSize": 6482102
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "6723c8ff106dfd6eb312d1ce31353eb80c2f7000",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.3.0"
+   },
+   "1.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.3.1",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.3.1_1774297398378_0.6324638933467621"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.3.1"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-8eJVwX0dnFBOng4CK/BtpZZkTjWLVMxCRlOo/a/enH4puXNjcp7VKm5afetQH7GfHwrtQJ9lgdMpy04sIbRmzw==",
+     "shasum": "f3fd57fc9bce46bfbfd52e19898e8b5d4cf54f32",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHHmWZr8HQKCe9juxvfQZH+pes3z5P9BrImoapsQ+rO4AiEAyzpHc6BztaivOeNa6GeUEUWnXKid6UeXfr5mGz09O+k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.3.1.tgz",
+     "unpackedSize": 6482110
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "e8ca8594295807dfa33111b6abef738e677acd91",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.3.1"
+   },
+   "1.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.3.2",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.3.2_1774634059793_0.6077981226845488"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.24.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.3.2"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-B569TfWuYkKOqMvLIx92+1muV9Gk41ksJUMuiMxgsw2Vi//DjrPCY8qewdI/DgI1wz8t2OOXnDuDeFmgbulv1A==",
+     "shasum": "ffcd7933fd44edc5a36174cf738749ff7b84cceb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD9hKqnJDzHUQ6qAPiRycwhQszASPEC5nylQEljUhc8lAIhAP2C/OeB0yy6kYzgTIpnETCtdgf8Tz7O7OqWjkuVu/vd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.3.2.tgz",
+     "unpackedSize": 6481900
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "14969c5da2fdbdef4284d2131b5ada4ba94aaca0",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node --external pdfjs-dist && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.3.2"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.4.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.4.0_1775101105086_0.2702766545568096"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.4.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-M8yAkKI3UFsjDGDYLlHRM5cRffMqO/X9zCSavfMFCOu0sGmJNQtH7dUz/Nj2MSYdpIyQuQ7NuLZGD2MVpmtwNg==",
+     "shasum": "72d84256227421afd07b7eae675ccfde4dbb1e52",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDHcksf7Q9m0IbaPzCAUdX9vcgnaq65/HkMHaimFup87QIgfw+JInF/I3EZ+ETQyAgnWnhbigPiSXzRuE55rybdHGk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.4.0.tgz",
+     "unpackedSize": 6512129
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "9da4a75ff60bcd127c494bbca98f7b22e87f95e7",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.4.0"
+   },
+   "1.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.5.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.5.0_1775121236538_0.9581090877216023"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.5.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-vAq8aAMhm6cZXc7Vned3Q5V8lvH/JJ2wijb6JcJu5ZEaj8YZgeTqhyCg0TD6fecOnrapfjQJMHydO3mxjRYzLA==",
+     "shasum": "c03e0239828141f13baacedef678ce024d819779",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICt9gMbxlLqKrs/pUHzIaDtb1gs+RUU/PU6TZCj9CH16AiEArKoR5lrxMyH+M4VoXCZ7kKCVgmb1yWs9uGST1EehI/o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.5.0.tgz",
+     "unpackedSize": 6522799
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "621a70a7242bf9c76dcb89a61d785ab9bb75cd87",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.5.0"
+   },
+   "1.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.6.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.6.0_1776180392950_0.8228069286267345"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.7",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.6.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-DWSq6IWqjr58kw1sl4D4KURSfsmZQkS8e1b2A+nAwkzPodujMOBu/tVhxvwjPs/P9C52cV2UQ4DmLzZJn9hChg==",
+     "shasum": "4d19aed65307bd2db12aeed8bc99d1f784f35edc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHd26DWXbawrIaKSN36ZQZibEIByFlvXP+GOoE/bECFAAiBkl0Mhg1JIfLJPLRk2t9GgxycJkxOfa+UNNeAAnL0+DQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.6.0.tgz",
+     "unpackedSize": 6522907
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "01d826aea000a2f774d1d3e9b57fa352632c1c50",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.6.0"
+   },
+   "1.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.0_1776784940708_0.8404691792583083"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.7",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-sFG6EhBKzZ/4IKDM9PmGoRm/fSDSFyEbCdWs4B8qbTKy5o6iJV3Eekwr3P+Zi4H49GO7X3RS16+Zf88Wh5KcgA==",
+     "shasum": "7557f1c84d3e065d196ba78a84aa653ed4077f2b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAE0+vqwrzyDFKiSjMa08f4Ive+IGHZ5bu7aaafLPG5bAiEA+vX4SU6mKK+W1vq+njxZlfAC8fOI41u76ik/ItVvPhM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.0.tgz",
+     "unpackedSize": 6761199
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "64b4fa16de4a4694dbec5514b866802a1825f919",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.0"
+   },
+   "1.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.1_1777303258979_0.9215642851571164"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.7",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdf-lib": "^1.17.1",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-O4Sj+2IqLx9aEY4MBSpOZufPVw+Gqx5P/EEf9HMPGn9KDmnnbZ/NnTBYPwP06az7xKL2IVfR07m6YrZHiR0sjw==",
+     "shasum": "39360bd6f273c9e616b15c5504f16dcff0f0191f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH9C1gjHPM3ZpCxDVnd3FH2E/K0pyjUuxXUwtbGbAt7RAiAXGd5MeVx1Mff98Kd+zKyHy+AgQMm47OuyfTOZlEguZA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.1.tgz",
+     "unpackedSize": 6765322
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "0008d3b78f94e37bb970673cbc33baecc481ae18",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.1"
+   },
+   "1.7.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.2_1778868252645_0.7996310657799526"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.7",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@cantoo/pdf-lib": "^2.6.5",
+     "@modelcontextprotocol/ext-apps": "^1.0.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.2"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-lAvzuxWp74lIt2H/KYze1v/oMPPdxh2V+m18lTcRCxwXKNJa8wKjmQT5aF30GOOVPo2fPvCVazgc8VCy4hTOLg==",
+     "shasum": "0ff46a2d04cd80ff58bdc23929d5e7060d2b2dc8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBrJQFS4xzFOrBwXnTDasja/YEHy5D/kNh2lX1aBOBOuAiBSo80kMoXROwVOB1GXHiPDs5FCG1Ap9cbkxnQgVleRvw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.2.tgz",
+     "unpackedSize": 6979203
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "9a37ad71827d076af06978fa7f7f510449687061",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.2"
+   },
+   "1.7.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.3",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.3_1780313720060_0.8149686728975796"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@cantoo/pdf-lib": "^2.6.5",
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.3"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-tywbM4xw2SSjOmpIfLFKh6pDTMcAjbvpYShVzsObQ++vMYUnpAqhf4rsClHt9ai4C3Vp2/9UzJEl5j2Xgk40KQ==",
+     "shasum": "539ff2ca3c275232ed50e25dc84f47aa6f40efba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCnXTSlf9T7Lh1a5oTRRkWCD1pCge97lhHxaZ7MAefJ5AIgCmmNWV6cIeilQroBDBdeGNFgYuz+LEQyEiGFzuPTAxU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.3.tgz",
+     "unpackedSize": 6979203
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "7d4434e991516d91286dded5bb10266cd6cddd02",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.3"
+   },
+   "1.7.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.4",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.4_1780670304278_0.3938243267978252"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@cantoo/pdf-lib": "^2.6.5",
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.4"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-wzR71jGxi15rPKhyMVoW2UDb2EP7Ns7V5CQT2oZyFSduHssf+cMlqPiPuymC4+TUXvGV1f7CAvpYcqUjXmbhgQ==",
+     "shasum": "2def670e9089ed8ea38f1809700b5fc402c2a82a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA+8jp9uzphmF99U7BHnMYUD+3ZvZtJLrCSNvKEsdVV9AiBKgaAuP//H6F09/F0R2hRhTKVWQTL+AO8iGBcnn+Wl9w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.4.tgz",
+     "unpackedSize": 6982965
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "ca1d29894fabbd1558885a9ec8620dcb01d7457e",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.4"
+   },
+   "1.7.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@1.7.5",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_1.7.5_1784806202079_0.20337934597927165"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@cantoo/pdf-lib": "^2.6.5",
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.1.13"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@1.7.5"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-JAlXoXvYUOKjzy6W9+kF8zrlvbscdvGcZusPpY1ZIvL5nam2lV8ZvlgWNTk54QGkXOGO9ZkhuB5IijmT9hi+YA==",
+     "shasum": "129b25f8e0ede93bc2fcff7dce72d76daf9411c0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH6f6J7oRWfnL0LpmJImbtpAGWxH6+fO8hK6xq8qRvgrAiEAh764d4y8Qw0jY8Z/v446bi2dsg+r/toAuPD5AiAoPwY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-1.7.5.tgz",
+     "unpackedSize": 6992459
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "92f46a574568a3ddac7600343b7d3c4c4ed7b588",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     },
+     {
+      "email": "[redacted-email:cef9df5daadb]",
+      "name": "cliffhall"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.5"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-pdf@2.0.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-pdf_2.0.0_1788892612556_0.8179607926592536"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-pdf-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@cantoo/pdf-lib": "^2.6.5",
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/express": "2.0.0",
+     "@modelcontextprotocol/ext-apps": "^2.0.0",
+     "@modelcontextprotocol/node": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "pdfjs-dist": "^5.0.0",
+     "zod": "^4.2.0"
+    },
+    "description": "MCP server for loading and extracting text from PDF files with chunked pagination and interactive viewer",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-pdf@2.0.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-27eBFr871+Lo7rkGbJGVAxZLdyWmJDLda7/iLpT8J9OrwzT5Vfsw6/STgd87hrlPIE1Jj0fJfsCr9qAqvcoxmw==",
+     "shasum": "4ce32376e4ad8fb46e3a820e4e5afefa4b29612c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBe+bm4o0HJx7ua1UtNojygnRj8wwzbn4Rqw6EHXLXoeAiEArl8mAi7OcESNIOrb0qrvQCDT6LoKGaJb2oAH1LWP75Q="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBlOwPNTyVX3G7VACQjWru/orS0RNoRCNw4FbFSvbscdAiEA4uZNRsjoSrUWburoiVF9sxyXLFMsPFoxB5TH8Y82Z9o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-pdf/-/server-pdf-2.0.0.tgz",
+     "unpackedSize": 7363546
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "352f6ced4d80772e92b4e7a311854481a8d65b04",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     },
+     {
+      "email": "[redacted-email:cef9df5daadb]",
+      "name": "cliffhall"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-pdf",
+    "repository": {
+     "directory": "examples/pdf-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build pdfjs-polyfill.ts --outdir dist --target node && bun build server.ts --outdir dist --target node --external pdfjs-dist --external \"./pdfjs-polyfill.js\" && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --external pdfjs-dist --banner \"#!/usr/bin/env node\"",
+     "build:mcpb": "npm run build && node build-mcpb.mjs",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts --enable-interact",
+     "serve:stdio": "bun main.ts --stdio",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
+     "watch": "cross-env INPUT=mcp-app.html vite build --watch"
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "2.0.0"
+   }
+  }
+ },
+ "name": "@modelcontextprotocol/server-pdf",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@modelcontextprotocol%2Fserver-pdf"
+}

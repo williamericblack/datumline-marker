@@ -1,0 +1,401 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92b95a8bf465]",
+    "name": "easylabsandrew"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.1",
+   "0.2.0",
+   "0.4.0",
+   "0.5.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@easylabs/mcp-server",
+  "_rev": "7-9a3d33e664f9f0036c011e04591cb6d4",
+  "bugs": {
+   "url": "https://github.com/itseasyco/easy-mcp/issues"
+  },
+  "description": "Easy Labs MCP Server - Payment processing tools for AI agents",
+  "dist-tags": {
+   "latest": "0.5.0"
+  },
+  "homepage": "https://docs.itseasy.co/docs/sdks/mcp",
+  "keywords": [
+   "mcp",
+   "payments",
+   "easy-labs"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92b95a8bf465]",
+    "name": "easylabsandrew"
+   }
+  ],
+  "name": "@easylabs/mcp-server",
+  "readme": "# Easy Labs MCP Server\n\nGive AI agents access to your [Easy](https://www.itseasy.co) payment data through the [Model Context Protocol](https://modelcontextprotocol.io). Ask your agent *\"how's revenue this month?\"* or *\"find [redacted-email:1dc31758a6f5] and show her recent payments\"* and get real answers from your account \u2014 read-only, sandbox-first.\n\n**Easy** (itseasy.co, by Easy Labs, Inc.) is a self-custodial payment platform: businesses accept cards, ACH, wallets, and stablecoins with flat-rate pricing, next-day payouts, and cashback on idle balances. Docs: [docs.itseasy.co](https://docs.itseasy.co) \u00b7 Machine-readable site index: [itseasy.co/llms.txt](https://www.itseasy.co/llms.txt)\n\n## Try it in 60 seconds \u2014 no account needed\n\nDemo mode serves a deterministic, obviously-fake dataset (\"Demo Coffee Co.\", `demo_*` ids, `@example.com` emails) with zero network calls, so you can explore every tool before you have an API key.\n\n**Claude Desktop / any MCP client** \u2014 add to your MCP config:\n\n```json\n{\n  \"mcpServers\": {\n    \"easy-labs-demo\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@easylabs/mcp-server\"],\n      \"env\": { \"EASY_ENVIRONMENT\": \"demo\" }\n    }\n  }\n}\n```\n\n**Claude Code:**\n\n```bash\nclaude mcp add easy-labs-demo -e EASY_ENVIRONMENT=demo -- npx -y @easylabs/mcp-server\n```\n\nThen ask: *\"Give me a revenue summary for the last 30 days\"* \u00b7 *\"Find the customer [redacted-email:1dc31758a6f5]\"* \u00b7 *\"Any open disputes?\"*\n\n## Connect your real account\n\nGet an API key from the [Easy dashboard](https://app.itseasy.co) ([signup](https://www.itseasy.co)). The server targets the **sandbox by default** \u2014 production is an explicit opt-in:\n\n```json\n{\n  \"mcpServers\": {\n    \"easy-labs\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@easylabs/mcp-server\"],\n      \"env\": { \"EASY_API_KEY\": \"sk_test_...\" }\n    }\n  }\n}\n```\n\nTo target production instead of the sandbox, add `\"EASY_ENVIRONMENT\": \"production\"` to `env` \u2014 deliberately explicit, never the default.\n\n## Tools\n\nWorkflow tools answer whole questions in one call \u2014 prefer them when they fit:\n\n| Tool | What it answers |\n| --- | --- |\n| `revenue_summary` | \"How's revenue?\" \u2014 gross volume, counts by status, average ticket, success rate, and change vs the previous period (`7d`/`30d`/`90d`/`6m`/`12m`/`mtd`) |\n| `find_customer` | \"Who is jane@\u2026?\" \u2014 email/name search plus the best match's profile and recent payments |\n\nRead-only building blocks:\n\n| Tool | Purpose |\n| --- | --- |\n| `list_transfers` / `get_transfer` | Payments, filterable by status |\n| `list_disputes` / `get_dispute` | Chargebacks and their lifecycle state |\n| `list_settlements` / `get_settlement` | Payout batches |\n| `list_customers` / `get_customer` | Customer records |\n| `list_balance_transfers` / `get_balance_transfer` | Balance movements |\n\nResources: `merchant://profile`, `merchant://summary` (account context for the agent), `docs://api-reference`, `docs://changelog`.\n\nAll tools are read-only (`readOnlyHint: true`) \u2014 nothing here moves money.\n\n## Notes for AI agents\n\n- No credentials? Use demo mode (`EASY_ENVIRONMENT=demo`, or the literal credential `demo` against a hosted endpoint). Demo data self-identifies: `demo_*` ids, `@example.com` emails.\n- Start with `revenue_summary` / `find_customer`; fall back to `list_*`/`get_*` for specifics. Read `merchant://summary` for account context.\n- Amounts are integer cents, USD unless stated. Errors are human-readable strings including the HTTP status; 404 means the id doesn't exist.\n- To learn about the Easy product itself, fetch [itseasy.co/llms.txt](https://www.itseasy.co/llms.txt) \u2014 every page there is available as markdown.\n\n## HTTP mode (Streamable HTTP, multi-tenant)\n\n```bash\nnpx -y @easylabs/mcp-server --http          # port 3100, or EASY_MCP_PORT / PORT / --port=\n```\n\n- `POST/GET/DELETE /mcp` \u2014 MCP endpoint \u00b7 `GET /health` \u2014 liveness, no auth\n- **Auth is per-request**: `x-easy-api-key: sk_...` or `Authorization: Bearer sk_...` \u2014 live keys route to the production API, test keys to the sandbox. `EASY_API_KEY` is only a fallback for keyless requests. Sessions are bound to the credential that opened them.\n- **Keyless requests get a demo session** \u2014 zero-config tool discovery with self-identifying sample data. The literal credential `demo` does the same explicitly. Set `EASY_MCP_KEYLESS=reject` for strict 401s on private deployments. Real data always requires a valid key; an invalid key fails at the API, never downgrading to demo.\n- Per-key rate limiting: `EASY_MCP_RATE_LIMIT_PER_MINUTE` (default 120); 429s carry `Retry-After` + `RateLimit-*`.\n- Idle sessions evicted after 30 minutes.\n\n## Configuration reference\n\n| Variable | Default | Purpose |\n| --- | --- | --- |\n| `EASY_API_KEY` | \u2014 | API key (required for stdio real mode; per-request fallback in HTTP mode) |\n| `EASY_ENVIRONMENT` | `sandbox` | `production` targets the live API; `demo` serves sample data with no key |\n| `EASY_API_URL` | per environment | Advanced override \u2014 only `*.itseasy.co` / `localhost` hosts are accepted, so your key can never be sent elsewhere |\n| `EASY_MCP_PORT` / `PORT` | `3100` | HTTP mode port |\n| `EASY_MCP_RATE_LIMIT_PER_MINUTE` | `120` | HTTP per-key rate limit |\n| `EASY_MCP_KEYLESS` | serve demo | Set to `reject` to 401 keyless HTTP requests instead of serving demo data |\n\n## Safety model\n\n- **Read-only** tool surface \u2014 no writes, no money movement.\n- **Sandbox by default**; production requires `EASY_ENVIRONMENT=production`.\n- **Host allowlist**: the client refuses to send your API key anywhere but `*.itseasy.co`/localhost.\n- Keys are never logged; multi-tenant session state stores only a hash.\n\n## Development\n\n```bash\npnpm install\npnpm dev                 # stdio (set EASY_ENVIRONMENT=demo or EASY_API_KEY)\npnpm dev -- --http       # Streamable HTTP on :3100\npnpm test                # vitest \u2014 includes end-to-end transport tests\npnpm type:check && pnpm build\n```\n\n## Links\n\n- [Developer portal](https://www.itseasy.co/developers) \u00b7 [Docs](https://docs.itseasy.co) \u00b7 [MCP docs](https://docs.itseasy.co/docs/sdks/mcp) \u00b7 [Status](https://status.itseasy.co)\n- Support: [redacted-email:28e5fff394a9]\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/itseasyco/easy-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-26T19:07:52.640Z",
+   "0.1.1": "2026-08-26T19:24:11.111Z",
+   "0.2.0": "2026-08-26T21:27:42.522Z",
+   "0.4.0": "2026-08-27T02:51:05.598Z",
+   "0.5.0": "2026-08-27T02:58:14.569Z",
+   "created": "2026-08-26T19:07:52.367Z",
+   "modified": "2026-08-27T02:58:14.740Z"
+  },
+  "versions": {
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@easylabs/mcp-server@0.1.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1787772250960_0.5372138004723546"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92b95a8bf465]",
+     "name": "easylabsandrew"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "easy-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/itseasyco/easy-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^4.3.6"
+    },
+    "description": "Easy Labs MCP Server - Payment processing tools for AI agents",
+    "devDependencies": {
+     "@types/node": "^25.3.2",
+     "tsx": "^4.21.0",
+     "typescript": "^5.9.3",
+     "vitest": "4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-/9lcw3EoJcXrWKIwQkBSDuFCGz/4nKK49O3gwb4s6PIJ+mrsNB5J5PVX8vaP4hhQOIVNpHMfudMjAPtzt+kqUw==",
+     "shasum": "ed9862d58ac66d3a3f738b03e286531e2318cbd0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICNaIHp0XnKI+5d99wgu0Idhu8L914aeECa50sqccBJxAiEAsOPFFZvknmF9y4O46DHtX/gCc2hIYjDEu7wFb4i5LmM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@easylabs/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 78703
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "bd21c82632a4c8f05106b8d7324409f0ac3a774a",
+    "homepage": "https://docs.itseasy.co/docs/sdks/mcp",
+    "keywords": [
+     "mcp",
+     "payments",
+     "easy-labs"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92b95a8bf465]",
+      "name": "easylabsandrew"
+     }
+    ],
+    "name": "@easylabs/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/itseasyco/easy-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "pnpm build && pnpm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "type:check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@easylabs/mcp-server@0.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1787779662381_0.10491392278226774"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92b95a8bf465]",
+     "name": "easylabsandrew"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "easy-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/itseasyco/easy-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^4.3.6"
+    },
+    "description": "Easy Labs MCP Server - Payment processing tools for AI agents",
+    "devDependencies": {
+     "@types/node": "^25.3.2",
+     "tsx": "^4.21.0",
+     "typescript": "^5.9.3",
+     "vitest": "4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-Eshm+l9fTTG7hiN5rqtbOSffaYsmDh81gFwrUygsE2ZvqvZulz3Oma8TF90JXNr4/0gRyt2lMUn2s9IIt/KFfQ==",
+     "shasum": "a3b86349dfbcd6f59c61629a2c07e1db604e7a6e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDcZG0J5l8rZIK94br8pXlX7Y71J1bNl52JvhYm7iV76AIhAMj9WtrUwaANwUXFx1P+PLYRFCY5rzK1udFdYGHdrN/Z"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@easylabs/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 87865
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "35abdceae477805889bb9fdb828fa24c62ffb725",
+    "homepage": "https://docs.itseasy.co/docs/sdks/mcp",
+    "keywords": [
+     "mcp",
+     "payments",
+     "easy-labs"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92b95a8bf465]",
+      "name": "easylabsandrew"
+     }
+    ],
+    "mcpName": "co.itseasy/easy-mcp",
+    "name": "@easylabs/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/itseasyco/easy-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "pnpm build && pnpm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "type:check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@easylabs/mcp-server@0.4.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1787799065420_0.2409620802975947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92b95a8bf465]",
+     "name": "easylabsandrew"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "easy-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/itseasyco/easy-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^4.3.6"
+    },
+    "description": "Easy Labs MCP Server - Payment processing tools for AI agents",
+    "devDependencies": {
+     "@types/node": "^25.3.2",
+     "tsx": "^4.21.0",
+     "typescript": "^5.9.3",
+     "vitest": "4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-3BiYV/BMIbrJKALQ+QYZ7de9ZZ9drdm72zS8jBoZP2W5mhV/vG5PFjOZ57pQRZnHapabk5+tGLEe3DFynFpFCQ==",
+     "shasum": "c47fb8992b470a577209af34c0f8d0b491580a76",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCXWgijrVBJwIH9uloXivyISHGV8F5u+SHN2LzbCpcbPAIgVsp2tCFhIFx121K+XryTs51OHBCg1AUs4hHPKAbg4tI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@easylabs/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 90056
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "834977d678a9feebdfdeed6f41daf50ca47e6a84",
+    "homepage": "https://docs.itseasy.co/docs/sdks/mcp",
+    "keywords": [
+     "mcp",
+     "payments",
+     "easy-labs"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92b95a8bf465]",
+      "name": "easylabsandrew"
+     }
+    ],
+    "mcpName": "co.itseasy/easy-mcp",
+    "name": "@easylabs/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/itseasyco/easy-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "pnpm build && pnpm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "type:check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@easylabs/mcp-server@0.5.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1787799494420_0.8588703136126372"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92b95a8bf465]",
+     "name": "easylabsandrew"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "easy-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/itseasyco/easy-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^4.3.6"
+    },
+    "description": "Easy Labs MCP Server - Payment processing tools for AI agents",
+    "devDependencies": {
+     "@types/node": "^25.3.2",
+     "tsx": "^4.21.0",
+     "typescript": "^5.9.3",
+     "vitest": "4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-LeAPeimqyjAK+vUBdh8F8dOYRPMHnsgZjdT4ELpE9yDIUOH8EvVMVRap5mID6jc7OAo55+dGhsQPsG6r3gFOBg==",
+     "shasum": "3ba3e17f8801e4b3ed5863ab660960b1e40f6e0e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIARy/bSEsUn/I8AkFEMd2edl9q5SqFnaFtUszx7h8LW2AiEA8NzshgmxoTD5pokzC4xBmf4wfeRSlTFrpspVz2VMADA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@easylabs/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 95432
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "45e0cbc03bf2f4f578aa3474fcbb001c50597bf8",
+    "homepage": "https://docs.itseasy.co/docs/sdks/mcp",
+    "keywords": [
+     "mcp",
+     "payments",
+     "easy-labs"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92b95a8bf465]",
+      "name": "easylabsandrew"
+     }
+    ],
+    "mcpName": "co.itseasy/easy-mcp",
+    "name": "@easylabs/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/itseasyco/easy-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "pnpm build && pnpm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "type:check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   }
+  }
+ },
+ "name": "@easylabs/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@easylabs%2Fmcp-server"
+}

@@ -1,0 +1,697 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@dockndevai/mcp-keycloak",
+  "_rev": "7-b98ec0df8b53aae364b2e3de7f0f91c9",
+  "bugs": {
+   "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+  },
+  "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+  "dist-tags": {
+   "latest": "0.2.2"
+  },
+  "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "keycloak",
+   "iam",
+   "llm",
+   "ai"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2de17b080e39]",
+    "name": "dock-n-dev-ai"
+   }
+  ],
+  "name": "@dockndevai/mcp-keycloak",
+  "readme": "# mcp-keycloak\n\n[![CI](https://github.com/dockndevai/mcp-keycloak/actions/workflows/ci.yml/badge.svg)](https://github.com/dockndevai/mcp-keycloak/actions/workflows/ci.yml)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)\n[![npm](https://img.shields.io/npm/v/@dockndevai/mcp-keycloak)](https://www.npmjs.com/package/@dockndevai/mcp-keycloak)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for **Keycloak**. It lets an MCP-capable client (Claude Desktop, Claude Code, etc.) inspect and manage Keycloak realms, users, clients, roles, and groups \u2014 with security controlled entirely by flags.\n\nThe design goal is **safe by default**: it starts read-only, scopes to an allowlist of realms, protects sensitive realms from mutation, and gates destructive operations behind an explicit opt-in.\n\n## Features\n\n- **Multi-realm** \u2014 every tool takes a `realm` argument; scope it with an allowlist.\n- **Access modes** \u2014 `read-only` \u2192 `read-write` \u2192 `admin`, layered so a mode never exposes tools above its level.\n- **Security flags** \u2014 realm allowlist, protected realms, delete gating, dry-run, and JSON audit logging (see below).\n- **Two auth strategies** \u2014 confidential-client service account (recommended) or admin username/password.\n- **Zero heavy dependencies** \u2014 a thin fetch-based Admin REST client, plus the MCP SDK and zod.\n\n## Security model\n\n| Concern | Flag | Default | Effect |\n| --- | --- | --- | --- |\n| What can the server do at all? | `KEYCLOAK_MODE` | `read-only` | `read-only` exposes only read tools; `read-write` adds mutations; `admin` adds destructive tools. Tools above the mode are **never registered**. |\n| Which realms are in scope? | `KEYCLOAK_REALM_ALLOWLIST` | *(all)* | Comma-separated. When set, any operation on a realm outside the list is refused. |\n| Which realms are read-only forever? | `KEYCLOAK_PROTECTED_REALMS` | `master` | Protected realms can be read but never mutated or deleted, regardless of mode. |\n| Can it delete? | `KEYCLOAK_ALLOW_DELETE` | `false` | `delete_*` tools require this **and** admin mode. |\n| Preview without touching Keycloak | `KEYCLOAK_DRY_RUN` | `false` | Write/admin tools validate + log intent, then return without calling Keycloak. |\n| Audit trail | `KEYCLOAK_AUDIT_LOG` | `true` | Emits a JSON line to stderr per guarded operation (`ALLOW` / `DENY` / `DRY_RUN`). |\n| Interactive confirmation | *(automatic)* | \u2014 | Destructive & high-impact actions prompt the human to approve via MCP elicitation before running; clients without elicitation fall back to the `*_ALLOW_*` gate. |\n\nThese layers are independent \u2014 for example `admin` mode with `KEYCLOAK_ALLOW_DELETE=false` can create and update users but cannot delete them.\n\n## Tools\n\n**Read** (`read-only`+): `list_realms`, `get_realm`, `list_users`, `get_user`, `count_users`, `list_clients`, `list_realm_roles`, `list_groups`\n\n**Write** (`read-write`+): `create_user`, `update_user`, `reset_password`, `logout_user`\n\n**Admin** (`admin`): `delete_user`\n\n## Quickstart \u2014 add to your agent\n\nPublished on npm as [`@dockndevai/mcp-keycloak`](https://www.npmjs.com/package/@dockndevai/mcp-keycloak). No clone or build needed \u2014 your MCP client runs it on demand with `npx`. **Start in `read-only` mode**; see [`.env.example`](.env.example) for every variable and [docs/CLIENTS.md](docs/CLIENTS.md) for the full per-client guide.\n\n**Claude Code** (CLI)\n\n```bash\nclaude mcp add keycloak -e KEYCLOAK_URL=\"https://keycloak.example.com\" -e KEYCLOAK_CLIENT_ID=\"admin-cli\" -e KEYCLOAK_CLIENT_SECRET=\"your-secret\" -e KEYCLOAK_MODE=\"read-only\" -- npx -y @dockndevai/mcp-keycloak\n```\n\n**Claude Desktop \u00b7 Cursor \u00b7 Windsurf** \u2014 same block in `claude_desktop_config.json`, `.cursor/mcp.json`, or `~/.codeium/windsurf/mcp_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"keycloak\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-keycloak\"\n      ],\n      \"env\": {\n        \"KEYCLOAK_URL\": \"https://keycloak.example.com\",\n        \"KEYCLOAK_CLIENT_ID\": \"admin-cli\",\n        \"KEYCLOAK_CLIENT_SECRET\": \"your-secret\",\n        \"KEYCLOAK_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n**OpenAI Codex CLI** \u2014 in `~/.codex/config.toml`:\n\n```toml\n[mcp_servers.keycloak]\ncommand = \"npx\"\nargs = [\"-y\", \"@dockndevai/mcp-keycloak\"]\nenv = { KEYCLOAK_URL = \"https://keycloak.example.com\", KEYCLOAK_CLIENT_ID = \"admin-cli\", KEYCLOAK_CLIENT_SECRET = \"your-secret\", KEYCLOAK_MODE = \"read-only\" }\n```\n\n**VS Code (GitHub Copilot, Agent mode)** \u2014 in `.vscode/mcp.json`:\n\n```json\n{\n  \"servers\": {\n    \"keycloak\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@dockndevai/mcp-keycloak\"\n      ],\n      \"env\": {\n        \"KEYCLOAK_URL\": \"https://keycloak.example.com\",\n        \"KEYCLOAK_CLIENT_ID\": \"admin-cli\",\n        \"KEYCLOAK_CLIENT_SECRET\": \"your-secret\",\n        \"KEYCLOAK_MODE\": \"read-only\"\n      }\n    }\n  }\n}\n```\n\n## Configure\n\nCopy `.env.example` and fill it in, or set the variables directly in your MCP client config. A confidential client with the `realm-management` roles you need is the recommended credential.\n\n## Run from source (development)\n\nPrefer the published package above. To run from a clone:\n\n```bash\nnpm install\nnpm run build\nnode dist/index.js   # with the environment variables set\n```\n\n## Develop\n\n```bash\nnpm run dev        # watch mode\nnpm test           # unit tests for the security policy\nnpm run typecheck\n```\n\n## Publishing\n\nThis server ships a [`server.json`](server.json) for the official MCP registry and an [`mcpName`](package.json) for npm ownership validation. See **[PUBLISHING.md](PUBLISHING.md)** for publishing to npm and listing on the MCP registry, Smithery, Glama, Cursor, and PulseMCP.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-23T07:49:16.049Z",
+   "0.1.1": "2026-08-28T02:48:26.784Z",
+   "0.1.2": "2026-08-30T06:18:24.321Z",
+   "0.1.3": "2026-09-09T15:55:01.794Z",
+   "0.2.0": "2026-09-09T19:24:35.448Z",
+   "0.2.1": "2026-09-09T19:43:25.055Z",
+   "0.2.2": "2026-09-12T17:56:27.116Z",
+   "created": "2026-08-23T07:49:15.756Z",
+   "modified": "2026-09-12T17:56:27.462Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.1.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.1.0_1787471355911_0.2489942742618525"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.1.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-vo8SjLnekOunAnVfhpI5pzeKE6M7uuFv+/mKB4gsXXEwGSUpTij3JQZaQ0aClff8+6m5YFFp73tIefgk8KlAjQ==",
+     "shasum": "d6c689aa5d8346deb0deaf16c7118b6dbf1d53d0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDzN6IHSLEFbjIoEAzh9BVT/m73OFS47DqdNoYOQ8mYzAiEA9eL5UWTfgiTaTwsFKm40n7owyeqi0i/E+IVqprzRwig="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.1.0.tgz",
+     "unpackedSize": 69793
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "0e8e9582fcd1f7b9363d54b0dd3df99f6b0afe31",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.1.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.1.1_1787885306639_0.4402325249498016"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.1.1"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-wt2IK1X3YX7WFo/NNJSHqSKA+RzrhLc4OR6PmdZO9b0+agaBUpyoaU4AVK/jcF6XLiAAWkfGfJYNdfO9m8+6bg==",
+     "shasum": "b11bcfb2de9ae996989ad2f01a374e4c2f01912f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBwkb7N89Nt6VJ1yXJM6RqrnoXdyq+He4ecAaocpoJx9AiBJpjFR9rl0KNi01TCnfPHWTreRU6cUQeNs+dRSiXKY3A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.1.1.tgz",
+     "unpackedSize": 74657
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "e7cbdbe2ef8460efad5aaa2e4de824c926e64a44",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.1.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.1.2_1788070704147_0.8867088635480367"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^3.2.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.1.2"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-tOKCerjHd+l0sZgk6r0YfkEWiKMVOTSP0cL4IDXl3GypkgIX8xY5ZQ/6j74OEo77l1YXywIvy2inGdgB/HkeXw==",
+     "shasum": "a79997859d5a099b51960ab14fb994cc6d68a91d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHbneoCvYycuOc5fsO1z1d3MV6kjA0Tb7KsRflkHyXPdAiEAjdKy+p+BKStzT6geKEkSbw2GapvMpszHDtZC6OslW3Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.1.2.tgz",
+     "unpackedSize": 74657
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "15c90c0a6312d8688f28618937d426c2e6550b34",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.1.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.1.3_1788969301632_0.09399877262708212"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.1.3"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-dGlkIwhcO7Mbit/yEkne56PzYl+qxhWPoCEATKKGXPD0VxUjxZ9GSNT+it6JpaZ4W5VdEAPiZmZ3t/2ha3Smng==",
+     "shasum": "3ca1c1656eb1b14d44ee16f659a00a5bf3cc64b7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCVjViByEDK3JMkkWFkY/uOngJII489tDRmTugJ+ryM6AIgYYf6DvyL5sKz/3J26RDsIfqMH6WJZ1OO8m4M277fWOk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.1.3.tgz",
+     "unpackedSize": 74657
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "340e73750bdb7b286f5ab6413b2a6bf50de66d88",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.2.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.2.0_1788981875325_0.4809548252681397"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.2.0"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-8QmX8vJnKFAWuoiAGvmbon5QTqLB7lwRTjQ4vz2Q/yGNDngUjZbXH3yS35LJ6ZWg+3HDP2Sf/+sKM9zyyu05kg==",
+     "shasum": "887773a0d079c1592d314ea7b21ffad04aaf731a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGz5GnPhbfZyn42v53dEvti0TRqfEN2y5Hj50x23EhLGAiEAxjcBrjSVjYxdMZ4KGv84YERos+8DZiAv4o6EoAwqQ2c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.2.0.tgz",
+     "unpackedSize": 80885
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "3d0013f79bd0263e53d3e7fc7ad86346ea792474",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.2.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.2.1_1788983004874_0.6981486890818367"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^22.9.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.2.1"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-7Xt+Y8abiM+uJi43jiJtmP1W0PAjNMfstkgw67n2DkpMBU5PWP7TZxrfyTImAlkfyjMSknR9tYmVEKZiTJX37A==",
+     "shasum": "2592ca1567a2efc777230dd1791013fef9676def",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD4/825vmepqZuJz4d/MXnA8hoTE430ImrknPGJA0Rd7QIhANmu1W2UYGgToY89zI4CVN9BEITtvRf2lBnrBrWxsQqi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.2.1.tgz",
+     "unpackedSize": 81569
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "bddc6ce824787adf0dcb2314acbf80dba6d0771b",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@dockndevai/mcp-keycloak@0.2.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.2.2_1789235786988_0.9572016773302117"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2de17b080e39]",
+     "name": "dock-n-dev-ai"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-keycloak": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dockndevai/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol server for Keycloak \u2014 multi-realm admin access with security modes and access-control flags.",
+    "devDependencies": {
+     "@types/node": "^26.5.0",
+     "tsx": "^4.23.13",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@dockndevai%2fmcp-keycloak@0.2.2"
+     },
+     "fileCount": 36,
+     "integrity": "sha512-s3GbYMvEm6MjAgFcNTPBNcBi0Tp8n0kMzc8o0CWIhED/471caYjJ+Q1tavwmCMxqQutPmcBJ+BMlLr492SzY7w==",
+     "shasum": "d279de99e08071901397a63e655b888db9a3361f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCRdMGb6NgqoLP9qhJp8zG5J3NbRhcUfCrXaLHBs7uP0QIgFpZ16N4nLRXmB18RZfA8nl7wGfl/Xh3pO7WgEzr8Yi0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dockndevai/mcp-keycloak/-/mcp-keycloak-0.2.2.tgz",
+     "unpackedSize": 81536
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "gitHead": "73a458525d27416736957809fe343de0caad346e",
+    "homepage": "https://github.com/dockndevai/mcp-keycloak#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "keycloak",
+     "iam",
+     "llm",
+     "ai"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2de17b080e39]",
+      "name": "dock-n-dev-ai"
+     }
+    ],
+    "mcpName": "io.github.dockndevai/mcp-keycloak",
+    "name": "@dockndevai/mcp-keycloak",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dockndevai/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx watch src/index.ts",
+     "lint": "tsc -p tsconfig.json --noEmit",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   }
+  }
+ },
+ "name": "@dockndevai/mcp-keycloak",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@dockndevai%2Fmcp-keycloak"
+}

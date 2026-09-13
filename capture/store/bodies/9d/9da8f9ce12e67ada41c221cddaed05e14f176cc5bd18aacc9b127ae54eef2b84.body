@@ -1,0 +1,4936 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.6.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3e6f2281d641]",
+    "name": "arnilo"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.10",
+   "0.0.11",
+   "0.0.12",
+   "0.0.13",
+   "0.0.14",
+   "0.0.15",
+   "0.0.16",
+   "0.0.17",
+   "0.0.18",
+   "0.0.19",
+   "0.0.20",
+   "0.0.22",
+   "0.0.23",
+   "0.0.24",
+   "0.0.25",
+   "0.0.26",
+   "0.0.27",
+   "0.0.4",
+   "0.0.5",
+   "0.0.6",
+   "0.0.7",
+   "0.0.8",
+   "0.0.96",
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.1.6",
+   "0.1.7",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.2.3",
+   "0.2.4",
+   "0.2.5",
+   "0.2.6",
+   "0.2.7",
+   "0.2.8",
+   "0.2.9",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.5.1",
+   "0.5.2",
+   "0.5.3",
+   "0.5.4",
+   "0.5.5",
+   "0.5.6",
+   "0.6.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@arnilo/prism-mcp",
+  "_rev": "51-b013fbd6b06dcb1d36e4d64c311bdf93",
+  "bugs": {
+   "url": "https://github.com/ashiqrniloy/prism/issues"
+  },
+  "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+  "dist-tags": {
+   "latest": "0.6.0"
+  },
+  "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+  "keywords": [
+   "prism",
+   "mcp",
+   "model-context-protocol",
+   "tools",
+   "agent"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3e6f2281d641]",
+    "name": "arnilo"
+   }
+  ],
+  "name": "@arnilo/prism-mcp",
+  "readme": "# @arnilo/prism-mcp\n\nBounded MCP client capabilities and explicit Prism MCP server exposure, pinned to the modular TypeScript SDK v2 packages (@modelcontextprotocol/client and @modelcontextprotocol/server 2.0.0). Client direction connects over stdio or Streamable HTTP and maps discovered tools to `ToolDefinition`s. Server direction registers selected Prism tools/commands on SDK `McpServer`, with required authorization and an optional bounded web-standard handler. Shared elicitation helpers (`mcpElicitationDecision` / `mcpElicitationResultFromDecision`) map onto Prism pending decisions and require host `humanInteraction: true` on accept. Server `guardrails` apply shared core tool stages to registered tools; commands remain host callbacks.\n\n## Install\n\n```bash\nnpm install @arnilo/prism-mcp @arnilo/prism\n```\n\n## Usage\n\n```ts\nimport { createAgent } from \"@arnilo/prism\";\nimport { connectMcpTools } from \"@arnilo/prism-mcp\";\n\nconst bridge = await connectMcpTools({\n  serverId: \"fs\",\n  transport: {\n    type: \"stdio\",\n    command: \"node\",\n    args: [\"path/to/mcp-server.js\"],\n  },\n});\n\nconst agent = createAgent({\n  model,\n  tools: bridge.tools,\n});\n\n// When finished:\nawait bridge.close();\n```\n\nStreamable HTTP:\n\n```ts\nconst bridge = await connectMcpTools({\n  serverId: \"remote\",\n  transport: {\n    type: \"streamable-http\",\n    url: \"https://mcp.example.com/mcp\",\n    allowedOrigins: [\"https://mcp.example.com\"],\n    requestInit: {\n      headers: { Authorization: \"Bearer <token>\" },\n    },\n  },\n});\n```\n\nRemote tool names are prefixed as `mcp:<serverId>:<toolName>` by default to avoid registry collisions. Use `connectMcpCapabilities()` for separate bounded resources/prompts plus explicit host roots/sampling/elicitation callbacks; missing capability calls throw `ERR_PRISM_MCP_UNSUPPORTED_CAPABILITY`.\n\nMCP Apps requires explicit negotiation, not metadata guessing:\n\n```ts\nconst bridge = await connectMcpTools({ serverId: \"weather\", transport, mcpApps: true });\nconst resource = await bridge.apps!.readResource(\"ui://weather/card\");\n```\n\n`mcpApps: true` advertises and requires `io.modelcontextprotocol/ui`. `bridge.tools` excludes app-only tools; `bridge.apps` preserves UI metadata, permits linked bounded HTML resource reads, and calls only same-server app-visible tools. Use `@arnilo/prism-ag-ui` to mount an authenticated proxy and separate-origin renderer sandbox; this package never renders HTML.\n\n## Server exposure\n\n```ts\nimport { createPrismMcpServer, createPrismMcpWebHandler } from \"@arnilo/prism-mcp\";\n\nconst server = createPrismMcpServer({\n  tools: [approvedTool],\n  commands: [approvedWorkflowCommand],\n  authorize: async ({ authInfo }) => hostAllows(authInfo)\n    ? { allowed: true, ownership: { tenantId: \"tenant-1\" } }\n    : false,\n  validate,\n  permission,\n  redactor,\n});\n\nconst handleMcp = await createPrismMcpWebHandler(server, { resolveAuthInfo });\n// Dual-era serving: modern 2026-07-28 through SDK createMcpHandler (one fresh\n// McpServer per request) plus the SDK stateless legacy fallback. Stateful mode\n// additionally requires sessionIdGenerator, exact allowedOrigins, and\n// resolveIdentity to bind every POST/GET/DELETE/SSE request to one principal;\n// classified legacy session traffic routes beside a strict modern handler.\n// The handler stays callable and carries fetch/close/notify/bus;\n// servePrismMcpStdio(factory) serves dual-era stdio.\n```\n\nNothing is exposed by default. To expose a durable agent, pass `agentRuns: { support: { lifecycle: createAgentRunLifecycle({ checkpoints, resolveAgent }) } }`; this registers only `agent.support.status` and `agent.support.resume` under normal MCP authorization. Handler uses the SDK dual-era serving entries; no listener or auth provider starts. Request/result/concurrency/timeouts are bounded, and Host/Origin allowlists run before body parsing and auth. Use `server.connect()` directly for in-memory transports; direct HTTP `server.connect()` is legacy-only.\n\n## Security\n\n- Stdio command, args, env, and cwd are **explicit host configuration** \u2014 Prism does not auto-launch unknown servers.\n- Streamable HTTP requires HTTPS plus an exact `allowedOrigins` entry. Every POST/GET/DELETE/reconnect resolves all DNS answers, rejects mixed/private results, pins one public address, rejects credentials/fragments/redirects, and bounds each response. Plaintext requires `allowLoopbackHttp: true` and loopback-only DNS.\n- Discovery defaults to 20 pages/500 tools, finite metadata/schema budgets, and atomic refresh. Raw SDK list/call requests avoid compiling untrusted output schemas.\n- Every result branch (`content`, `structuredContent`, legacy `toolResult`) shares `maxResultBytes`, JSON depth, and property bounds before `ToolResult` retention.\n- Register returned tools only after reviewing server trust; core `PermissionPolicy` and `ToolValidator` still apply at dispatch.\n- MCP Apps keeps nested metadata over deprecated flat metadata, permits only linked `ui://` `text/html;profile=mcp-app` HTML5 bodies, and leaves iframe sandbox/CSP, app-call approval, and mutation recovery to the host/AG-UI adapter.\n- Server resources/prompts re-authorize every callback. Sampling/model choice, roots, credentials, and form/URL consent remain host-owned; Prism never opens elicitation URLs. Stateful sessions bind a non-secret principal ID and disclose mismatches only as 404.\n\nSee [MCP client/server exposure](../../docs/mcp-tools.md) and [Tool execution primitives](../../docs/tool-execution-primitives.md).\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp",
+   "type": "git",
+   "url": "git+https://github.com/ashiqrniloy/prism.git"
+  },
+  "time": {
+   "0.0.10": "2026-07-21T18:29:12.128Z",
+   "0.0.11": "2026-07-22T11:53:58.074Z",
+   "0.0.12": "2026-07-22T17:57:54.143Z",
+   "0.0.13": "2026-07-24T21:11:17.004Z",
+   "0.0.14": "2026-07-26T06:40:47.254Z",
+   "0.0.15": "2026-07-26T11:07:28.623Z",
+   "0.0.16": "2026-07-27T14:22:49.445Z",
+   "0.0.17": "2026-07-29T21:43:15.486Z",
+   "0.0.18": "2026-07-30T10:34:32.637Z",
+   "0.0.19": "2026-07-30T19:58:57.588Z",
+   "0.0.20": "2026-07-31T09:51:01.234Z",
+   "0.0.22": "2026-08-02T09:33:56.147Z",
+   "0.0.23": "2026-08-04T09:48:21.357Z",
+   "0.0.24": "2026-08-04T22:12:09.800Z",
+   "0.0.25": "2026-08-05T21:30:00.046Z",
+   "0.0.26": "2026-08-06T22:02:38.883Z",
+   "0.0.27": "2026-08-07T19:22:41.054Z",
+   "0.0.4": "2026-07-15T13:36:48.808Z",
+   "0.0.5": "2026-07-16T15:10:13.363Z",
+   "0.0.6": "2026-07-19T13:18:55.639Z",
+   "0.0.7": "2026-07-19T21:21:20.564Z",
+   "0.0.8": "2026-07-20T16:47:21.070Z",
+   "0.0.96": "2026-07-21T14:27:15.215Z",
+   "0.1.0": "2026-08-09T11:06:42.095Z",
+   "0.1.1": "2026-08-10T09:12:32.362Z",
+   "0.1.2": "2026-08-10T12:35:21.592Z",
+   "0.1.3": "2026-08-10T17:35:37.279Z",
+   "0.1.4": "2026-08-10T22:24:35.442Z",
+   "0.1.5": "2026-08-11T08:39:50.199Z",
+   "0.1.6": "2026-08-12T05:45:19.166Z",
+   "0.1.7": "2026-08-12T14:06:13.524Z",
+   "0.2.0": "2026-08-12T23:31:05.835Z",
+   "0.2.1": "2026-08-13T14:16:30.541Z",
+   "0.2.2": "2026-08-14T10:23:25.086Z",
+   "0.2.3": "2026-08-14T15:41:48.709Z",
+   "0.2.4": "2026-08-14T22:02:41.755Z",
+   "0.2.5": "2026-08-15T12:02:36.870Z",
+   "0.2.6": "2026-08-16T17:31:03.573Z",
+   "0.2.7": "2026-08-17T22:44:26.039Z",
+   "0.2.8": "2026-08-18T22:17:46.087Z",
+   "0.2.9": "2026-08-19T19:13:24.554Z",
+   "0.3.0": "2026-08-20T23:37:08.817Z",
+   "0.4.0": "2026-09-01T18:19:30.625Z",
+   "0.5.0": "2026-09-05T20:45:56.877Z",
+   "0.5.1": "2026-09-07T11:07:18.245Z",
+   "0.5.2": "2026-09-07T20:07:44.014Z",
+   "0.5.3": "2026-09-08T07:22:20.506Z",
+   "0.5.4": "2026-09-08T13:24:02.974Z",
+   "0.5.5": "2026-09-08T17:21:48.684Z",
+   "0.5.6": "2026-09-09T18:40:15.961Z",
+   "0.6.0": "2026-09-12T19:17:55.045Z",
+   "created": "2026-07-15T13:36:48.441Z",
+   "modified": "2026-09-12T19:17:55.345Z"
+  },
+  "versions": {
+   "0.0.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.10",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.10_1784658551972_0.937219543907329"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.10"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-SXNmNxOqHkvjH+ms5l+vHR0Lkb/Ii70ExjMTmSy+LHWaMgeGiJ2CGE0qbBZpv71fJ27yd1hamaosLvjIE4DFLA==",
+     "shasum": "a4f76c8b41011388ebd02985a6f229ce0db2f360",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC6m/gMo0lPd2OWHZ/0lEhENszkS8M7tOwIzvn2rbM2yQIhANRhZa9YEhDE24pZqJxFXaI6r1qpw7ncWhecsb1L6GdR"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.10.tgz",
+     "unpackedSize": 101266
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a677113a409b1b60a3361a76c980e7411013916a",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.10"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.10"
+   },
+   "0.0.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.11",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.11_1784721237933_0.6581833583893271"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.11"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-IauONd1cUI6IqLNqWqvUbZhsUgUJQLAkj7TpMYoyKLbpmyHuZcVrkIijBTmtEvyy34n8HCQ54xTDyvpxAhNrag==",
+     "shasum": "f7964ce63061c6ff93b549209e124fad2b473d01",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAQ3wpQbCm5mMJY+klVWGLPrb01xSaKDxnQyN0CyJOGqAiAMQjOUlm236sxVDgcaahLa+f32ItFC9d72nE83OTG1+A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.11.tgz",
+     "unpackedSize": 101342
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f9630a9bd12f299fdf473640e3869eea050b786f",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.11"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.11"
+   },
+   "0.0.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.12",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.12_1784743073962_0.8820089631973824"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.12"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-Ig54lkxJGmkL7XL9hd2f+v6MomXhjgWDdrdxJbkBDF3iUH+KU4GVn5g4gl7VYxNJZ57OzuHKnS8Eik3p8oJVLA==",
+     "shasum": "194fafc2ce1a65cd2b39b1f499e66ab5266dfd9d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGO3BDQbZ/i37Ki/bUyo6XTIoXScq0KyyuDcPqT0FdvFAiB/Y7tdNgGpTUVckPH5bMETChUlUAtgwfJR7ip+pbdNOQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.12.tgz",
+     "unpackedSize": 101418
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5b21f78cde6c4f3c9e7760f153c4bd8670d104e4",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.12"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.12"
+   },
+   "0.0.13": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.13",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.13_1784927476862_0.6460008233679142"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.13"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-ORVo76qDgawcqzQ5N3r8Fj0EiilxueMRkm3h1nvE0dKIZKINoY7prMUebShfbASCDith3MXdnkbxvTWcOyShnw==",
+     "shasum": "539f0e56627d00af0c0e6e275490eb627095c9cb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDHRoqDIzKNmceOpXRCdA7irdpFRpDiyC1LMOvoI4vjWwIgI4Fjz7cz9RBGuhudCEXXBaH+Sf40K7C6eOTB7ZX3Fcc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.13.tgz",
+     "unpackedSize": 102360
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "56692ad8ab8d05dce2d5a08f29ad768a8b43e0af",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.13"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.13"
+   },
+   "0.0.14": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.14",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.14_1785048047097_0.7566622276397561"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.14"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-UWGQ0gH5WMptaKwqfSOLsqvcuun6DXiznBZrJLL85pRO9iP5diDnf/2npIgk1GGj3zQrKkaeDhm+VK2FCcEU7Q==",
+     "shasum": "25c41f49a3ee95fdd24b015d4f23d0cfc0182ac5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDx8JPwCJeja80ZJGr/FP5OYLNKI5WDJJsUrMm5YjS8wwIhAMsm0PtDuZAjSdMYHzbjTxyvnEygu63UsW36iAWEQQTv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.14.tgz",
+     "unpackedSize": 102436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "73aec9561b2762d0445397fd8a735ccab2f1ad70",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.14"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.14"
+   },
+   "0.0.15": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.15",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.15_1785064048502_0.8480849297584268"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.15"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-4DE44Dxsm0mFA2SWEqqA5XEwyk56WWsLCs+YtQB3VpJlUpC2auXn6DJO4ESAzTYJweHDDu1zKkZ05J02TBFqBQ==",
+     "shasum": "64a9f8698c5c6dccb127a0dd0ffd59bb3e79665f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCsTKzjusb+PSX7oeGeMsxRqBJos+le5dFwsJ6GShqD7QIgNUMCS6xyUGZoolyXKOV18NfdECjXxsWyC9Me1yAkbt0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.15.tgz",
+     "unpackedSize": 102512
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "88c415b1d38f2c41fe068dfdb237616e3782d254",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.15"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.15"
+   },
+   "0.0.16": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.16",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.16_1785162169302_0.14910029200778907"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.16"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-wNa1nO/j9+ToZQjAXkMdvdfKRCTKSIsz7ZK5j9zvuyvGlC+sdx9d3O/JHgQWuUT4D0n2k1dgTR/cvz7mVJpRGA==",
+     "shasum": "699659f7f3e87e85e6c5df38507da503eb276b27",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEQXW8Wp4J0VrCOztXaGeA+4U2L3fzmySL5l5oILeteFAiEAuFgAAZ6RXxgZLCj0ZnzHqTXu910JgPipzgEaG0W2sCM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.16.tgz",
+     "unpackedSize": 103628
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3310c428985ef0a16652b73b10ea3958013846a5",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.16"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.16"
+   },
+   "0.0.17": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.17",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.17_1785361395332_0.5176530252989624"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.17"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-jdZD8O2l8iAKel4Z2yB64zaJ6oeFZd98ElMEDuaer3+fqgPzxtb4ncprexyA3s045QpCyZrCu+ojl2QTtzhRuA==",
+     "shasum": "9c2f638779b4f5fc34500dcf1c9ea5c4952ade12",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDsLHcHTaMXW5AAn6glOIaNhUWqlw68pvp4ZH7YpdhcPAiEAvTgidJG7aHb6bzX89QBcezE/ehUFLkSo9vyJjzcmcQg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.17.tgz",
+     "unpackedSize": 103703
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "fc58638e8612ea9999112b7d2a0319b01c1915fc",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.17"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.17"
+   },
+   "0.0.18": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.18",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.18_1785407672481_0.7871640020280601"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.18"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-KNRD8wrv9xOyPO8GEQwoo3tzaz8g+ASuwfzTeTqpxhrFk0hyh2scGBQY5NSPeHAfvip2adsJvLiKKsJ0fC4H1A==",
+     "shasum": "8e397ca00c4766239859ec74779bf6286b81b9a2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBEBXvCfRgnpiTL5ZGu26Ly79U4RiO1ewCO74augCpPdAiBv9qyGASBsXST5h3r6Uk508+nO2jJoQtTCvaHbnnctVw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.18.tgz",
+     "unpackedSize": 103887
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f627752da1c7fc699d5d4a4a46bb3235d6df8186",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.18"
+   },
+   "0.0.19": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.19",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.19_1785441537436_0.2534492461302591"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.19"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-Y3L57h/ZaFPT7w+EcEnLTa291xMFHW2f3kpfo9lKtl8uDMrezdNNU/R+xjCcnWkMcC5Pc4278Ik254F50X0EqQ==",
+     "shasum": "2a1f503f619d4462452b5ba1a7de20f8471224d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZI9CoOdQXDT6/Py7+rjg17ZafIvJtKyA2PPI47qc65QIhANNacveBjjA0yM2qy3ywYhgMNRve2IdvHiZ9xbKhqtic"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.19.tgz",
+     "unpackedSize": 103962
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7574e500dfb4114af6e72115bb3ac8ae0ecbd8c8",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.19"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.19"
+   },
+   "0.0.20": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.20",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.20_1785491461082_0.39023828222439194"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.20"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-AfGRZydTOFJ4z63ha8rcwk8bPE+1WO4ZEoDAGiy0f393gKANW9wx7DANx8r3cHnQ63xuHVBYJSbuMi+1/OM34Q==",
+     "shasum": "142c4fdabed4d234af996fe84ef9dd34b85a53b6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDys9RDhKenZiY+U/m7uDifesmYRtwmrUi7NT29i7phagIgYiZgHZWEWTC9+kUVkRxYENlwSkXc+IIOEiyPdWrfOp0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.20.tgz",
+     "unpackedSize": 104038
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b2cdb2e7ca562f0992a3befa20e71f050e5fe701",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.20"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.20"
+   },
+   "0.0.22": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.22",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.22_1785663236005_0.9686852488925299"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.22"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-yIwYGEQ3PyTDTSknVAjY9RJmn41Xu4fcP97HrOIsRnwCu49yGBXxCR29sGdGGJVoUD94PgZRxw/5G+OhW7p7cA==",
+     "shasum": "574a2968d1c9a2bc17381ce3c4a9b768e657ad41",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCZRrjee5ad1S5RWGVNa0lSZSJsx/mnAg4ps6Ndm/HaPgIgESvgCE7IsTYvzOm1kmhqxn17SgJfE8pcOZitdjcqHzI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.22.tgz",
+     "unpackedSize": 104190
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f9902edf838744603f2a2473beeb96461c899ccb",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.22"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.22"
+   },
+   "0.0.23": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.23",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.23_1785836901201_0.5882360303302785"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.23"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-4Sm8njBhwoScdy/fRXpRodXgBxkytcrLvjBg/YzZc4MXitrmpgZMo2D3YnRMWQB83fuGJQ8lTl/oK6nhYvS5Zw==",
+     "shasum": "830e15caed2d609a41fe4d23cb1a01cb790a796b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFL/QkqCVLoeOw1sy00A5Yq2d1TZugSHy5QgsZQ3O2PSAiEAzJUvXmoDuZk/aVw9GotYhFehnz4DdMQWj2AaBOEdm4o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.23.tgz",
+     "unpackedSize": 104266
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1401b6b0d9b5da2e1b841f13940166b7eb31267c",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.23"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.23"
+   },
+   "0.0.24": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.24",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.24_1785881529637_0.7865474703925535"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.24"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-7ASFefne2nt2Rfz4xVATXYIpA5yLIp/geSuvvUifxrnvyqxnDL+R0ZqFMd7qQXiKHKFkFqjl0PSJjEqhqFGzVQ==",
+     "shasum": "5745f97a8e75e1f2d882a8d5b7b7b63a9b06a365",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBhiRkSJyhFPgNp4hbtdg9AwNj7aOa8/9SmRYBP0hCmuAiEA5Pw2EAGxngA+G/dSh63w7jl3mPur3OU5N+hpTDfdUcs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.24.tgz",
+     "unpackedSize": 121409
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "55c4b0e0f07ef784f7fa723d0a37fe53deed3e72",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.24"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.24"
+   },
+   "0.0.25": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.25",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.25_1785965399901_0.3094708073564725"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.25"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-naikJNZFJHRiL5m7f1FY8JiIXc0kEcYETWBqqVq5lVtitU4o3jJJpnqyhdl1k03FZXes6UUblrXrJZwPFw/tgg==",
+     "shasum": "cf0853aa709c52160b90c6a13f8f804c7260ffff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDJ4YG2Yb8X0Qy0+ntoyXOvXa7AU6IV4CKezw5wqS5vjgIhAKRNYZuHIiSGA6r6osAYmOx6nivgDVvy+YWm3QJTLkfp"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.25.tgz",
+     "unpackedSize": 126395
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "24d7ac00ee9160bfcb3b16f0ad593126d79178ce",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.25"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.25"
+   },
+   "0.0.26": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.26",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.26_1786053758710_0.9919102386685357"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-/1DZPy/Q08u+8qWOPH8SJs6qQ5QYRUXLYFYNt81x5D+wyMwWZQURsTC/i2LvfIapuzc4IZ3kQG0us3I3zImyLw==",
+     "shasum": "76dcfc740147301c30d36f08f0c352227c789b27",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIASw4x7TcJXyA5eaXzp6rqpqKtLFhkBYJYhcAbHol6qLAiEA8D/B8ecfPcl5YpWbDPp7UUZ5kfOZQaGSlmT9NNs1soU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.26.tgz",
+     "unpackedSize": 126470
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "77fac7ea4aff3f7ac4b48fdc4df91419b7a24b70",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.26"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.26"
+   },
+   "0.0.27": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.27",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.27_1786130560867_0.37258130925962885"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.27"
+     },
+     "fileCount": 28,
+     "integrity": "sha512-cJ22jOiYRcGIIL0E24V4iOBuJnisC9nGsvk6/UwXpnoSCXV+iNTIn3vReKfsjA95ikfmFYd4kQJhAkGFfiFaqw==",
+     "shasum": "7b5dfaa41cea9bb651121cda28a409259bf9b2ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDM6WFwBPVPMwDwNUSuVamu0ju2sixPBIvaSxC6oKGPUgIhAP7bAcEynIfPJaQA0Qc8z643B7zp3tY2L+wq8g/VDR2W"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.27.tgz",
+     "unpackedSize": 126545
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9d49625cf11f159de240e87110f784e92a346c6d",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.27"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.27"
+   },
+   "0.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.4",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.4_1784122608669_0.698496723536381"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Optional MCP client bridge that maps remote MCP tools to Prism ToolDefinitions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.4"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-cNUKNl5es7nQGIeqi/L+Mklnxc8KD28DQ0p/2LhyyfWVfUcf0qG3uKub3Hzd6S26gO86/11krCiCrXfW2ztVcA==",
+     "shasum": "5e8aee4a75bf7abc10cb8b55b80389fa9ba7a88c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHhCESRBn+DF/f7gT8pQ4N5Z0uWEenGNLpMnmC0kISMmAiBgBr8H5WmjiqhBOQgjcEU8ioSY5s2w6pFjxoq+XPo4rw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.4.tgz",
+     "unpackedSize": 27081
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e0f8e5e36db23b890d09a8e94a4818ee9c8082e5",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.4"
+   },
+   "0.0.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.5",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.5_1784214613228_0.26839715425075816"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Optional MCP client bridge and explicit Prism tool/command server exposure.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.5"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-IYaAtCJUHlc1rcO58kKhOUet5+PCsK2YjMMB+tQVe8XFXKfayrp6+23euEOWqxHukGMJFLAOp1kuV1i/B96eXg==",
+     "shasum": "fd501b676a0fee312e51513c2639cd64dad5a8d3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCscUhE1tnZfzxMwu794UZiHY005s492wLjTmwwWRLDWAIhANGYhL+gyQxm/ZlLx3a4JZwB0OZ3+zYKPOjQXp8Sqr4d"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.5.tgz",
+     "unpackedSize": 45018
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7f46339ba92e9087c0b45d1c4a54e83a0d854111",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.5"
+   },
+   "0.0.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.6",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.6_1784467135481_0.8598604596647046"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Optional MCP client bridge and explicit Prism tool/command server exposure.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.6"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-bjF0bGp5vMv1Z/wzqKCHn7fcmsORLt4FHWSWP4BchjydtKRNJB2mncSoNqvbqaTtTXnRqbi7zXGWUdhSEAgMbg==",
+     "shasum": "b8599073f502c862a441aa29ec9e86deefb47aec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDdQeDTLZieqh7z4Kuef3ZNpsUaj7cqRPOYWGoUWFVkegIgGpuQAChDjxhJgj6KnROKKDZT3NkFBcL/xpIk0tWlpRE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.6.tgz",
+     "unpackedSize": 75678
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f129cb3858b9ba9b3fbcea552b8989a9f3cf5f42",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.6"
+   },
+   "0.0.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.7",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.7_1784496080425_0.2019289816584391"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Optional MCP client bridge and explicit Prism tool/command server exposure.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.7"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-4XyDFFlWW+uU8I8YQr7TQA+MHQBv/NKsEZv88Uti984/Er1clNOJz+UvLg1Ssshd0xuDlOiH4OlQ7ox7dIy2Hg==",
+     "shasum": "f0a4270e74a54180dc46a0a00765f1ead7825157",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEjfOVWL95ZMfl0gudRJQLh3ZFxyEnh4fbLpafj28TgZAiBtgxZXAh5MBxGO5zQ2JBsIT8PnBDF3xVI0g2DSRP+GfA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.7.tgz",
+     "unpackedSize": 81276
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "6048e82db212303f4f072ff70539830b779f35cf",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.7"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.7"
+   },
+   "0.0.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.8",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.8_1784566040937_0.8560740724202429"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.8"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-JZgoAOnPzG2X9NK9W8wDgfLOcdb1q5EVn3UHO2mnlH+aCD6ESu0GW6syb2aNiZ5aNsl48Djbhe/I290aFmjQFA==",
+     "shasum": "645a17c73233e607b250aeca4c330d351700c3c2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEdpda7grwCJFvlwrPrGonHyumiZGJEzssHCWSCfyCFiAiEA/WLaA74HO0iYUYC/Ja2fcqrVSljtYAceioQ20v3Uub8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.8.tgz",
+     "unpackedSize": 101040
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0d109989b4892e3fe4378ab782044ceadc460277",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.8"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.8"
+   },
+   "0.0.96": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.0.96",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.0.96_1784644035079_0.7972767383148056"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.0.96"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-8ak9Uxid5Pt+3o7QbTJAkYWEMtOSQe5qIF6TNxduu0FQmMvRzxpp1BXAK5zZi3Qlvv1eerj6Lg06kMkiro/qfQ==",
+     "shasum": "c255d18d1da4192b824999871c18ce81c9d379a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDY+O5o5z5IR9MqxXhn3FAnRRz4rZahFHhyFFCo+BP40AiEAx06mpjILIfksFke6LTrT6H4JrDYJopUh92aFhpPLu8o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.0.96.tgz",
+     "unpackedSize": 101206
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5fc05437224f347b00fb6124d1783eb2cd3a9b25",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.0.96"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.96"
+   },
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.0_1786273601933_0.3975717849931071"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-mW691VGs4wGWwaNHlwMAAGuvcX6rce4hgWp00d3e+MT+mKbkrE3Kb97XpKBBeWG/FC5W3K+FaMKwY31t4ICRlw==",
+     "shasum": "4256ffab223b54be1dddd1f01ec5d4e2175c537d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQClJXVVwzDNMQof3oUOk9eLPkgAXRWO/aYzBcamIsC7SQIgSuEBOiV0GbJ0uEdRUsHqLeAOp64KQzMHw7xYA8VUWe0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.0.tgz",
+     "unpackedSize": 159184
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "dd9ebdc12f0fd6b17ab7c1b7e8eb1729729d1534",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.1_1786353152219_0.27338498303443015"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.1"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-2NNR1l/p3TOIp2lJDNlsUlfoUYKCXAziLjcyHv+y+HXKMIkgA/uyqC18T8jwOcXyC/DyUQIcTs6BKwqi/9KSxg==",
+     "shasum": "fdfd27c3c185d8d5f3f8efbbea8aa684af899553",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBZn/BOmY4hir6j8tDwxv9Ik+UqBosZceo3KIpPUeek/AiBJU0+4ENpiCXbXH6dicRoEumsOWQDoC98IgFtGhrEycQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.1.tgz",
+     "unpackedSize": 160505
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "269f229108968cdc85699106118cab3f2c0d719b",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.2_1786365321452_0.6062580657427916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.2"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-Ahu//jIKSERCFnk9bl9BmhziMV1QjVC9xDoJBbCHp8sZ6+WCXynzDn5nCCXO03nKP0jvXL3vlgdO+VLX2v/Q0w==",
+     "shasum": "3ceee0168af4412ac7046f8129d370f484acb3d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCo+QwvLLJyrAXZf78eWgcu1zT9UXL+qGBr8kjwRDw1QgIhAJWqhefkzPwvou3EvpphRv1SAyY2PU1nFnKajs33PgYV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.2.tgz",
+     "unpackedSize": 160505
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "595fe5ccd6940d87fb77ea10f255099be0bcccf9",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.3",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.3_1786383337139_0.519650992772779"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.3"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-i3uxxzfd2yTcv5yrY5qcPMMJfL/NaNcJGKBTrWW+GXhAO+hkS+zcbQO0m0qJ1AjAd2n196XYXvwcbxO7kdyk5Q==",
+     "shasum": "6746dc637def4a3a34cd7891f8547c219c4856eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDwmaF0auFtcStZT84SxwX7kjRV0vXMhk+jT+U0esxscQIgJT05EGW5QTIFQJB7f9ZgxnIk1x0xUjodiuVSwqV14SA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.3.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "91c55fc32495a16ecbc909e1ad93b554505c8c31",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.3"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.4",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.4_1786400675310_0.22943727895279742"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.4"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-8iM3I/Dkia0rbxQcNsAQYfAX6NRi68z/EH3J10ilC3MZpmf6WAPbeCehshvtAgPuLKZYRRGmJN2Y79iqFmguNw==",
+     "shasum": "5fcca7a45181b965f0d37c3c992c918cccbd81a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIErD84CDUEkF9s2TIHS9CXCwEH7XEIZUGc4oIo0MYVXqAiAhnpQzyN8s4yoxQQvlQPnW1sX605F6FQaQ7QKd67m6FQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.4.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9a79a6ed9cb2b8eca75585f68a372dca602b8536",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.5",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.5_1786437590056_0.8090325881476177"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.5"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-NU5W27F3zyH3x63UhVBDz3Ae4qZxZ9uBQnqiEpc1A2KY15rbUrlMoWs2CBY/uPhWuxYYQwIk8EOMHnEa6pWBLQ==",
+     "shasum": "e7223a6aca50f153183a7e827cbecbde297be7ec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGa4JmbHSXaolLdh86v/tyam6gYfkjhyO+T+6M5f2gtlAiAgXllwMU/T+LFjWZX0YyjrMYxSC7mhuVHYARr52bMB8g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.5.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "fc914aaf78a1bfd8d42ec2509d41f6ff49c2c77b",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.5"
+   },
+   "0.1.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.6",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.6_1786513518978_0.9551903206444328"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.6"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-izMC4aF2+is8zqGWVlOtR4RPnh1polynWi1pSJIjQGbN9fbvxzU5v3B6Epeud9PfKjA/0mNVgRk03tLMDep1oQ==",
+     "shasum": "96f8f238c60703bcb5072b1e7c20d8a9390ce342",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCjaJUQsQ92jK8j1bN88jeOwPKw7Xr5AuWmeRsBZE04qQIgZkW2ZFzI8mtBnnszeh60hw72UrhQ0VPd9hLgBl6aQnw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.6.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "2ebc08e778786717901a9be5511b93969d3d2308",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.6"
+   },
+   "0.1.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.1.7",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.1.7_1786543573375_0.15054874487458703"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.1.7"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-A1m47JVOEFYofIQJgjmKhguEXBSkfxvsp2XG258IbO4yStme+EafKg5AHuTJGgX0Vw7fJm8d+lY4UWX5CanSFg==",
+     "shasum": "521c69bc1238aeed6c6c0cbf7a97e7257efa1852",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICKrL3V7q4j47l3ZxOwvLoh5YOI2tv2uTc4QXIrCDSYUAiBJ3w40DvX4y1jnqJOCnUujWzJI1qQtD2qV8p3HHjVYUg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.1.7.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "051470abf5eacb9bab74749958ba9f78e6a19627",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.1.7"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.7"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.0_1786577465663_0.8667058610285092"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-PqrA5I6F6MdNGuMNcsylzNDOS5Tja7nYOxePPQdaRT4cYBSXoPr9k+WySDJQ67ZWuZ7u0A9JeWPsIFBGYsEIOQ==",
+     "shasum": "281e564c62fdf2171f28f264f46c46415c56a1b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCdFD6E/l5kV+HqHHjSwGF1ea+l5CqLGp7qod8bw64DvQIhAN5vUNTdD7MYFtoV5loxyXzGxX7mqjKflKG/E3hX4m8e"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.0.tgz",
+     "unpackedSize": 160436
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cb9369d113961c01a2f6aae28a0f3c75948b5dbb",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.1_1786630590377_0.8121629156158465"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.1"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-WhZ/noYhX4bdJLJwmxC8VW8/D1AkRs+DTPduypvz4TwTDARgNTD6RZ0SGwyOaP0D/0wB5RvdSvMviJd+Sg+1bA==",
+     "shasum": "2f6db180d672f1d964afe9a6cf253284d7d6db1c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFyrz+bey+VBMg+BzIi5jvgFK9v1unAFk7ihZ7TeN/f2AiEAg+gs6ad3aToR3HKQXtmn/oVnkTOIU16ar2jl7M17Njg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.1.tgz",
+     "unpackedSize": 153299
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7aa46844ac4c8fc71366c82c1360326f4f346832",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.2_1786703004922_0.22898115095412686"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.2"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-vY6y3srSh2tDlzLjtAMk+CGNLjIZyxLNKc2esTiZCaTiZMZU3mgIy/B+3pdgXnSpGK4rAsA60RAgyx30iav2Hw==",
+     "shasum": "ad5ff9d94dc5df923b28d08bf2ca948ea469dcba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBO1UIsSSUQ445Rat0qgmfcR9GJNHiMON04yM5TLIFm9AiAXxaCtIAMjCcoemZwHTEvV2P7YHPIezdcm+XR2qQFDkQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.2.tgz",
+     "unpackedSize": 153299
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3126fc2a6d84c3b6ac038722ecd558590055ce40",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.3_1786722108580_0.9393088315465521"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.3"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-+veS6Jadcjd6GN3urBsGlUq/+880W1LOYxRYHFm0vzq6pqOUy6M6ADQ1GjQ1RS20KKEu3iE+IqG2p/tcZ1DT4A==",
+     "shasum": "b632781864b13c0f5f9b10c0e1d02112170c54ac",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFDVb3GLB57rLvE+m1BqsacG2hBKuMXnb9PAtLJZv8kIAiAOrXUJNjPh9UE9oQ7dudYYNsauH/4jy3QGojq8D/moUg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.3.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4138e659139eb7421bc67f44440a4363abd5563b",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.3"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.3"
+   },
+   "0.2.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.4",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.4_1786744961614_0.9164733042322777"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.4"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-3T83kdbO6U+f/yrxPKNZcSMIQE5ldOhGxqdaeFGM4DGH/YS76D0iK9w4tPIkD5wsfNmpW9TryCYZio6OoGOWRQ==",
+     "shasum": "a8738c9575e71b83be90aaf78975e1d0cb2bed7e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTXBHWHGBlwGfzNKa3WPxA/dsGVOUERRFIzoRZB7eILAIhAOMTzJPctlLBanGeFHFJIeE9xZO7sYHko32PSxAxuCAj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.4.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "236ee8cca0740d6d7b812d12fa52eb040e15f3cf",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.4"
+   },
+   "0.2.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.5",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.5_1786795356710_0.8205898792529134"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.5"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-w0lcxt+dYshWJtyZoEL+2tdBr3dDj0/jYusKwMrIj9TqLY9vtM75PhDY5frRiR7kkX0yF6umAp7Tm0/2uwXNMA==",
+     "shasum": "9016844d3251f83db0fe256667f2d7cf210b91dd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCHz/4gbybl35v03f2Y1mIK9965po5K/pwxmGA0uD4etkCIQCSmCxoUuAzweMFZXsWPLDqzRqI1hTt1tlbMh2oAX6KYg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.5.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "496d0213403aecf658b92bf013bb8f3b8cda2911",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.5"
+   },
+   "0.2.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.6",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.6_1786901463425_0.5168605179445926"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.6"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-0QD2eDuXaKWhuijsXE9uFF04C9+eGiRmyfzncJz5OvnRaRtDyZcKw6FKigOWACQszSws4HX7O3vw3MfFBrjWYA==",
+     "shasum": "16907834155f2b05a809c61dead8c68b16c32bbc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxF5BscIt3CPZaLehiLQscQ2Gk1/31o93AOkX1Xne1ZgIhAN7/TgIbvfa0byKsNl9BgAhzKHsXXfxBGxZr6e+rkImQ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.6.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "099540531a35303c11a22b582a72677c1a0978fc",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.6"
+   },
+   "0.2.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.7",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.7_1787006665885_0.6578812249723314"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.7"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-uxot/LNk4GTq+ZgzucjtE3MD12LPFEg5+PMxIPVD6xRJjXHthH5heLaVkcSCqDQ6bONtYr6lMGDuDrCrI9a6sQ==",
+     "shasum": "8c72595af45af3d457e9668422b2e5c577a4879f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDs0jn6X8uazE/H4uTuueo63zeCnrdVm0WpNOWySeO/wAiEA0XomqZQ0XGweOFn6S5+GYdlY85m79PZRjUU/O5BI6Dg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.7.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "df58c6c8c623771833ab725d3b816de39bb4ca62",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.7"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.7"
+   },
+   "0.2.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.8",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.8_1787091465923_0.2927930546457398"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.8"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-PPpEW086E++ZB78hpRcAHtxUsSYW6gySoEuzr1dihtDYT1NNgQv5eV7fOyjDk+N+24H/3fo8rsrOYRaxwV45JA==",
+     "shasum": "9ec0f09e4c97bbef55683bb7b13d8356d80c5dca",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICC4c7Hyq4Y1rBEweFt9fQectB/rGV6wwqdKg9oOEVq6AiAL07IlYbtoTPKfRUB7DG1A6utQvJhbryaDAGx9XEeIQA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.8.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a9918b42bd77a4015f6987c0de1898cd96133bf4",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.8"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.8"
+   },
+   "0.2.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.2.9",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.2.9_1787166804424_0.8568684657737662"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.2.9"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-WjxeE9kaQmojbfOq2/aLRxwJ1a+aX6bAsbpTofpeQizdcWNUiC1p+5CPdzegPxH+IfFTE01Rezcz5db+Id9hIA==",
+     "shasum": "a9812307985138e747f4ce3f773e42f7586f6641",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCjOvqtCHQLHpE4S/ezO6hPlpHhzAmlCjSR3Z1MOIXMQgIhAL1CgiRmgRmP6L6aPgeITK9pA4lg8vabCiOMsRjkfDl8"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.2.9.tgz",
+     "unpackedSize": 153366
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9be4284e917eb6512fcb8d503e26f87d5a3074bd",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "0.2.9"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.9"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.3.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.3.0_1787269028667_0.9991372656959998"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.3.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-r0k0qRAGyMQDNZ8NqjDPsT9nCjlznd8LflYW5SNt7VufQ+yiLkriaatKpPPYxn907st4PY51CnJZEKIwf9YDEA==",
+     "shasum": "849c316148c2e7f20983e299f48568f514fc32b1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBrrRSqQ6tcuwQOgpjowB6qrVURGlp/jWkTWnf42AqMHAiEA8Yy7S5bLC5mVD9m1EVq0PmrmTkKI8j7hhcWOgdhuMyY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.3.0.tgz",
+     "unpackedSize": 153367
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "6522844ee7a1478d8980c8c18e8dc539913de673",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.4.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.4.0_1788286770513_0.6291734776364397"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-7wdvqKGR5U+9mXmxmPaPePy+r0A6rT9ImB9tyRmhlDL5/FvEYVpal731sO4PjyBXLFie2FtEPRgr1Ry2zjTfaA==",
+     "shasum": "2ad15c7a8683871fbb193fcfd35942b7921b2a65",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAqxqXvm/ZAMzEGuzAhzJ+XOkG2e2LKEWoP3Y7CNTcFxAiEAyW3IRRjEVTZF900AXNeeOJ6iC3/Ny3wgHYjBPyuxeII="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDJTo4XnY+fj1s6SHXNW6ffU5lK196NoXJEWr+us/NXIQIhAOLsEhFaNmS/rNJp6aoeJBhLx6Tguf3cztbiS0dqep2A"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.4.0.tgz",
+     "unpackedSize": 153487
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5dddbe2ca4a8f641b5a096283dab768767dce3d9",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.0_1788641156788_0.6670149552137992"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.0"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-v9V9i0SP6i2rxIFD/zO+xC+6w/aiZhinUHvXqepQu9s8cTuKWQp1XDF6Wp/7zOLK5PsD0uSajKRC0tGsTyck9g==",
+     "shasum": "ccaace7a02547566e17def816475a8a9ff41f3fa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEwfuTb8A2t07UZBzziPsHHNB3AB9dAoA5gOYVjFe6s2AiA5oS4uvaT0ilQODygvJc05tTNgyHwBAfCzjtlAEVx/4A=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCCR2uyPlNbqplhtPhwkwn0JeQ+mwhCgY92LJNIxYaQaQIgB1C5l+AdPwccHGdFcr3Y2rNGsgfYvlvqLdSHV50koco="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.0.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3b3ccaa7a072b55c61f9e613dc4042fcbef61f45",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.1_1788779238148_0.4686552645427995"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.1"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-F5HLsXFLOYJrzraYkqDJdQ8WbCeS8CdOPekvfYHg0YyfdlOhLbDlSEzniJog9UdoDolKIbgKIKVVHxfP1xSTeg==",
+     "shasum": "a99c4229b858c965eecf4ecfb8bbe2fcccddc67e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCBBGmjaMtmlz7YPI4AKbu0JDwWJA4HecJ+0xvfpWKMSgIgQge+AUV+uKnUa/E+V5v106oYxbCpfK48o60Lcg2QkbA="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBht0jaHyvx0XpH2LcU9eOAYBoT6TydiZuSUoaR+XaY+AiAl1wmSDvaMKykkAL6LucNexkFzlm2CvOIh3oFN2cBFOA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.1.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5f586c2ee4cceca651c3872f39266d20bc23d6ad",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.1"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.1"
+   },
+   "0.5.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.2_1788811663933_0.7219474430318871"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.2"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-6he308OLoSgsrEJ/gEmIU0aEEX0i+gZaVetJdTw1VwOjLvW+XQJ69D+onGjiRZ7O3rZ2spBs3Rdkj78YucKtOw==",
+     "shasum": "b31402694b4cbc20bba7605dd075a03ed817d16d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFD6+P+QZaUYKBAB8KndcJzaMKTVaWwb3+Uv1DIrYEONAiEAtKwtzyvXEj8lz933JcC0IFfYhwByXtUogTiM0q2o4Uc="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGfajpQU8cCNCeyPnE7/Ke2n7xMYg2GOaBuC4F67m3nKAiEAlZoS0WhTPeSJ5jS+QHip76qFis7ps6kclCKgrDPTEpQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.2.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "166f6353940e6cb30ca160aa24451ca0d9f646cb",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.2"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.2"
+   },
+   "0.5.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.3",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.3_1788852140233_0.2139427484601102"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.3"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-s0BUYqughS0XEFTnws6ej1fbNZCJNqT4dVji2KSABlz4q/P/oSsFiOJ3x7pqPaS0tSz+23yG4Z9r/qYrH0T46Q==",
+     "shasum": "ff6fe3234a5587fce0a4edd8e3bd07f4a0070aff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC0a7tE9z6+C2u/1JR1ImX8+/cTIq/F9ZdUANUMKkhMGQIgV1OxJCdwS+l37te2D3Oe79lN81foRLH8a6RB5OIxz60="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCtrh+8nUpoUQ6JuJiDdI33sbDm5Wi7YFpKkZyPNo5L/AIgFMkd6mqWDbWX7eouxGRPn7HCdY0Pi2f64kHUq+/q1CE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.3.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "58901885ef6e33e77c1378c0767d2a389c261ddb",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.3"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.3"
+   },
+   "0.5.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.4",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.4_1788873842865_0.8671734192024916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.4"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-HEUcolXbRSeNf4fzVnfbYdVFtxlqn0d+Wk+FRz9I1kBlZYzayZGlolk1AaFcBjNoi10vOSW2S1cyRWsrsa0kSg==",
+     "shasum": "d26c6374894122c04293ad1ad9fef0791d7b5131",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDvK746OLxuDZzHwjRVhgOwevSfs5IKufsH5cW9qTweRwIhAM432AOY26y28qybgKoRpruUkSHJx6rgkOWQ5Nu1tNzY"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDVPXnXcygBBRaWbFjVUwzV/pV5n+WYU5qW0/Ti8+iIsAiEAqrESMDf3cR+tBM5LRmyyaO8JNSKg1JON9FpWWpiKO6o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.4.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "97f931b547762fac1235d20a00c25117133c6a18",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.4"
+   },
+   "0.5.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.5",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.5_1788888108573_0.17269508171617498"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.5"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-kWZvkmmx2h6fvlJomD9pc+7gQnUSGy1u0xCj5zcN7h1ZmayqPjGdm/TRuZU0mwtuefZDKgH3dBXupmrv/EVbUQ==",
+     "shasum": "eeb74dc778ef4d6c7fbeae387e788f1e81c3506c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDMGqZ9+I+KjPVow0DyP7/VdDbHhk8FVbmsDn83lx8TnAIgRGH2JsEx4rBuvFSFub5el5zfGQ2+1Dv8cmiqWdsFXNY="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID40hRNmQraXVr206VUsqa1ZbMhSMGwud9/6ms33Ada1AiEAjPPWMvFMGr9zyiy8tv+XxyQ1AKiz5qjcuqRdO9gpMQ8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.5.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "ba577f20526bd323d1064588ff7e97048b3f88bd",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.5"
+   },
+   "0.5.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.5.6",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.5.6_1788979215874_0.8639422021037184"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.5.6"
+     },
+     "fileCount": 30,
+     "integrity": "sha512-Xz5pAthKyWIuEDo3En3EdXhFVFchfREG8JBAtdgv+DgLB454iLpIE2Bri8l/S1IyVAhXK95pz7jq7dCpOTvLmQ==",
+     "shasum": "2570de292f8cd592f2e2b3ecf49ffc973ce6b79a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB/x/HpMM6dXdeQY5K6v2Gwop2+SfeauDWpzjqPUllkmAiB9PHWnu3EhAtmzP2lRMzMuYnWR6wvfTVSI4pFKKVKIqQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCBeTgf1C69v7ArtDGO+Vs/sw/9ssRclMOdOMnGH2KB3AIgI2nPg1Ag0ik9wijHxA13XFOjdLcF0bxgKD78Q7NYDjk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.5.6.tgz",
+     "unpackedSize": 180623
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "983eca4d5b8ec64c4ff03098c0d0b3cd972df7a5",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.5.6"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.6"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@arnilo/prism-mcp@0.6.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/prism-mcp_0.6.0_1789240674955_0.9288997032362833"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3e6f2281d641]",
+     "name": "arnilo"
+    },
+    "_npmVersion": "11.19.0",
+    "bugs": {
+     "url": "https://github.com/ashiqrniloy/prism/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "zod": "^4.6.2"
+    },
+    "description": "Bounded MCP tools, resources, prompts, client callbacks, and authorized Streamable HTTP sessions.",
+    "devDependencies": {
+     "@arnilo/prism": "file:../.."
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@arnilo%2fprism-mcp@0.6.0"
+     },
+     "fileCount": 32,
+     "integrity": "sha512-rnZe6BFlbYOz9H6/MrFNccnUFLF58rnjc54uSjqHU/Do+o3FSVbNkwVUfbKiPV8fFlVc09jjYNDY32LRTtAnug==",
+     "shasum": "a4c7489ca912ed5d023afd3308e41eb26647e7de",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHKwUqvmCdG7eBN2QQZeItQGzDhjx/kd0fosiuH4MFKxAiBa0pNVDLvcMJgmy6KRImLpUk4czW7NWh28gA4nD9tZHg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBsttA1tgaJjqMUd7+d5+Kq4HEvJvnqVu7Srf3hbe4c+AiB40sqQOink3NFbR198hV58IO+vTo6Uke016svnHFex4g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@arnilo/prism-mcp/-/prism-mcp-0.6.0.tgz",
+     "unpackedSize": 182254
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "74be1b30c0dfc7e80f9c9684b392e9f8cf610e72",
+    "homepage": "https://github.com/ashiqrniloy/prism/tree/main/packages/mcp#readme",
+    "keywords": [
+     "prism",
+     "mcp",
+     "model-context-protocol",
+     "tools",
+     "agent"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3e6f2281d641]",
+      "name": "arnilo"
+     }
+    ],
+    "name": "@arnilo/prism-mcp",
+    "peerDependencies": {
+     "@arnilo/prism": "^0.6.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ashiqrniloy/prism.git"
+    },
+    "scripts": {
+     "build": "node ../../scripts/with-build-lock.mjs tsc -p tsconfig.json",
+     "pack:dry-run": "npm pack --dry-run",
+     "test": "node ../../scripts/with-build-lock.mjs node --test dist/__tests__/*.test.js",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   }
+  }
+ },
+ "name": "@arnilo/prism-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@arnilo%2Fprism-mcp"
+}

@@ -1,0 +1,1763 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.13.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ca1aa70cb1df]",
+    "name": "decispher"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.10.0",
+   "0.10.1",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.2.0",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.6.2",
+   "0.6.3",
+   "0.6.4",
+   "0.6.5",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0",
+   "0.9.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@decispher/mcp-server",
+  "_rev": "20-e5e55778d2e836f2ca80df6508f494e1",
+  "author": {
+   "name": "Decispher",
+   "url": "https://decispher.com"
+  },
+  "bugs": {
+   "url": "https://decispher.com"
+  },
+  "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+  "dist-tags": {
+   "latest": "0.13.0"
+  },
+  "homepage": "https://decispher.com",
+  "keywords": [
+   "mcp",
+   "decispher",
+   "decisions",
+   "context",
+   "engineering",
+   "knowledge"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ca1aa70cb1df]",
+    "name": "decispher"
+   }
+  ],
+  "name": "@decispher/mcp-server",
+  "readme": "# @decispher/mcp-server\r\n\r\nThe Decispher MCP server. It serves your team's engineering decisions, constraints\r\nand conventions to AI coding agents over stdio, so an agent knows *why* the\r\ncodebase is the way it is before it changes anything.\r\n\r\nNeeds a Decispher account and an MCP API key from your dashboard.\r\n\r\n## Install\r\n\r\n```bash\r\nnpx @decispher/mcp-server\r\n```\r\n\r\n## Configure\r\n\r\nName your key once with the CLI, then point the config at the name:\r\n\r\n```bash\r\nnpx decispher@latest link\r\n```\r\n\r\nClaude Code, Cursor, Windsurf and any other MCP client take the same shape.\r\n\r\n```json\r\n{\r\n  \"mcpServers\": {\r\n    \"decispher\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\"-y\", \"@decispher/mcp-server\"],\r\n      \"env\": {\r\n        \"DECISPHER_LINK\": \"acme\"\r\n      }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\nA link name is public and meant to be committed. The credentials it points at\r\nstay in `~/.decispher/links.json` on your machine, so this file holds no secret\r\nand a teammate who clones the repo runs `decispher link` once to answer to the\r\nsame name. `acme/payments` names a project-scoped key under the same company. On a\r\nmachine holding no credentials that command is a browser sign-in, so nobody has\r\nto be sent a key for it to work.\r\n\r\n### Attaching memory sets\r\n\r\n```json\r\n\"env\": {\r\n  \"DECISPHER_LINK\": \"acme/payments\",\r\n  \"DECISPHER_SET\": \"design-system,incidents\"\r\n}\r\n```\r\n\r\nThe link stores the sets you hold; the config picks which ride along. At most\r\nfive, and past two or three they compete for one budget and crowd out what\r\nrelevance retrieval would have found.\r\n\r\n### A key in the config, without the CLI\r\n\r\nStill supported, and not deprecated. Three situations need it: the Decispher\r\nWorker injects credentials per run into a sandbox with no home directory, CI and\r\ncontainers are rebuilt every run, and trying MCP before installing the CLI.\r\n\r\n```json\r\n\"env\": {\r\n  \"DECISPHER_API_URL\": \"https://api.decispher.com\",\r\n  \"DECISPHER_API_KEY\": \"dsk_...\",\r\n  \"DECISPHER_COMPANY_ID\": \"optional\",\r\n  \"DECISPHER_IDENTITY_KEY\": \"dik_...\",\r\n  \"DECISPHER_SET_KEY\": \"dset_...\"\r\n}\r\n```\r\n\r\n`DECISPHER_COMPANY_ID` is optional. Present, it is used and one round trip is\r\nskipped; absent, the server resolves it from the key on the first tool call.\r\n`DECISPHER_API_URL` still matters: without it the server talks to\r\n`http://localhost:3000`.\r\n\r\n### When both are set\r\n\r\nThey compose field by field, with each environment variable overriding just that\r\none field of the link. So a link plus an explicit API key means that company's\r\nidentity and sets with the narrower key substituted in. The one thing that\r\ncannot compose is two companies: an identity key is scoped to the company its\r\nAPI key belongs to, so a mismatch would resolve to nothing and personal memory\r\nwould go dark. The server refuses to start on that combination and names both\r\ncompanies rather than running with memory silently off.\r\n\r\nA `DECISPHER_LINK` naming a link this machine does not hold is an error, never a\r\nfallback. Quietly using an unrelated credential is the confusion links exist to\r\nend.\r\n\r\nThe server publishes its own tool list from your account's `/capabilities`, so a\r\ntool added on the server side appears in your client on its next start with no\r\nupgrade here.\r\n\r\n## What it exposes\r\n\r\n**Before you write code**\r\n- `check_intent` tells you whether a planned change conflicts with a team\r\n  constraint, answering BLOCKED, WARN or CLEAR.\r\n- `get_constraints` and `check_conventions` list the rules in force.\r\n- `get_context_for_file` returns the decisions attached to a file, ranked by a\r\n  symbol graph rather than by text similarity alone.\r\n\r\n**While you work**\r\n- `search_decisions`, `get_decision`, `ask_knowledge_base`,\r\n  `get_context_for_topic` and `get_related_context` read the knowledge graph.\r\n- `capture_decision` writes back what you learned.\r\n\r\n**Across sessions**\r\n- `copy_chat` compresses the current conversation into a portable snapshot and\r\n  returns a key that works on any machine and in any Decispher-connected tool.\r\n- `paste_chat` restores one. Sections that do not fit the response budget are\r\n  named and held back behind a free continuation cursor; `section` fetches one\r\n  in full, and `excerpt` reaches the per-stretch notes of a long conversation.\r\n- `list_clips` finds a snapshot whose key you lost.\r\n\r\n**Branch memory**\r\n- `store_read`, `store_write`, `store_list` and `store_link` are the working\r\n  memory your agents hand to each other across a branch.\r\n\r\nEvery tool is scoped to the key that called it: a project-scoped key never sees\r\nanother project's record.\r\n\r\n## Costs\r\n\r\nReads and writes are priced in Decispher credits per your company's effort mode;\r\n`/capabilities` reports the current cost of every tool. `paste_chat`,\r\n`list_clips` and the branch-store tools are free.\r\n\r\n## Links\r\n\r\n- [decispher.com](https://decispher.com)\r\n- [MCP server docs](https://decispher.com/docs/mcp-server)\r\n\r\nLicensed under the terms in LICENSE.\r\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "https://decispher.com"
+  },
+  "time": {
+   "0.1.0": "2026-05-24T21:18:33.662Z",
+   "0.10.0": "2026-08-07T04:39:17.348Z",
+   "0.10.1": "2026-08-25T22:19:20.521Z",
+   "0.11.0": "2026-08-26T07:34:29.626Z",
+   "0.12.0": "2026-08-27T19:29:21.972Z",
+   "0.13.0": "2026-08-30T16:02:36.793Z",
+   "0.2.0": "2026-05-25T17:38:17.629Z",
+   "0.3.0": "2026-05-29T20:57:43.406Z",
+   "0.4.0": "2026-06-07T00:04:20.470Z",
+   "0.5.0": "2026-06-11T17:35:25.489Z",
+   "0.6.0": "2026-06-12T16:04:34.815Z",
+   "0.6.1": "2026-06-12T16:09:51.015Z",
+   "0.6.2": "2026-06-12T23:53:43.131Z",
+   "0.6.3": "2026-07-09T09:25:10.383Z",
+   "0.6.4": "2026-07-12T17:08:33.513Z",
+   "0.6.5": "2026-07-15T20:37:15.889Z",
+   "0.7.0": "2026-07-18T21:29:15.502Z",
+   "0.8.0": "2026-07-21T05:35:13.237Z",
+   "0.9.0": "2026-07-21T21:30:02.172Z",
+   "0.9.1": "2026-07-22T05:58:47.238Z",
+   "created": "2026-05-24T21:18:33.403Z",
+   "modified": "2026-08-30T16:02:36.949Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.1.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1779657513526_0.1601557118181125"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-cVUtAP+kJef2CE7RhWbUE/M+b4bmqYAlbTiWLiiBfSCHKm/Y5l//fj1X6QRURjuu+9dUR7KrJx85RbDGxHOS1A==",
+     "shasum": "d0f8fe432ebf1282fb2c222a9e437f71e15ddeb1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGgKzSK2Oq5wsAG/y897301fE7d2O84SaWHDx20Eie0qAiAq75Eyy5o7ELERf4y8LstFvZWuiGSH4b3Nnff3FojUAg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 174461
+    },
+    "gitHead": "e2331dbc7103d7bc6feb32e84d6fa14ad83b2df5",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.10.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1786077557141_0.7049676182021194"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-vmoIkBl1D9+8Yrjm0H2BKj3GEaCljAXqKk9x7wWSIeqOnvM9CQ0kcFUziYahOtexbuUT+w4HbqCDh5igFxrFZA==",
+     "shasum": "dc1c328242e6d262767b3988f72ab26c323e727c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBh66TDKnzl3JCedx4OzPFl7k6wOgz98/2YJTwIpCJOtAiEA8PEz+DcAtZyxfn2YuzRW1oddFihkO3WAiM6WJGsdsHQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 455753
+    },
+    "gitHead": "d0fd8dbf6d9681489f972c479277b428583ff7d7",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.10.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.10.1",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.1_1787696360382_0.5672009785166596"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-/4iq2gvVweP+9TUaFNJNbs8K1hhs2NVP83dceFXhbrYi3ZLF+BxN3QP3x3uzu/M9tiqFO21w/Bb/EyPnxD98sQ==",
+     "shasum": "f94500268ec6a2c167baba47f36d32f7a53234c7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCceyXcYF6NJG1qMS5ggxTw7DZY665kuuZL66u6Xhuu3wIgSLyMR8g7kKRaTT+ael2vyaW9xm5+swr8HecuLGk5N4g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.10.1.tgz",
+     "unpackedSize": 497253
+    },
+    "gitHead": "ca60680deecbf0d7a5f1743472d15ee27566f5db",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.1"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.11.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1787729669493_0.24925141798349526"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "author": {
+     "name": "Decispher",
+     "url": "https://decispher.com"
+    },
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 28,
+     "integrity": "sha512-FuKC6XDz2+ILSEXYc/hBAKTYGQVPQzDSKIMLXVW1gPQW5Z5iDVFX/f/S7T/Ag8sxCoNPo7fRu316al2JPdKhdQ==",
+     "shasum": "4ffadbb634240397d2662a5018b7aaad13546de8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCrgUiznx0c7jwl6wkmzOzf/WfcOXWu7BIiqriKJzREawIgJeISyZsAPXy2gyYtcKy5IVFlP78tvrn7yBI+fqDlptU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 257942
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "f6ac32721c32c64bb66824d47a41ec5c49776c28",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "license": "SEE LICENSE IN LICENSE",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc -p tsconfig.build.json --watch",
+     "prepublishOnly": "npm run clean && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.12.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.0_1787858961774_0.3160016668302654"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "author": {
+     "name": "Decispher",
+     "url": "https://decispher.com"
+    },
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-75ORVWhajMjnQLNc4wwCzRAR4maNaCzSoG06j7nVIZnPEgUOYzrd1KrWyhwJQVEGIIlDH2IIMvKKe+8snk7aGw==",
+     "shasum": "b2ff1d43586e64c7b9124bbab50cb1b32072b160",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBaqPLo035kjJcVxa2RhMVE3qSJHb+GRLxcoAZXhoO7uAiBf/+uq34Hmn7KcH4SMDaR8wQU6klUJi7jDlGsiGNsNeg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.12.0.tgz",
+     "unpackedSize": 371603
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "066a5f1ffb7e47cd2fe9149800fed546f17a9748",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "license": "SEE LICENSE IN LICENSE",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc -p tsconfig.build.json --watch",
+     "prepublishOnly": "npm run clean && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.13.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1788105756626_0.1508045473666464"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "author": {
+     "name": "Decispher",
+     "url": "https://decispher.com"
+    },
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-X5TPuUzqkYauRCqSqN+oODr/70RWSNRD6TYcla5fJMAGgSeNqodEM8xCJjprfpfQxwVQag3xQIEFg98dbsC7Hw==",
+     "shasum": "f870e02c36ee496a98245d26f99d2f48619a570f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHqY6wQVKjDfAbwUDNiNU+mB3+fmOGE0nToVBrhExpBQAiBQk5LOi+ILGOuSdQUTw2zqw+ZP+w1/oNyqQoPMHKMpWA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 376989
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "74e9212b358c4348d198d638e67c3f3331ec70ac",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "license": "SEE LICENSE IN LICENSE",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc -p tsconfig.build.json --watch",
+     "prepublishOnly": "npm run clean && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.13.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.2.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1779730697478_0.6294571126502106"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-6dyHnU+Rxjw8tNb3+Osjlc3P2eb3jAfaDFnPLHrNNQqZLquPcKTP5RCLBLhDs7dED6vMNDwD8Ne2gRgkgnn0NQ==",
+     "shasum": "a5a083d791d6f0960c14414b3759d40c9b5f4837",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCII0MPairQ1hI8WPP1k/qbs2jjmksr12NRTtWglca70QIgTdcbt9n01hMCs67NklU5jrQe1SVf6XX9iBx7ad6mW7g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 200016
+    },
+    "gitHead": "820ade7b524dd63228c82999668f2c751b4bd6bc",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.3.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1780088263267_0.8667855396789115"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-os+MTinhyXEGn4bFNPhrrdT3YQfZ0Fu8o523T6Usn/1oUm2hvLm1+jqCnC1eT8C42W5QpsD8J/MmiIUJ+RmZ5w==",
+     "shasum": "14fd62d12fd6b32b3950d0bd456730f9e455f800",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFAbEQOfBYANN2F7psZPCAW2WpXPLS4eMRAThNi/gfkTAiB0d0myyXIy1vj97RWUf8KMyWR4o9EOXij9t5KcXG+GMw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 217797
+    },
+    "gitHead": "eee8840eac2ce9fd0c8f3b5aeb824e601e01112c",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.4.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1780790660270_0.4380092615897686"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-06qGfwx5VDVrY3n5qNqXO0i6rTg4nxM+x+kK85hkvpUQ6mDwoC7aGWWEgJJskrUg5cd235XF7i7QM9LrGKNGGw==",
+     "shasum": "6fabc8926f5a13eacb55bfa57ae8a45dbc242146",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCL4C8KvU4EfZgmniOEbCLuFkyY0Gme/2K7FqNEq1XZ8wIhAKva6v9GxoGakwI3Dq7tidK9C3Fq/u/7yMiXl4U/6Zvk"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 238021
+    },
+    "gitHead": "b55b877c3258df489d1f6f8b3aca2aecdf925d35",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.5.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1781199325362_0.20827511229052798"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-Fl4aF8zcpx8mSxgGhlRahQSwoZVc0MMOV9M6vXQx/FH9WwlrjwLgi5LeNf3cHiiDpWHkJsw/X0QjmUYbIDzZew==",
+     "shasum": "096f5bd9fef88105ba0419a764643c1cfc248b9f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICG8IO3nO+mpPPNeR3JHwIbLXAI0buAa/o09dekcBKAOAiEA1z9uBkCIk3YT8Zt7W6mPUw9j/CJt3LuxPfK9gys955s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 250769
+    },
+    "gitHead": "f29bf17a8438ac9fc6637530174ab7f56e95bac0",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1781280274646_0.5858245848312091"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/gr8-alizaidi/decispher-platform/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-dq5ide5B/Yn5rHJ/3XT4jSow+HNt1y3x2h1oKFlHCJzAxSCoGMI7yUOq0uqG2MOFI0Fz7izlUu9gHbXfcgfP5g==",
+     "shasum": "a8b43d2caa0e8dbffe03c3eb875e16337a3067f8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICnXX8B53KiKtsP5qLznVnFHprjhk+G903g9PCGbHANRAiBkKcdLn9K267ee2HtO4n//7ZKtAgMmTOe9Vra/Rzzhvg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 294329
+    },
+    "gitHead": "ef95e41d665f23f4237cc2b2a6202ccee057702d",
+    "homepage": "https://github.com/gr8-alizaidi/decispher-platform#readme",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/gr8-alizaidi/decispher-platform.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.1",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1781280590876_0.34201946011404294"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-7vjfETTKRdq/nJr/se3H7i89//YDjXpso0SZraXYrCqxdpbGa2VIN3SwhJWLSEWwCDr/gtig8Ef+vSeBQ1mnZw==",
+     "shasum": "e1a87dcf01451986e2cf5d6437e552e80bfd872a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCheS+DE5HtgioLC5JW9s/CEl2/wcZJLGbCnXijRqpMOwIgOzGDvQWtV7keLDn1E4zqv63yMin0/Ju05bb4f6cwvEU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 294405
+    },
+    "gitHead": "ef95e41d665f23f4237cc2b2a6202ccee057702d",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.6.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.2",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.2_1781308422995_0.49160854403222953"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-fsdj8mlXGWCsN4MFbHp/+dB5tK2DbhtC6DsCHx/jZ9P3XVqVsy19Chg+g7Gsfmdpx2T/+n/NYVGeJ0bGbQZJXg==",
+     "shasum": "45b0afa8dcbbb44d04dbb4c2fe6f908bed376a03",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDoAt5imIpajuC0pBoopFhF4Tghl8w+FHnijUSA+kip7gIgYrx7wPOnIl7m/DhFchE5tkURrxyUq5O/axPlfeAgRM8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.2.tgz",
+     "unpackedSize": 294405
+    },
+    "gitHead": "5fcf11e601a9195d026cc86e9fcfb7b4c9635459",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.2"
+   },
+   "0.6.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.3",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.3_1783589110253_0.8150050036433707"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-t47SNcrZ/C2T2s3qNYISCzR10iMxDWgaOy/YIU/GQEurR66BYnTVO/Y3hvkyjxO64LaJPDEwHORDe2HrrTAFlA==",
+     "shasum": "2c2bd71d7c6c94c909c112c120e53ab12456da9d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAfNiHAcZy54tOJkOYEkRIIhizIvjetMBK67mR4qd5nzAiEA/T1VlJIMrmEecYsaz3ee36gNVwu0XBMCtR2ywMFiOwM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.3.tgz",
+     "unpackedSize": 324114
+    },
+    "gitHead": "4953a1d0565f2380804c2a570ba44f6e3189513e",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.3"
+   },
+   "0.6.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.4",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.4_1783876113361_0.35943157675441384"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-/Pn9sUMP4dGFDRspcaYaaL/+y1r3UVgovc9SyqFxDm++OjJGibG91oszPKgAh6/TMPx50WZ/KdZeN83W8qdc+g==",
+     "shasum": "ddecb0b00492e93c6f7d4abea33d0230ce2ff922",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGIsPJGcSjse0Ns1on30/72p8OiAOWM6GlkJrVGrVE9LAiAmz54+jUDJ9hw1/MLXcSOr1oiyeRBu3tfXBq+ZeCa9OA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.4.tgz",
+     "unpackedSize": 334270
+    },
+    "gitHead": "082e2cf026903c1872726f5dac5614b95ca7e16a",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.4"
+   },
+   "0.6.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.6.5",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.5_1784147835734_0.41007487641680007"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-+Ad/XuxeuoYayLZH0/ROTIeCcxWjF4pPhIfNUFlhY39LMXDFuzS9udADU/knV620U1yCFzGUHSSOUfRvnMttIQ==",
+     "shasum": "5fdc1259960ef12bb49ac1ec91107b1baa3e123c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDpK/aA5NhMfj4/p7lBBYP0AwJHDQtSnYtO9R56Ve7nRgIgXQ8YQJUqopUueTfuR7NEg7tHSFM+kJ5KIs6s59qZYC4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.6.5.tgz",
+     "unpackedSize": 345147
+    },
+    "gitHead": "2c52b5e5feb78f910ddf45aab0c1b1c1d5ed7126",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.5"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.7.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1784410155355_0.5828824790971892"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-Q8ecbdeBzoFwsSqCVYwTMhr7no8ZU9yx2s+HMCUSsxx37SDbAKVe3Ek8FKNVnYcdxTaOLdEuc2d/DKl18oLlpQ==",
+     "shasum": "414fc11a9e708c3c50f66754a51b928453ed6d1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbSkjRUQqcFECJlbMJvCGGuYQTSdElBcdyfwisA0pV5gIgHTzVxqBDlA1d4cD4Q0GdKEOp/RGq4fL+MMlMT4WxEAk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 348569
+    },
+    "gitHead": "bf4376b5a643d03c0714450c10d32d0f2fcc770b",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.8.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1784612113116_0.1568260112015747"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-miJMp4HbpAB4MQXan/RAJVo+4R+9PACTH2jyoPjofYmyIewDccbISlBaNrmmO51CZoiZ6dWHonW5XQh7LaAlqw==",
+     "shasum": "5fb92dbb4a0512ea6ca45f6ccd480d1bc0caea82",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICP+LN8StCFTF8xHVHWIeazWrlcgd7L6N3ftgrnsVYRpAiEAovn8ZqnRz7pKwj7ivr6obp0yBR+AgOu0SdudL+3G7KA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 378694
+    },
+    "gitHead": "7fb8eae9ed903d36f401903d9e3980a458691902",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.9.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1784669402013_0.5841069312246674"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-uCJ349dYuKQZqjo67hQPcCuWjT6M/avc8VE5ROFTJ4q2/Agd+yhfcX8qdJ2dXTXEprtdUuIIVn2E9kZt8WTMlQ==",
+     "shasum": "c06a73a55ecfaf060503fb42d0cde7e08cdafc1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA36SfZJQyBmg0Qo1sKfyk8pVxD5D537W3PkZ+agF120AiEAlIXGR2vN0AWuy7IpYJoWFaOFJP6npr3AKP7KO5+BUwI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 397051
+    },
+    "gitHead": "b3437714d7846d61b90c561b0dae94aa9bea851f",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@decispher/mcp-server@0.9.1",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.1_1784699927039_0.4150396853971079"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ca1aa70cb1df]",
+     "name": "decispher"
+    },
+    "_npmVersion": "8.5.3",
+    "bin": {
+     "decispher-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://decispher.com"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "undici": "^6.21.0",
+     "zod": "^3.22.0"
+    },
+    "description": "Decispher MCP server \u2014 serves engineering decisions to AI coding agents",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "rimraf": "^6.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-xWp7eNjR6X+MK23+rBj593s9iTiiI65WzL0iy1MeiITTNY5PmcSxU0rtcsjaPC2ID90LKTv6203Bblu0leeIug==",
+     "shasum": "62c24091a80ba4f03a5ce2b287e3cc068bc37a99",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHhv6tiJz1tT/kVwLrYOLBA438hAZeNVjT5HSeZxdOu4AiEAmewcTRLK22alQvXec+hCH8424OAiqbuajeiGEqm96aQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@decispher/mcp-server/-/mcp-server-0.9.1.tgz",
+     "unpackedSize": 397229
+    },
+    "gitHead": "74cc9d6020d470c4f917be1e86cd4bb03b90e4bd",
+    "homepage": "https://decispher.com",
+    "keywords": [
+     "mcp",
+     "decispher",
+     "decisions",
+     "context",
+     "engineering",
+     "knowledge"
+    ],
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ca1aa70cb1df]",
+      "name": "decispher"
+     }
+    ],
+    "name": "@decispher/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "https://decispher.com"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.1"
+   }
+  }
+ },
+ "name": "@decispher/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@decispher%2Fmcp-server"
+}

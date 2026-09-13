@@ -1,0 +1,1227 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.14",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2f14f4834291]",
+    "name": "alfianyabdullah"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.1",
+   "0.1.10",
+   "0.1.11",
+   "0.1.12",
+   "0.1.13",
+   "0.1.14",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.1.6",
+   "0.1.7",
+   "0.1.8",
+   "0.1.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@jalipata/mcp-memory",
+  "_rev": "14-2aef43b3dbb037897d07bc1daac55a89",
+  "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+  "dist-tags": {
+   "latest": "0.1.14"
+  },
+  "keywords": [
+   "mcp",
+   "memory",
+   "knowledge-graph",
+   "sqlite",
+   "model-context-protocol",
+   "ai",
+   "ai-memory"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2f14f4834291]",
+    "name": "alfianyabdullah"
+   }
+  ],
+  "name": "@jalipata/mcp-memory",
+  "readme": "# jalipata-mcp-memory\n\n[![npm version](https://img.shields.io/npm/v/@jalipata/mcp-memory.svg)](https://www.npmjs.com/package/@jalipata/mcp-memory)\n\nPersistent **long-term memory** for AI tools, over [MCP](https://modelcontextprotocol.io). Give Claude Code, OpenCode, Cursor, Antigravity, Codex \u2014 or any MCP-capable client \u2014 a shared knowledge graph it can read and write across sessions. Like Claude's memory, but tool-agnostic.\n\n## Features\n\n- **Knowledge graph memory** \u2014 entities, atomic observations, and directed relations (compatible with `@modelcontextprotocol/server-memory`).\n- **Model-driven** \u2014 the model recalls and saves via MCP tools, guided by an injected prompt. No host-specific integration required.\n- **Multi-tenant** \u2014 memory is scoped by `namespace` (`user:alice`, `user:alice:project:frontend`), so users, projects, and agents never mix.\n- **SQLite storage** \u2014 transactional, WAL mode, zero-setup, single portable file.\n- **Keyword search** \u2014 SQLite FTS5 with a substring fallback; no external services.\n- **Live updates** \u2014 mutation tools notify subscribed clients via MCP resources.\n- **Two transports** \u2014 stdio (default, local) and Streamable HTTP (remote).\n\n## Quick start\n\nWire memory into Claude Code, OpenCode, Cursor, Antigravity, or Codex with one interactive command:\n\n```bash\nnpx -y @jalipata/mcp-memory init\n```\n\nThe wizard asks which tools, where to set it up, the database path, and a memory namespace \u2014 then writes the MCP config, injects usage guidance, and optionally installs an auto-inject hook/plugin. **Restart your AI tool** and start chatting.\n\nRun it outside a project (e.g. from `$HOME`)? It detects that and defaults to a **user/global** setup instead of cluttering your home directory. Re-running is safe \u2014 existing files are merged, never overwritten.\n\nGenerated configs pin a specific version (`@jalipata/mcp-memory@<version>`). After publishing a new release, bump the pinned version in all existing configs with one command:\n\n```bash\nnpx -y @jalipata/mcp-memory update\n```\n\nIt scans every configured tool (project + user scope) and rewrites only the pinned version \u2014 no interactive prompts.\n\n### What the wizard writes\n\nConfig and guidance cells show the **project** path / **user-global** path. The auto-inject column shows the **project** path \u2014 user scope mirrors it under your home directory.\n\n| Tool | Config file | Guidance file | Auto-inject |\n| --- | --- | --- | --- |\n| **Claude Code** | `.mcp.json` / `~/.claude.json` | `CLAUDE.md` / `~/.claude/CLAUDE.md` | `.claude/settings.json` \u2014 `SessionStart` hook, disables auto memory |\n| **OpenCode** | `opencode.json` / `~/.config/opencode/opencode.json` | `AGENTS.md` / `~/.config/opencode/AGENTS.md` | `.opencode/plugins/memory-guidance.ts` \u2014 `system.transform` plugin |\n| **Cursor** | `.cursor/mcp.json` / `~/.cursor/mcp.json` | `.cursor/rules/memory.mdc` / `~/.cursor/rules/memory.mdc` | none \u2014 rules auto-applied (`alwaysApply`) |\n| **Antigravity** | `.agents/mcp_config.json` / `~/.gemini/config/mcp_config.json` | `AGENTS.md` / `~/.gemini/GEMINI.md` | `.agents/hooks.json` \u2014 `PreInvocation` hook |\n| **Codex** | `.codex/config.toml` / `~/.codex/config.toml` | `AGENTS.md` / `~/.codex/AGENTS.md` | `.codex/hooks.json` \u2014 `SessionStart` hook |\n\nFor Claude Code, the injected guidance makes the model treat the memory MCP server as its **primary long-term memory, instead of Claude's built-in memory**.\n\n### Auto-inject memory guidance (hooks / plugin)\n\nFile guidance (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md`) is advisory \u2014 the model reads it but is free to ignore it. The wizard can go one step further and make the memory guidance **automatically injected on every session**, so you never have to tell the model to use mcp-memory again:\n\n- **Claude Code** \u2014 `SessionStart` hook returning `additionalContext` (system reminder before the first prompt); disables Claude's built-in auto memory.\n- **OpenCode** \u2014 plugin tapping `experimental.chat.system.transform` (guidance appended to the system prompt before every LLM request).\n- **Antigravity** \u2014 `PreInvocation` hook emitting `injectSteps[].ephemeralMessage` before every model call.\n- **Codex** \u2014 `SessionStart` hook returning `additionalContext` (same contract as Claude) with `matcher: startup|resume`.\n\nPick project, user/global, or both when prompted; existing settings and hooks are merged, never overwritten.\n\n### Adding a new AI tool\n\nIntegrations are **adapters**, not scattered patches. The wizard (`init.ts`) is a single generic loop that only talks to the `ToolAdapter` contract (`src/cli/adapters/types.ts`); it contains zero per-tool logic. Adding a tool means two steps:\n\n1. **Create `src/cli/adapters/<tool>.ts`** \u2014 a `ToolAdapter` implementing:\n   - `hasExistingConfig` \u2014 pre-select the tool when its config already declares the memory server\n   - `targets(scope, ctx)` \u2014 resolve config + guidance file paths for project/user/both\n   - `autoInject?` \u2014 an `AutoInjectMechanism`, or `undefined` for rules-only tools\n2. **Register it** \u2014 one line in `src/cli/adapters/registry.ts` (`TOOL_ADAPTERS`).\n\nReusable building blocks:\n- **Config formats** \u2014 `CONFIG_FORMATS` (`mcpServers` / `servers` / `mcp` / `mcpServersToml`) in `src/cli/config.ts`. Most tools reuse `mcpServers`; Codex's TOML `[mcp_servers.*]` shape uses `mcpServersToml` (serialized by the built-in `src/cli/toml.ts` parser). A genuinely new shape needs only a new format entry.\n- **Plugin mechanisms** \u2014 `createFilePluginMechanism` (`adapters/pluginMechanism.ts`) covers any tool that auto-injects guidance by writing a plugin file (OpenCode uses it; a future Cursor extension would too). Supply file paths + a content renderer, get install/uninstall/isInstalled for free.\n- **Hook mechanisms** \u2014 `adapters/hookMechanism.ts` provides `createSessionStartHookMechanism` for any client whose session-start hook returns `additionalContext` (Claude Code, Codex \u2014 matcher/handler-fields/extra-settings per spec) and `createPreInvocationHookMechanism` for Antigravity's `injectSteps`.\n- **Guidance variants** \u2014 `buildGuidanceBlock(scope, variant)` wording is per-target (`claude` vs `generic`); rule-file formats get YAML frontmatter (e.g. Cursor `.mdc` `alwaysApply: true`).\n\nCursor ships as a reference adapter: it reuses the `mcpServers` format and `.cursor/rules/memory.mdc` with `alwaysApply: true`, so it needs no auto-inject mechanism at all.\n\n## Running the server\n\nThe server is a normal MCP process. **stdio is the default transport** \u2014 most clients spawn it themselves from your MCP config, so you rarely run it directly. HTTP is for remote setups.\n\n**stdio (default):**\n\n```bash\nnpx -y @jalipata/mcp-memory\n```\n\n**HTTP (remote):**\n\n```bash\nMEMORY_TRANSPORT=http MEMORY_HTTP_PORT=3000 npx -y @jalipata/mcp-memory\n```\n\n## Web dashboard\n\nVisualize and inspect your memories in the browser \u2014 a read-only graph view with entity details, observations, relations, and search:\n\n```bash\nnpx -y @jalipata/mcp-memory serve\n```\n\nThen open `http://127.0.0.1:4824` (default). Pick a namespace from the dropdown, click nodes to inspect them, and search across names/types/observations.\n\n### Environment\n\n| Env var            | Description                          | Default                 |\n| ------------------ | ------------------------------------ | ----------------------- |\n| `MEMORY_DB_PATH`   | SQLite database file                 | `~/.jalipata/memory.db` |\n| `MEMORY_TRANSPORT` | `stdio` or `http`                    | `stdio`                 |\n| `MEMORY_HTTP_PORT` | Port when transport is `http`        | `3000`                  |\n| `MEMORY_WEB_HOST`  | Host the web dashboard binds to      | `127.0.0.1`             |\n| `MEMORY_WEB_PORT`  | Port the web dashboard listens on    | `4824`                  |\n\n> Memory is **centralized** in one database (`~/.jalipata/memory.db` by default). Projects stay isolated through **namespaces**, not separate files. Set an **absolute** `MEMORY_DB_PATH` in client configs if you move it \u2014 the default is resolved from your home directory.\n\n## Manual MCP client setup\n\nSkipped the wizard? Add the server to your client's MCP config. On Windows, prefix `npx` with `cmd /c`.\n\n**Most clients** (Claude Code `.mcp.json`, Claude Desktop `claude_desktop_config.json`, Cursor `.cursor/mcp.json`, Antigravity `.agents/mcp_config.json`) \u2014 `mcpServers` format:\n\n```json\n{\n  \"mcpServers\": {\n    \"memory\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@jalipata/mcp-memory\"],\n      \"env\": { \"MEMORY_DB_PATH\": \"/absolute/path/to/memory.db\" }\n    }\n  }\n}\n```\n\n**OpenCode** (`opencode.json`):\n\n```json\n{\n  \"mcp\": {\n    \"memory\": {\n      \"type\": \"local\",\n      \"command\": [\"npx\", \"-y\", \"@jalipata/mcp-memory\"],\n      \"enabled\": true,\n      \"environment\": { \"MEMORY_DB_PATH\": \"/absolute/path/to/memory.db\" }\n    }\n  }\n}\n```\n\n**Codex** (`.codex/config.toml` or `~/.codex/config.toml`) \u2014 TOML:\n\n```toml\n[mcp_servers.memory]\ncommand = \"npx\"\nargs = [\"-y\", \"@jalipata/mcp-memory\"]\nenv = { MEMORY_DB_PATH = \"/absolute/path/to/memory.db\" }\n```\n\n**VS Code / Copilot** (`.vscode/mcp.json`) \u2014 uses the `servers` key:\n\n```json\n{\n  \"servers\": {\n    \"memory\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@jalipata/mcp-memory\"],\n      \"env\": { \"MEMORY_DB_PATH\": \"/absolute/path/to/memory.db\" }\n    }\n  }\n}\n```\n\n**Remote HTTP:**\n\n```json\n{\n  \"mcpServers\": {\n    \"memory\": { \"url\": \"http://localhost:3000/mcp\" }\n  }\n}\n```\n\n## How memory works\n\nMemories form a **knowledge graph** of entities, atomic observations, and directed relations:\n\n```json\n{ \"name\": \"Alfian\", \"entityType\": \"person\", \"observations\": [\"Prefers TypeScript\"] }\n{ \"from\": \"Alfian\", \"to\": \"jalipata\", \"relationType\": \"works_on\" }\n```\n\nThe guidance injected into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` (or the bundled `memory-guidance` prompt) tells the model to:\n\n1. **Recall** relevant context at the start of a conversation with `search_nodes` / `open_nodes`.\n2. **Save** durable facts with `create_entities`, `create_relations`, and `add_observations`.\n3. **Stay clean** \u2014 atomic observations, reuse existing entities, delete stale memory \u2014 always under a consistent `namespace`.\n\n## MCP tools\n\nAll tools accept an optional `namespace` argument (defaults to `default`).\n\n| Tool                  | Description                                                       |\n| --------------------- | ----------------------------------------------------------------- |\n| `create_entities`     | Create entities; duplicates by name are ignored                   |\n| `create_relations`    | Create directed relations; missing endpoints are auto-created     |\n| `add_observations`    | Append atomic facts to entities (fails if entity is missing)      |\n| `delete_entities`     | Delete entities \u2014 cascades to relations & observations            |\n| `delete_observations` | Delete specific observations                                      |\n| `delete_relations`    | Delete specific relations                                         |\n| `read_graph`          | Read the full knowledge graph for a namespace                     |\n| `search_nodes`        | Keyword search over names, types, and observations (FTS5 + LIKE)  |\n| `open_nodes`          | Retrieve specific nodes plus their connected relations            |\n| `list_namespaces`     | List all memory namespaces                                        |\n\n## MCP resources\n\n- `memory://namespaces` \u2014 all known namespaces (JSON)\n- `memory://graph/{namespace}` \u2014 full graph of a namespace (JSON), subscribable\n\n## Development\n\n```bash\nnpm run typecheck   # tsc --noEmit\nnpm test            # vitest run (unit tests)\nnpm run dev         # tsx watch\n```\n\n**Stack:** Node.js \u2265 22 \u00b7 TypeScript \u00b7 `@modelcontextprotocol/sdk` \u00b7 `better-sqlite3` \u00b7 SQLite FTS5 \u00b7 `zod` \u00b7 `@clack/prompts`\n\n## Project layout\n\n```\nsrc/\n\u251c\u2500\u2500 index.ts               # entry point: stdio + HTTP transports + `init`/`serve` dispatch\n\u251c\u2500\u2500 config.ts              # env configuration\n\u251c\u2500\u2500 prompts.ts             # LLM memory-guidance prompt\n\u251c\u2500\u2500 resources.ts           # MCP resources + subscribe notifications\n\u251c\u2500\u2500 db/\n\u2502   \u251c\u2500\u2500 schema.ts          # SQLite DDL + FTS5 triggers\n\u2502   \u251c\u2500\u2500 connection.ts      # better-sqlite3 bootstrap\n\u2502   \u2514\u2500\u2500 knowledgeGraph.ts  # namespace-aware CRUD + search\n\u251c\u2500\u2500 cli/\n\u2502   \u251c\u2500\u2500 config.ts          # format registry (mcpServers/servers/mcp/mcpServersToml), merge/write engine, guidance\n\u2502   \u251c\u2500\u2500 toml.ts            # minimal TOML parser/serializer (Codex config.toml)\n\u2502   \u251c\u2500\u2500 init.ts            # interactive `init` wizard \u2014 one generic loop, no per-tool logic\n\u2502   \u251c\u2500\u2500 plan.ts            # pure planner: selection + scope \u2192 targets & mechanism installs\n\u2502   \u251c\u2500\u2500 hooks.ts           # Claude Code hook file layout + script renderer\n\u2502   \u2514\u2500\u2500 adapters/          # pluggable AI-tool integrations\n\u2502       \u251c\u2500\u2500 types.ts           # ToolAdapter / AutoInjectMechanism / WizardContext contracts\n\u2502       \u251c\u2500\u2500 registry.ts        # static registry (TOOL_ADAPTERS) \u2014 the only wiring point\n\u2502       \u251c\u2500\u2500 pluginMechanism.ts # generic \"write a plugin file\" mechanism factory\n\u2502       \u251c\u2500\u2500 hookMechanism.ts   # generic SessionStart (additionalContext) + PreInvocation (injectSteps) hooks\n\u2502       \u251c\u2500\u2500 claudeCode.ts      # Claude Code adapter (SessionStart hook + auto memory disable)\n\u2502       \u251c\u2500\u2500 opencode.ts        # OpenCode adapter (system-transform plugin mechanism)\n\u2502       \u251c\u2500\u2500 cursor.ts          # Cursor adapter (rules-only, reuses mcpServers format)\n\u2502       \u251c\u2500\u2500 antigravity.ts     # Antigravity adapter (PreInvocation hook, mcp_config.json)\n\u2502       \u2514\u2500\u2500 codex.ts           # Codex adapter (SessionStart hook, TOML config)\n\u251c\u2500\u2500 web/\n\u2502   \u251c\u2500\u2500 server.ts          # web dashboard HTTP server + read-only JSON API\n\u2502   \u2514\u2500\u2500 static/            # frontend (index.html, styles.css, app.js)\n\u2514\u2500\u2500 tools/\n    \u2514\u2500\u2500 index.ts           # MCP tool registration (zod schemas)\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.1": "2026-08-10T06:58:29.585Z",
+   "0.1.10": "2026-08-11T07:20:28.004Z",
+   "0.1.11": "2026-08-11T09:29:45.524Z",
+   "0.1.12": "2026-08-12T04:16:54.354Z",
+   "0.1.13": "2026-08-12T04:32:51.213Z",
+   "0.1.14": "2026-08-12T04:55:22.527Z",
+   "0.1.2": "2026-08-10T07:09:00.898Z",
+   "0.1.3": "2026-08-10T07:44:22.944Z",
+   "0.1.4": "2026-08-10T07:54:09.810Z",
+   "0.1.5": "2026-08-10T08:01:30.961Z",
+   "0.1.6": "2026-08-10T08:33:03.574Z",
+   "0.1.7": "2026-08-10T08:42:21.549Z",
+   "0.1.8": "2026-08-11T04:50:09.398Z",
+   "0.1.9": "2026-08-11T06:47:32.006Z",
+   "created": "2026-08-10T06:58:29.283Z",
+   "modified": "2026-08-12T04:55:22.689Z"
+  },
+  "versions": {
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.1_1786345109435_0.2772639744354557"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^11.10.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 34,
+     "integrity": "sha512-BHkzwVBoewF7t607vupumcgwCUj8q/gFFEsXH5Bj546m+8C6dvPzLmDaoUliZOA1S8S4ioQemeKimQ87zOikJA==",
+     "shasum": "9df9e178951c5cb6418871d8546d906ecde027fa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDOBnaLtTUXRCJ0Blg1tkKW0QG9Y+uyopzy8PHNThIK8QIgZu2huv4YHUze8wk5PUL4pDVIdCSULstj89Jar1Q7y1Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.1.tgz",
+     "unpackedSize": 78092
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2c4c2388d57751a39f3f9ac0325a9ec7fc24987d",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.10",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.10_1786432827818_0.2731126651296889"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 97,
+     "integrity": "sha512-HzjUmVyBIxFsauUNBy1L1dxFlEV1rg/S/UPE0our4M18N7aKe//ehs+Bv/1wWrJ6rtAxyBjSl43jjhKmJmw+PQ==",
+     "shasum": "d27781b24444e379f30166c070042af37fa81900",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEaga2VRcvColF5wkxOo1u2hnsy2eSjYaiA009glXofeAiEA88BejqrYzJdgPDPVdIEgS4CvZO1Mwl18G7vZj/hKbMc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.10.tgz",
+     "unpackedSize": 248238
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "7ba98f7196a98ce46a91868060d46f972a27ebed",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.10"
+   },
+   "0.1.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.11",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.11_1786440585368_0.9150691882873918"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-/nHI5FYcL8X/zo+3lhVS058k9bGpKFFJQj9AYwtN5AL968A0eTvqv9vpov2nWrUJnH+6CaUCGsXRVdO4xsMQYw==",
+     "shasum": "59e351ef8a2164bc0aae7b05488db20efe1b9689",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEWZviCtQzIvyFemvJGcfy/j9jn7qcyoxeXtE5ap/0bMAiEAtqXI+1C++P/MaaoSBNoBnxyn2SflXjRW4g+M9vGraTI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.11.tgz",
+     "unpackedSize": 256664
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "83b95583003c08bf10f95164e325159b53b429d8",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.11"
+   },
+   "0.1.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.12",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.12_1786508214200_0.10002143458695101"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-j6b+79yE19paMXAe1dc5a+jlusBR5jAA9B7zJJXkpSW2I7rCGz0+QgqK3FuZp2SDXwMfD3ogadOjjuiQ6HDj5A==",
+     "shasum": "db34f0cdf89c57d5eaaf87d6494691a2a285b4ea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCt5xyA3jzidjJQAGkl/iizFFPXse9+62ylZGC7fBniDQIgI+15qJH9SV15kZA/6pwyQou/fGtNTKEgkTYGKCMAeUQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.12.tgz",
+     "unpackedSize": 263957
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "f2b2c492ce0642f72fd28b06455856a3e120e5c7",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.12"
+   },
+   "0.1.13": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.13",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.13_1786509171060_0.06164615559904307"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-0IN1Xy1/Y/Don6NTOSFRGF0QBrvwX3DGRKWbJlmcrl4Jl069XmbRdqqTwFAEyFdM1xUs6NxWfi7eExIvKezfRQ==",
+     "shasum": "cf9fef4c7213746a397dde446197870da45875b6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFG83izPCavpASOm62gduW97en8gWt7Ew/wmFSFXKIm0AiEA3f4sGRYrHb/9qq2oXFnjBz64UqWZAxLdp4hl9yeO0Co="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.13.tgz",
+     "unpackedSize": 271589
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "ef2f70662289fe36f3bc6e7000f4d04f9546b471",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.13"
+   },
+   "0.1.14": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.14",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.14_1786510522367_0.2796510493240727"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-uBEUWJFBL1/8Ebk2dweTs4iBvxIyC6p4u+heH7/QBmg7ypsw7TqrU87yBA5Seb3rDP4l6FzYat5SNVeKG2VXoQ==",
+     "shasum": "5423f3304bea3e15fdb399d1e89e340d2a218a70",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDkZOzoByyBYe5XO3yZiv4SgCjGXnEqrCWHFg39472JRgIhAK8zhoetrukbowtpn/msy0J1rTCiWynCSNmsdfOLgi3i"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.14.tgz",
+     "unpackedSize": 276194
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "2f71192589d4c099662c5374957ee329c7b3de7c",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.14"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.2_1786345740719_0.4424769651009943"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^11.10.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 34,
+     "integrity": "sha512-xN9fmcw0XqG0EfcLdsvcRybQFt+4OQ6WfhMhhi0DgH+PqoC4f/jMOsZABsEFQkJrD3oiobF7RVaJlv0DxUzREw==",
+     "shasum": "dbb272ef3b4a773ae7f899bdd9a96da05557d837",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCKZMltXNaO0/PUhn5AcRRBrUhrRQE7tAxk0nvKErqV2wIhAKsrEsS+NtrqCermLpOZCqjlcJXEPhdN+7N3vye0lOtu"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.2.tgz",
+     "unpackedSize": 80386
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "7f289b57df29623280cf022da28ff7e638fb887f",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.3",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.3_1786347862793_0.7697306049401345"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^11.10.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 42,
+     "integrity": "sha512-NkJEX7b7LiGXwDp4OF50kivFZVoEFk4C7a8ZYQqXKhqxUnw7U4lrH8oZ3feF8yVGITeZg+vTVG91etOkCFHtrA==",
+     "shasum": "5f507dae3f85d84227a99ab5ba2dda37072fb28b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC5DJl04ppRssHKWLEyjiRL7Euhebagh3wVLVNiXm8b7wIhAKxaWH/HC8BixYWQ50A0Q+2+hUGlPDb5CrrH/xU27nSK"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.3.tgz",
+     "unpackedSize": 111811
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "62752f0101adf7f2c56611ea954147163da66cf7",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.4",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.4_1786348449673_0.4546442714525636"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 42,
+     "integrity": "sha512-ttUAfvMarC4xN9wBZ0FK+XknW0Hy+bwnJNVoEIKV8Fr/vBm2G5dl9Wy4UTBP5igbXbKMwbo1GjBXvDvay3O0Rg==",
+     "shasum": "b56c6efe4730655f88b63904cd5424e5a73953ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBeXRatRN0u8KusDKsLAmfzUvFAxFxjDUhc5Lw0+afGyAiEA73ZfeJ2yVhIcTdqBE702ZNYJbSTd9vWZBHKgFp5EiHc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.4.tgz",
+     "unpackedSize": 111891
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "f0e22289438d2db36c1863464f5320f00fa0df21",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.5",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.5_1786348890800_0.6857864493454668"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 42,
+     "integrity": "sha512-WYaoxFjmofCokQjBSAPHkcaZVzpwi3k2Cibp52sZc5IqJ8INV1u7oK8HxYG6zABX2wOh3Ob6k9Nsktjgfjl5Ow==",
+     "shasum": "6f07f5821ac4b8d32ddc8d6fda63eda9687c8b1a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCEOYO8GwSipCbb6z6/8nEEnCGZlbL3IEDcL+wYFrCPFQIgHI3lWlAK3V/iGv/atEAlfmaLilmwaMr67lkeFoLVGlo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.5.tgz",
+     "unpackedSize": 113318
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "a2998e8090df72d232a8c487ca3dc2c1f18031ec",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.5"
+   },
+   "0.1.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.6",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.6_1786350783340_0.6739313816617201"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 49,
+     "integrity": "sha512-XqXIzc+xREBRbTLBjzGsYDdxUFAlyMv4ndwClDvK7f1LicDV36im4CdS4ZEQNjuW6uFmnylO4P0lFXVMrXgBJA==",
+     "shasum": "fd9e67d9bf97392e600e89824080ec26066ace07",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD4k+mDEwFrxYOIeucYGo4w9DdcqqYQYiSsDP69CVhgegIgXL3ImQ/Mw/l4Yhjjqe92RJKUYcySnyTXtCkjAXILeEc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.6.tgz",
+     "unpackedSize": 133556
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "d5f4af0504ebb5c79f1150ab463cb29cb0bd6043",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.6"
+   },
+   "0.1.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.7",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.7_1786351341414_0.8022155916217237"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 49,
+     "integrity": "sha512-kSyGdJXfXHyJiesNVliP3Kqa633dC9anHsrWtO3WFiCA4eVPf3M/NuszyOdZOgYVbNlGAsdtBg2CGYPzYPvBJA==",
+     "shasum": "809ca00198efd6f02f5096210b498628d2351ab9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC8ZyorhyDw1myRbGKMEbioXfe1xdtlreG3fYOn47/0QgIhAJbbADbYCXG8bY4+E6d/F2P7wAw7kimU1yHlSxRhIhdN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.7.tgz",
+     "unpackedSize": 133537
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "fac8379564b93d97261f93cafe3f1229080abfd3",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.7"
+   },
+   "0.1.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.8",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.8_1786423809246_0.2236116711516749"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 97,
+     "integrity": "sha512-ZXW1EikomnVOVZ+XovYIArLt34clKjB6/qOh1/h60GtEkGcDPd2xBNX9apHkN7aWXKKBHJKuYqmkpdLGnbWMfg==",
+     "shasum": "f40c7eeb42e588d15b47daaf757b608a995c3be9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAORQNX0UhbR5xxSHvL2t6VPvsTTfM7/rYhJ3ldxRH+gAiEAl+uP4zo7Dwbb6jszUvUnAT9jJ1TsXMbLPb5fQ8OMSPo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.8.tgz",
+     "unpackedSize": 241387
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "4bdddd533ec75d4671c9d6bf1ecbc632ecd590d8",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@jalipata/mcp-memory@0.1.9",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-memory_0.1.9_1786430851843_0.3108631896986582"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f14f4834291]",
+     "name": "alfianyabdullah"
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "mcp-memory": "dist/index.js"
+    },
+    "dependencies": {
+     "@clack/prompts": "^0.9.1",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "better-sqlite3": "^13.0.3",
+     "zod": "^3.25.0"
+    },
+    "description": "Agnostic persistent memory server for AI tools via MCP. Knowledge graph stored in SQLite with FTS5 keyword search, multi-tenant by namespace.",
+    "devDependencies": {
+     "@types/better-sqlite3": "^7.6.12",
+     "@types/node": "^22.10.0",
+     "shx": "^0.4.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.7.0",
+     "vitest": "^2.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 97,
+     "integrity": "sha512-J4fi9y/xXqphhX5k33PDusnjjSEeEAoDNz0BXAKD/+8IxgEreH1IJjpAuOzgwUCiwJ+IsJvvYodZJ1Kq+3UVBg==",
+     "shasum": "93b27c42f67d9928572d730ab471be69d8e4d82e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBT+5Pq6brUgL3xXL4L9Dbx1Oea2PySwkCKaCQhsY2Q7AiEA2315w4kmIUezetb4F8wyLNHjXW1DPq4jrBwVfoIW3HQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@jalipata/mcp-memory/-/mcp-memory-0.1.9.tgz",
+     "unpackedSize": 241387
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "6916aa4c77a4f118c5692c20df8c9ff302e74dc7",
+    "keywords": [
+     "mcp",
+     "memory",
+     "knowledge-graph",
+     "sqlite",
+     "model-context-protocol",
+     "ai",
+     "ai-memory"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f14f4834291]",
+      "name": "alfianyabdullah"
+     }
+    ],
+    "name": "@jalipata/mcp-memory",
+    "scripts": {
+     "build": "tsc -p tsconfig.json && shx mkdir -p dist/web/static && shx cp -r src/web/static/* dist/web/static/ && shx chmod +x dist/index.js",
+     "dev": "tsx watch src/index.ts",
+     "pack": "npm pack",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.9"
+   }
+  }
+ },
+ "name": "@jalipata/mcp-memory",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@jalipata%2Fmcp-memory"
+}

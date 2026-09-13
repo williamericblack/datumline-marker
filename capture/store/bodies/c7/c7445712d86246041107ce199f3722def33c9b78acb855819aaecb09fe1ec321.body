@@ -1,0 +1,1242 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.3.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:9ff7ff437019]",
+    "name": "danlayers"
+   },
+   {
+    "email": "[redacted-email:dcb7d1ac3979]",
+    "name": "sdoyle_layers"
+   },
+   {
+    "email": "[redacted-email:88612ce37b14]",
+    "name": "gabappmachina"
+   },
+   {
+    "email": "[redacted-email:c02075159113]",
+    "name": "mikekhristo"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.1.0",
+   "1.1.2",
+   "1.2.0",
+   "1.2.1",
+   "1.2.2",
+   "1.2.3",
+   "1.3.0",
+   "1.3.1",
+   "1.3.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@layers/mcp-server",
+  "_rev": "10-603aded046f526207d3ec8623cec723c",
+  "author": {
+   "name": "Layers AI, Inc."
+  },
+  "bugs": {
+   "url": "https://github.com/layers/mcp-server/issues"
+  },
+  "description": "MCP server exposing the Layers API as tools",
+  "dist-tags": {
+   "latest": "1.3.2"
+  },
+  "homepage": "https://github.com/layers/mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "layers",
+   "partner-api",
+   "ai-agents",
+   "stdio",
+   "social-media",
+   "content-generation"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:9ff7ff437019]",
+    "name": "danlayers"
+   },
+   {
+    "email": "[redacted-email:dcb7d1ac3979]",
+    "name": "sdoyle_layers"
+   },
+   {
+    "email": "[redacted-email:88612ce37b14]",
+    "name": "gabappmachina"
+   },
+   {
+    "email": "[redacted-email:c02075159113]",
+    "name": "mikekhristo"
+   }
+  ],
+  "name": "@layers/mcp-server",
+  "readme": "# Layers MCP Server\n\nAn MCP (Model Context Protocol) server that exposes the\n[Layers API](https://api.layers.com) as tools, so AI agents can manage\nprojects, generate short-form social content, and publish it \u2014 straight from\nany MCP client.\n\n> Tool coverage tracks the Layers API reference.\n\n## One-paste onboarding\n\nPaste this one sentence to your coding agent, from the product repository:\n\n```\nOnboard this repository into Layers: run npx --yes @layers/mcp-server@1.3.1 onboard from the repo root as a background process and follow the agent_instructions it prints; each input_required event advertises the exact command to send, except approve_consent, where you print the consent_proposal verbatim and stop until the human explicitly approves.\n```\n\nThat is the whole paste. The consent clause is not decoration: `approve_consent`\nadvertises its approval command like every other turn, so a paste that says only\n\"send the advertised command\" reads as licence to send that one too. The\nexception has to be stated where the human pastes it, not only inside the\nlauncher output the agent may summarize.\n\nThe rest of the rules for driving the launcher used to live in the paste; they\nnow arrive from the launcher itself, as the FIRST line it writes:\n\n```json\n{\"type\":\"agent_instructions\",\"protocolVersion\":1,\"instructions\":\"\u2026\",\"commands\":{\u2026}}\n```\n\n`instructions` is the full operating protocol in plain ASCII \u2014 how to poll the\nprocess, what to print verbatim, when to stop and wait for a human, and what to\ndo with the SDK fact after the claim. `commands` lists the command shapes the\nprotocol uses; every turn still advertises its own exact command, and that\nadvertised string is the one to send. The event is emitted once, before the\nlauncher does anything else, so an agent that started the process has the\nprotocol before it has to drive anything.\n\nThe phrase \"as a background process\" is load-bearing: Claude Code's permission\nclassifier approves a long-running `npx` only when it is told the task runs in\nthe background. Keep it.\n\n**The paste pins an exact version, on purpose.** The server's capability\nmanifest is the source of truth for which launcher it will accept: it advertises\n`minimumMcpServerVersion` and `acceptedCollectorVersions`, and a launcher outside\nthat window is refused at preflight before anything is reserved. Pinning the\npaste to the version the server currently advertises means the paste and the\nserver agree by construction. `@latest` does not: it can outrun a cutover and\nhand somebody a launcher the server has not been told about yet, which fails with\n\"requires an update\" for a version that is newer than the one being demanded. So\nthe paste stays pinned and moves when the server's advertised version moves.\n\nThe same pin applies to the Claude Code recipe below, which is the paste's own\ncommand with a FIFO wired to its stdin \u2014 a recipe that drifted to `@latest`\nwould quietly contradict the sentence it implements. The legacy public-URL form\nfurther down stays on `@latest`: it predates the capability manifest and is not\npart of the pinned flow.\n\nThe command checks server compatibility before reading the workspace, runs the\nchecksum-verified native collector locally, shows the exact bounded source-data\nproposal, and waits for explicit approval before sending evidence. While the\npreview builds it asks the same setup questions the Layers web onboarding asks,\none at a time, each carrying its exact title, its offered options, and the exact\ncommand that answers it. It then surfaces the preview and attempt-bound browser\nclaim URL and returns the safe post-claim workspace projection to the same\nprocess when the browser claim finishes within its bounded window. Reservation,\ntransport, PKCE verifier, post-claim capability, full evidence-envelope, and\ntransient excerpt values never enter terminal output; the bounded consent\nprojection does.\n\n### Setup questions and the claim link\n\nOnce evidence is approved and on its way, the command reads the outstanding\nsetup questions and emits `input_required: answer_intake` one question at a\ntime. Each turn carries the canonical `question` (title, optional subtitle,\nwhether it takes one option or several, whether it takes free text, and the\noffered `options` as `value`/`label` pairs) and the `commands` that answer it:\n\n```\nanswer <field> <value>                 pick one offered option\nanswer <field> <value>,<value>         pick several (multi-select questions)\nanswer <field>                         pick none (multi-select questions)\nanswer <field> other <your own words>  questions whose allowsFreeText is true\n```\n\nWhich questions take free text is the server's call, carried per question on the\nwire and reported on the turn as `allowsFreeText`. A question the walk refuses an\nanswer to is re-asked with the server's reason on `refusal`, rather than reported\nas recorded.\n\nSend exactly one advertised command per turn; the next question arrives once the\nanswer is recorded. A line that names an option the question does not offer\nre-asks the same question rather than guessing.\n\n**The claim link waits for both the preview and the questions.** Whichever\nfinishes second releases it, so the browser claim is never offered while setup\nquestions are still outstanding. Progress is reported on `intake` events, whose\n`complete` flag is the explicit signal that the walk is done \u2014 the same way\n`previewReady` reports the preview. `state` is one of `asking`, `complete`,\n`not_required` (there were no questions), or `skipped`. **`skipped` means the\ngate failed open**: the question service was unreachable, refused repeatedly, or\nthe questions were left unanswered past their bounded window. A broken question\nservice costs a person their questions, never their workspace. The terminal\n`complete` event carries the same summary on its `intake` field.\n\n### Waiting for the browser claim\n\nThe claim handoff waits for the human, not for a timer. A browser claim link is\nattempt-bound and the server caps each attempt at 15 minutes, so an unopened link\nis re-minted rather than treated as the end of the session: the command emits\n`status` with stage `claim_link_refreshed`, and the fresh URL arrives on the next\n`progress` event. Give the human that one; the earlier link is dead.\n\nWhile it waits it emits `status` with stage `awaiting_claim` every few minutes,\nso an agent polling a deliberately idle process has something true to report. The\noverall wait is 24 hours, intersected with the reservation.\n\nIf it does stop before the claim, it says so explicitly on `status` with stage\n`claim_still_open` before the terminal `complete`: the workspace is still built\nand still claimable until the reservation expires, and nothing was cancelled.\n\n> 1.3.0 ended the wait at the 15-minute transport-attempt expiry and exited `0`\n> with `state: awaiting_claim`, which read as \"the claim expired\" when the only\n> thing that had expired was the transport leg. That is fixed in 1.3.1.\n\n### Claude Code process control\n\nThe command stays alive across scope review, human approval, preview creation,\nand claim. Each local source-inspection generation has a fixed 15-minute\nprivacy lifetime. If that lifetime ends during scope review or consent, the\ncommand clears the expired local artifact and emits\n`input_required: resume_inspection`; `resume` performs a fresh inspection with\nfresh opaque IDs and requires a fresh proposal and approval. An expired\nproposal can never authorize an upload. In Claude Code, run the command as a\nnative background Bash task so later tool calls can read its JSONL and answer\nits stdin. Do not put `&`, `nohup`, or a foreground `wait` around the command;\nthose do not give Claude a controllable task handle.\n\n1. In a short foreground Bash call, create the private input pipe and retain the\n   absolute directory printed by the last line:\n\n   ```sh\n   layers_session_dir=\"$(mktemp -d \"${TMPDIR:-/tmp}/layers-onboard.XXXXXX\")\"\n   chmod 700 \"$layers_session_dir\"\n   mkfifo \"$layers_session_dir/input\"\n   chmod 600 \"$layers_session_dir/input\"\n   printf '%s\\n' \"$layers_session_dir\"\n   ```\n\n2. In a second Bash tool call, substitute that absolute path and run exactly\n   this shell with the Bash tool's `run_in_background` parameter set to `true`:\n\n   ```sh\n   exec 3<>\"/absolute/layers-onboard.ABC123/input\"\n   npx --yes @layers/mcp-server@1.3.1 onboard <&3\n   ```\n\n   The shell command itself stays in the foreground of the background task.\n   Claude Code returns a task ID instead of blocking the conversation.\n\n3. Use `TaskOutput` on that task ID with `block: true` and a timeout no longer\n   than 15 seconds to read new JSONL. Send each advertised response from a\n   separate short Bash call, for example:\n\n   ```sh\n   printf '%s\\n' 'prepare' > '/absolute/layers-onboard.ABC123/input'\n   ```\n\n   Read `TaskOutput` again after every response. Print the complete\n   `consent_proposal.canonicalProjection` verbatim, along with its display ID,\n   display time, projection hash, and exact advertised approval command. End\n   the turn and wait for the human's explicit approval before writing that\n   command. If `resume_inspection` appears, send only its advertised `resume`\n   or `cancel` command; a resumed inspection requires a new proposal and new\n   approval. Keep the task alive until a terminal `complete` or `error` event.\n\n4. At `input_required: answer_intake`, relay one question per turn while the\n   launcher keeps building in the background: show its exact `title`, its\n   `subtitle` when present, and its offered `options`, take an offered option or\n   the human's own words, and send the exact advertised answer command before\n   asking the next. Never show a setup question while a consent proposal is\n   displayed or awaiting approval. Withhold the claim link until the launcher\n   reports the questions complete and the preview ready.\n\nFor ordinary public callers, a server that has not opened source admission stops\nthe command before local inspection. An operator-only environment token can\nauthorize a closed internal probe. The older public-URL compatibility form\nremains available:\n\n```sh\nnpx --yes @layers/mcp-server@latest onboard https://example.com\n```\n\n## Install as an MCP server\n\nTo expose the persistent Layers MCP tools without an existing API key:\n\n```sh\nclaude mcp add layers -- npx -y @layers/mcp-server@latest\n```\n\nThe server enters keyless onboarding mode when neither `--api-key` nor\n`LAYERS_API_KEY` is set. It can create and claim a workspace without an\nexisting Layers account or API key.\n\nTo connect an existing Layers workspace with an API key:\n\n```sh\nclaude mcp add layers -- npx -y @layers/mcp-server@latest --api-key lp_YOUR_KEY\n```\n\nOr configure API-key mode in any MCP client's JSON config:\n\n```json\n{\n  \"mcpServers\": {\n    \"layers\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@layers/mcp-server@latest\", \"--api-key\", \"lp_YOUR_KEY\"]\n    }\n  }\n}\n```\n\n> Pin a reviewed version (`@layers/mcp-server@<version>`) in production setups instead of\n> `@latest` if you want releases to be deliberate on your side.\n\n## Configuration\n\nFlags take precedence; environment variables are the fallback.\n\n| Flag | Env var | Default | Description |\n|---|---|---|---|\n| `--api-key` | `LAYERS_API_KEY` | unset | Layers API key (`lp_...`). When neither form is set, the server starts in keyless onboarding mode. |\n| `--base-url` | `LAYERS_BASE_URL` | `https://api.layers.com` | API host. Paths are versioned under `/v1`. |\n| `--read-only` | `LAYERS_READ_ONLY=1` | off | In API-key mode, register only the 25 read tools. In keyless mode, this limits the workspace API tools; the five onboarding tools remain available. |\n| `--organization` | `LAYERS_ORGANIZATION` | unset | Act on behalf of a child org (`org_...`), sent as the `X-Layers-Organization` header on every request. Requires an `org:admin` parent key. |\n\n**Security note:** flags end up in your client's config file and in the process\nargv (visible via `ps`). Prefer the env var for the key where your client\nsupports it:\n\n```json\n{\n  \"mcpServers\": {\n    \"layers\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@layers/mcp-server@latest\"],\n      \"env\": { \"LAYERS_API_KEY\": \"lp_YOUR_KEY\" }\n    }\n  }\n}\n```\n\nSandbox keys (`lp_test_...`) skip real platform calls during development \u2014\ncontent, OAuth, and publish return fixture-backed results.\n\n## Tools\n\nThe tool surface depends on how the server starts:\n\n- **API-key mode:** 52 workspace tools, one per API route.\n- **Keyless onboarding mode:** five onboarding tools plus the same 52 workspace\n  tools. The workspace tools are registered up front so the MCP client can see\n  them, but they refuse calls until the onboarding session claims a workspace.\n\n`--read-only` hides workspace write tools (marked W below). The five onboarding\ntools remain available in keyless mode.\n\n### Keyless onboarding tools\n\n`onboard_start` \u00b7 `get_onboarding_status` \u00b7 `onboard_claim_begin` \u00b7\n`onboard_claim_verify` \u00b7 `ask_elle`\n\n`onboard_start` without a URL remains a reservation-only MCP tool. Its result is\nhonestly limited to `awaiting_evidence`, and its opaque capability stays inside\nthe server process. The full local inspection, consent, evidence, preview,\nbrowser claim, and same-process return path belongs to the one-shot\n`layers-mcp-server onboard` command above. Passing an explicit public product\nURL to the MCP tool keeps the existing preview and claim flow working.\n\n### Workspace API tools (52)\n\n### Core\n`whoami` \u00b7 `list_projects` \u00b7 `get_project` \u00b7 `get_credits` \u00b7\n`list_credit_events` \u00b7 `create_project` (W) \u00b7 `update_project` (W) \u00b7\n`archive_project` (W)\n\n### Creative\n`list_influencers` \u00b7 `get_influencer` \u00b7 `get_keywords` \u00b7 `list_content` \u00b7\n`get_content` \u00b7 `get_content_progress` \u00b7 `get_content_asset` \u00b7 `get_hooks` \u00b7\n`get_source_recommendations` \u00b7 `get_content_review_policy` \u00b7\n`create_influencer` (W) \u00b7 `clone_influencer` (W) \u00b7 `update_influencer` (W) \u00b7\n`delete_influencer` (W) \u00b7 `refresh_keywords` (W) \u00b7 `generate_slideshow` (W) \u00b7\n`generate_ugc_remix` (W) \u00b7 `generate_video_remix` (W) \u00b7\n`generate_slideshow_remix` (W) \u00b7 `create_content_upload` (W) \u00b7\n`upload_content_from_url` (W) \u00b7 `finalize_content_upload` (W) \u00b7\n`update_content_caption` (W) \u00b7 `approve_content` (W) \u00b7 `reject_content` (W) \u00b7\n`update_content_review_policy` (W)\n\n### Distribution\n`list_social_accounts` \u00b7 `get_scheduled_post` \u00b7 `list_scheduled_posts` \u00b7\n`list_tiktok_music` \u00b7 `get_engagement_config` \u00b7 `publish_content` (W) \u00b7\n`schedule_content` (W) \u00b7 `reschedule_post` (W) \u00b7 `cancel_scheduled_post` (W) \u00b7\n`notify_device` (W) \u00b7 `update_engagement_config` (W)\n\n### Measurement\n`get_metrics` \u00b7 `get_top_performers` \u00b7 `list_ads_content` \u00b7\n`list_recommendations` \u00b7 `update_ads_content` (W) \u00b7 `update_recommendation` (W)\n\n### Framework\n`list_audit_log`\n\n### Conventions\n\n- **Async jobs.** Generation, influencer creation/cloning, and keyword refresh\n  return a `202` job envelope (`jobId`, `containerIds`/`influencerId`). Poll the\n  matching read tool (`get_content_progress`, `get_influencer`, `get_keywords`)\n  until the resource is terminal.\n- **Uploading your own media.** Two transports, both producing an uploaded\n  content container you can then schedule/publish. For already-hosted files,\n  `upload_content_from_url` is one synchronous call. For large/private files,\n  `create_content_upload` returns presigned `PUT` URLs \u2014 your client uploads the\n  bytes directly to storage (outside this server, within ~15 min), then calls\n  `finalize_content_upload` per container. Fix a caption afterward with\n  `update_content_caption` (uploaded content only).\n- **Pagination.** List tools accept `cursor` + `limit` and return\n  `{ items, nextCursor }`; pass `nextCursor` back verbatim.\n- **Idempotency.** The server stamps a fresh UUID `Idempotency-Key` on every\n  mutating POST/PATCH automatically.\n- **Errors** expose only the public status, stable error code, safe message, and\n  validated `requestId`. Backend details and non-contract response bodies are\n  not copied into the agent transcript. Include the `requestId` in support\n  tickets.\n- **Timestamps** are ISO 8601 UTC with a `Z` suffix everywhere (offset forms\n  are rejected by the API). `scheduledFor` is a literal UTC instant \u2014 convert\n  from local time before calling.\n\n## Development\n\nRequires Node 20+.\n\n```sh\nnpm install\nnpm run build                 # tsc -> dist/\n\n# wire the local build into Claude Code:\nclaude mcp add layers -- node $(pwd)/dist/index.js --api-key lp_YOUR_KEY\n\n# exercise the same-session command from a product workspace:\n(cd /path/to/product && node /path/to/mcp-server/dist/index.js onboard)\n\n# or explore interactively with the MCP inspector:\nnpx @modelcontextprotocol/inspector node dist/index.js --api-key lp_test_dummy\n```\n\nIn MCP-server mode, stdout is the JSON-RPC channel and all logging goes to\nstderr. The one-shot onboarding CLI emits its documented JSONL events on stdout;\nthe legacy URL form emits its compatibility output there.\n\n## Testing\n\n```sh\nnpm test            # hermetic suite \u2014 no API key, no network\nnpm run smoke       # opt-in live smoke; needs LAYERS_TEST_KEY=lp_test_...\n```\n\n`npm test` builds, then runs the contract suite with Node's built-in test runner\nagainst a localhost mock \u2014 it verifies tool registration, `--read-only` gating,\nannotation hints, stdout protocol discipline, and the request contract (auth,\nidempotency, query encoding, per-tool routing, error rendering). No credentials or outbound network\nrequired; this is what CI runs. See [`test/README.md`](test/README.md) for the\nfull breakdown and the sandbox smoke script.\n\n## License\n\nApache-2.0 \u2014 see [LICENSE](LICENSE) and [NOTICE](NOTICE).\nCopyright 2026 Layers AI, Inc.\n\nReport vulnerabilities privately as described in [SECURITY.md](SECURITY.md).\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/layers/mcp-server.git"
+  },
+  "time": {
+   "1.0.0": "2026-06-16T19:14:34.930Z",
+   "1.1.0": "2026-07-29T21:46:07.194Z",
+   "1.1.2": "2026-08-12T05:31:00.138Z",
+   "1.2.0": "2026-08-14T04:10:50.362Z",
+   "1.2.1": "2026-08-14T13:33:50.179Z",
+   "1.2.2": "2026-08-15T00:06:00.838Z",
+   "1.2.3": "2026-08-15T10:05:07.234Z",
+   "1.3.0": "2026-08-17T00:50:30.125Z",
+   "1.3.1": "2026-08-17T21:14:13.095Z",
+   "1.3.2": "2026-08-18T21:15:30.648Z",
+   "created": "2026-06-16T19:14:34.544Z",
+   "modified": "2026-08-18T21:15:30.998Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.0.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.0_1781637274704_0.7920554304063816"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9ff7ff437019]",
+     "name": "danlayers"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-OiDTYhWe/TfBWnVKhKLd6gfzJFsF6MzZnF5C1aW2JaljdSenVjSep1YqCFz4rhJOhLGuhRAZ3yRy5msGeAY51w==",
+     "shasum": "9291e0e02f9a4fd2a366c2c7a6613a8534dff48d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCOKKHqang4VIAwnynK7EW3wAOsviQsyKwD5dpCoHamKAIhAPNMJSITeleAhgxQWa4lOP81uVdEZKd3oOwEvk4BnYvd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.0.0.tgz",
+     "unpackedSize": 78947
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "428cc3a6c2b8d33b8210e03b5c67fe166368638c",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.1.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.0_1785361567069_0.7002366714122679"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.1.0"
+     },
+     "fileCount": 16,
+     "integrity": "sha512-kXJ8eUr0KPFmhqoPj2ie0DvyXrqpf/GQS0NHpqlAkzuDh892h6ynED+q0WcPjlGadzP0GTPr2T9vYHbXliilkw==",
+     "shasum": "d962f350f25c51e47e9bb26af0500fb30bad894d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC2/lDmMbjt18vLxxSqFL3w3f5mLyj6TZGaOR9Tq1VDQQIhAPnp4u0fPean/gc1weCr1P5K0jKG8mbYV2sXkU+nbTXN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.1.0.tgz",
+     "unpackedSize": 158921
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "67b121bb707db872daec61e344699fe96238e074",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.1.0"
+   },
+   "1.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.1.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.2_1786512660006_0.505314339466951"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.1.2"
+     },
+     "fileCount": 17,
+     "integrity": "sha512-9UAVUf20PyLO3WDs0/S7GOnsvP3n2lg+HGJbUFYONTY+yYnNKyD2LnBvA/Rt/rIQHe7Eym0UeBy+0xPZJ4FLGw==",
+     "shasum": "29c39a4ef226eb677159765cba7e643fd463e411",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEJycNXQDTTXgcsw2IeXc+Cpxkku/8CLDQva+AFkKq0ZAiEA+Ao7r6ZArBHIIQ/Bz6/1D1+yN/prMzNU1o1Ta0KsNJc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.1.2.tgz",
+     "unpackedSize": 167092
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "9d6242806cfd8d59a532b68b48705a3f3f74bee4",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.1.2"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.0_1786680650207_0.9335100407946844"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.3",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.2.0"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-SaIQ8gWQU3CrYr5hxo5pthI1RNnEHBkfGU4YbL37i9KcRJpT44g09Od51RecqAkB+8/iAVGjwJpLh4NZfo69QA==",
+     "shasum": "6b30cc066c259f2388f72e01cd52c23cc9b5ff69",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID+fABr122t+7W6pYJ0026m67b1qkkDr5Ig2StVODwWnAiEA+rOMAwZSCTLYwzLe0wGnMJpg5ZjGCWsE61xlWNb3Jfc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.2.0.tgz",
+     "unpackedSize": 269235
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a42230ab883d8a1798d885d011c123909bd51e9b",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.3",
+     "@layers/onboarding-collector-darwin-x64": "0.1.3",
+     "@layers/onboarding-collector-linux-arm64": "0.1.3",
+     "@layers/onboarding-collector-linux-x64": "0.1.3",
+     "@layers/onboarding-collector-win32-arm64": "0.1.3",
+     "@layers/onboarding-collector-win32-x64": "0.1.3"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.2.0"
+   },
+   "1.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.2.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.1_1786714430014_0.5460171697006835"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.3",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.2.1"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-C/Ou+0PRUwk4m9GTHvwDUkHq/hL9oWwqOjvn/Fi9RjEgp/dKBeyzGAaAW/re/ybEaw5fjCJzvJp3T74n8DmAtg==",
+     "shasum": "df966752aee6555554627f0efa8592b20030c7d9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHFt5Pdl9HBR69g5NXSXtO3FPY2A26ZL4Lz0FMW5KP/DAiEA3lAWI1scM/sRyQxAk+ZnPs+fyXFy38crifkKNQCNCFw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.2.1.tgz",
+     "unpackedSize": 269369
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "62e7fd9939e1938a99e46a7014bf710714dd8467",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.3",
+     "@layers/onboarding-collector-darwin-x64": "0.1.3",
+     "@layers/onboarding-collector-linux-arm64": "0.1.3",
+     "@layers/onboarding-collector-linux-x64": "0.1.3",
+     "@layers/onboarding-collector-win32-arm64": "0.1.3",
+     "@layers/onboarding-collector-win32-x64": "0.1.3"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.2.1"
+   },
+   "1.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.2.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.2_1786752360684_0.3581866279496744"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.4",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.2.2"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-Iit3XONp2w8ZXAA3B0o5vJRk+HP6/BbozX5DKL6gViTKDJxQ4fg1ZPYzcvh9qUYhStJRayUHOdU7xR1m/bnj/A==",
+     "shasum": "90e0effabd50082d29d932328f32cf7ac1181603",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDjU0/vR76LPXrx++cxQoXRKX/OKOUVlhhe92ppLo//KAIhAOvw5Ct7Xx9IWiPdkIP2+BMKnaBC5VYUo7/P0WlCuKZc"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.2.2.tgz",
+     "unpackedSize": 271034
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "1eadabbfe5c8f75912a6443c81b84e02fb982922",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.4",
+     "@layers/onboarding-collector-darwin-x64": "0.1.4",
+     "@layers/onboarding-collector-linux-arm64": "0.1.4",
+     "@layers/onboarding-collector-linux-x64": "0.1.4",
+     "@layers/onboarding-collector-win32-arm64": "0.1.4",
+     "@layers/onboarding-collector-win32-x64": "0.1.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.2.2"
+   },
+   "1.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.2.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.3_1786788307029_0.55678484391863"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.4",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.2.3"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-/Jj0kyP+BRE7Q4bG9IcxigBRYW1kn0J3IXDRobFl5X9pOxowtV3TGZNUmDEvsjxgPvmeD2bT7UD3FZf0cTGiZg==",
+     "shasum": "0ebdf3a1b77eaa4e33c2b1ef7a62e72abfde95b4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDFPhLEY3bxmSdQNqx803fsK5TlpalJ5Hc4dnOOHpvtfAiAIPjcNkse8MFzfR5fNgspV8L+d/6QG0WE2ldIbTmb6Gw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.2.3.tgz",
+     "unpackedSize": 288390
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a59dfe1bfc1ec17c944b484dc5d481282fd1eedc",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.4",
+     "@layers/onboarding-collector-darwin-x64": "0.1.4",
+     "@layers/onboarding-collector-linux-arm64": "0.1.4",
+     "@layers/onboarding-collector-linux-x64": "0.1.4",
+     "@layers/onboarding-collector-win32-arm64": "0.1.4",
+     "@layers/onboarding-collector-win32-x64": "0.1.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.2.3"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.3.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.3.0_1786927829957_0.870616362972336"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.4",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.3.0"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-iWL23kM1sw6uyI+nB9Q9JAUvYENwS9sSyaPGWFikz7Sm0yGdIm9Aao1YcUrXsEH5JbW6rYUHyT9/NX83Whm/xQ==",
+     "shasum": "3f899dc5bfd7f2a0e609f148a4c8fd73fdcd7382",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCxLh9uY4LN2zAhSlK+IGWU34UDwYlmRGZABkERAFLA5wIgY7PsxQuhdnN3OkWAHmRBM4hSVBLEcsMBFwZk7iaC5s0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.3.0.tgz",
+     "unpackedSize": 320343
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "58f120533dec397246aa91e30126ab603b679b56",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.4",
+     "@layers/onboarding-collector-darwin-x64": "0.1.4",
+     "@layers/onboarding-collector-linux-arm64": "0.1.4",
+     "@layers/onboarding-collector-linux-x64": "0.1.4",
+     "@layers/onboarding-collector-win32-arm64": "0.1.4",
+     "@layers/onboarding-collector-win32-x64": "0.1.4"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.3.0"
+   },
+   "1.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.3.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.3.1_1787001252947_0.45280019942939664"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.5",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.3.1"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-+UQftrZbEzz95lPis1NWlYSuw4bC9qMg0ljHL17yuq2h+VfMETAx5TwA1tRDeN8U7lOgarpRvYSdNF6d754KUw==",
+     "shasum": "2853f4e44e5afde7242bac0270820d13d578a466",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCEg8C0STCVpV79MO9BMAyyG0kFN7Xt3IIEsPsFsXcTygIhAL7RI2L7fg1T8G95q9TQD0JFqfBmC3oB145znwOTvJet"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.3.1.tgz",
+     "unpackedSize": 388973
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "392d1aea764fb538bc04d657a5e73da6cf670690",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.5",
+     "@layers/onboarding-collector-darwin-x64": "0.1.5",
+     "@layers/onboarding-collector-linux-arm64": "0.1.5",
+     "@layers/onboarding-collector-linux-x64": "0.1.5",
+     "@layers/onboarding-collector-win32-arm64": "0.1.5",
+     "@layers/onboarding-collector-win32-x64": "0.1.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.3.1"
+   },
+   "1.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@layers/mcp-server@1.3.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.3.2_1787087730494_0.3693303441293585"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5257db18-c3b4-467d-9471-c63791f18b23"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Layers AI, Inc."
+    },
+    "bin": {
+     "layers-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/layers/mcp-server/issues"
+    },
+    "dependencies": {
+     "@layers/onboarding-contracts": "0.1.5",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server exposing the Layers API as tools",
+    "devDependencies": {
+     "@types/node": "^25.9.3",
+     "typescript": "^6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@layers%2fmcp-server@1.3.2"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-s8Hw6xiAYr9msfXtg5L7hnY7GxapZ1Gd9182zs/PZBzeuR9dCSsHdpNhOQbQcqMBxE8y7mAmLhqpYyLAQupAMQ==",
+     "shasum": "8a61c5353354b43bd95f0b88b4dfdd729a635284",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQChjC8f/hDSIkHkJ/wzZpBeJ3XjIEhnpNKDvNjsp1nJ1wIhAP4oiuc3arAmsRCihlkmZp5No3SfUktAMxO/s8uIATvD"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@layers/mcp-server/-/mcp-server-1.3.2.tgz",
+     "unpackedSize": 394497
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "c946cf05eebc46ee24c5517549d8d782260b66ad",
+    "homepage": "https://github.com/layers/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "layers",
+     "partner-api",
+     "ai-agents",
+     "stdio",
+     "social-media",
+     "content-generation"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9ff7ff437019]",
+      "name": "danlayers"
+     },
+     {
+      "email": "[redacted-email:dcb7d1ac3979]",
+      "name": "sdoyle_layers"
+     },
+     {
+      "email": "[redacted-email:88612ce37b14]",
+      "name": "gabappmachina"
+     },
+     {
+      "email": "[redacted-email:c02075159113]",
+      "name": "mikekhristo"
+     }
+    ],
+    "name": "@layers/mcp-server",
+    "optionalDependencies": {
+     "@layers/onboarding-collector-darwin-arm64": "0.1.5",
+     "@layers/onboarding-collector-darwin-x64": "0.1.5",
+     "@layers/onboarding-collector-linux-arm64": "0.1.5",
+     "@layers/onboarding-collector-linux-x64": "0.1.5",
+     "@layers/onboarding-collector-win32-arm64": "0.1.5",
+     "@layers/onboarding-collector-win32-x64": "0.1.5"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/layers/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prebuild": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "pretest": "npm run build",
+     "smoke": "node scripts/smoke.mjs",
+     "test": "node --test test/*.test.mjs"
+    },
+    "type": "module",
+    "version": "1.3.2"
+   }
+  }
+ },
+ "name": "@layers/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@layers%2Fmcp-server"
+}

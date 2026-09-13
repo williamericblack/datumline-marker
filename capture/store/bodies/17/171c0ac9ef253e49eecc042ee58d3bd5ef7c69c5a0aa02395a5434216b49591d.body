@@ -1,0 +1,1970 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.13.4",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3304e8ab471c]",
+    "name": "georgeharker"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.0-dev.0",
+   "0.10.0",
+   "0.10.1",
+   "0.10.2",
+   "0.11.0",
+   "0.11.1",
+   "0.11.2",
+   "0.12.0",
+   "0.13.0",
+   "0.13.1",
+   "0.13.2",
+   "0.13.3",
+   "0.13.4",
+   "0.2.0",
+   "0.9.0",
+   "0.9.1",
+   "0.9.2",
+   "0.9.3",
+   "0.9.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@geohar/opencode-mcp-combiner",
+  "_rev": "20-3d3da36fcf14826f0a14c03ece83250f",
+  "author": {
+   "email": "[redacted-email:3304e8ab471c]",
+   "name": "George Harker"
+  },
+  "bugs": {
+   "url": "https://github.com/georgeharker/mcp-companion/issues"
+  },
+  "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+  "dist-tags": {
+   "dev": "0.1.0-dev.0",
+   "latest": "0.13.4"
+  },
+  "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+  "keywords": [
+   "opencode",
+   "opencode-plugin",
+   "mcp",
+   "mcp-combiner",
+   "sharedserver",
+   "plugin"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3304e8ab471c]",
+    "name": "georgeharker"
+   }
+  ],
+  "name": "@geohar/opencode-mcp-combiner",
+  "readme": "# @geohar/opencode-mcp-combiner\n\nAn [OpenCode](https://opencode.ai) plugin that makes the **`mcp-combiner`** MCP\naggregator available to OpenCode: it starts the combiner (supervised by\n[`sharedserver`](https://github.com/georgeharker/sharedserver)) and registers its\nHTTP MCP endpoint with OpenCode.\n\nIt is the OpenCode counterpart of the Claude Code plugin\n[`mcp-combiner`](https://github.com/georgeharker/mcp-companion/tree/main/plugins/claude), and\nshares the same combiner and the same `sharedserver` instance \u2014 so OpenCode,\nClaude Code, and Neovim can all talk to **one** refcounted combiner process.\n\n## What it does\n\nThe plugin has two independent responsibilities (mirroring the Claude plugin,\nwhich uses session hooks + a static `.mcp.json`):\n\n1. **Run the combiner** \u2014 drives `sharedserver`:\n   ```\n   sharedserver use <name> --pid <opencode-pid> --grace-period <g> \\\n       -- <combiner> --mcp --config <servers.json> --port <port>\n   ```\n   `sharedserver` refcounts by PID with a grace period, so the combiner is\n   shared across clients and outlives any single one. The plugin runs `unuse` on\n   OpenCode exit.\n\n2. **Register the endpoint** \u2014 via the OpenCode `config` hook it injects a\n   remote MCP server into your config:\n   ```jsonc\n   { \"mcp\": { \"mcp-combiner\": { \"type\": \"remote\", \"url\": \"http://127.0.0.1:9741/mcp\", \"enabled\": true } } }\n   ```\n   (OpenCode has no static `.mcp.json`, so registration is programmatic.)\n\nThe two halves are independent: registration is unconditional \u2014 OpenCode tracks\nconnection state (`McpStatus`) and reconnects if the endpoint is briefly absent\nwhile the combiner binds its port. After startup the plugin polls\n`client.mcp.status()` and toasts `connected` / `failed` accordingly.\n\n## Requirements\n\n- **`sharedserver`** on `PATH` (or `$SHAREDSERVER_BIN`) \u2014 `cargo install sharedserver`.\n- **`mcp-combiner`** available as a command (`uv tool install mcp-combiner`, a\n  console script on `PATH`), or a checkout runnable via `uv run`. Requires\n  combiner \u2265 0.8.0 (the `--mcp` serve flag; version-gated automatically).\n- A combiner **`servers.json`** (see auto-probe locations below).\n\n## Install\n\nAdd it to `~/.config/opencode/config.json` under `plugin`, tuple form\n`[spec, options]`:\n\n```json\n{\n  \"plugin\": [\n    [\"@geohar/opencode-mcp-combiner@latest\", {\n      \"port\": 9741,\n      \"config\": \"~/.config/mcp-combiner/servers.json\",\n      \"gracePeriod\": \"30m\"\n    }]\n  ]\n}\n```\n\nBare-string form (`\"@geohar/opencode-mcp-combiner@latest\"`) also works and uses\nall defaults.\n\n## Options\n\n| Option | Default | Description |\n|--------|---------|-------------|\n| `port` | `9741` | HTTP port the combiner serves on. |\n| `host` | `127.0.0.1` | HTTP host the combiner binds. |\n| `config` | *(auto-probed)* | Path to the combiner's `servers.json`. |\n| `command` | *(auto-resolved)* | Override the combiner command. |\n| `args` | `[]` | Extra combiner args (before the serve args). |\n| `checkout` | \u2014 | Combiner checkout for `uv run --project <checkout> python -m mcp_combiner`. |\n| `name` | `mcp-combiner` | `sharedserver` instance name. |\n| `gracePeriod` | `30m` | `sharedserver` grace period (`30m`, `1h`, \u2026). |\n| `logFile` | `~/.local/state/mcp-combiner/mcp-combiner.log` | Capture the combiner's stdout/stderr (`sharedserver --log-file`); `\"none\"` disables. |\n| `pyLogFile` | `~/.local/state/mcp-combiner/mcp-combiner-py.log` | The combiner's own `--log-file` (fastmcp/OAuth/httpx detail); `\"none\"` disables. |\n| `logLevel` | `info` | The combiner's `--log-level`. |\n| `binary` | *(auto-resolved)* | Path to the `sharedserver` binary. |\n| `lockdir` | \u2014 | Override `SHAREDSERVER_LOCKDIR`. |\n| `mcpName` | `mcp-combiner` | Key under OpenCode's `mcp` config. |\n| `url` | `http://127.0.0.1:<port>/mcp` | Explicit MCP URL to register. |\n| `register` | `true` | Register the endpoint with OpenCode. |\n| `manage` | `true` | Start the combiner. `false` \u2192 **register only** (something else runs it). |\n| `notify` | `true` | Show TUI toasts for attach/health outcomes. |\n\n### Inbound authentication\n\nIf the combiner is locked down with an inbound bearer token (see the combiner\nREADME), set **`MCP_COMBINER_AUTH_TOKEN`** in this plugin's environment. When\npresent, the registered `mcp` entry carries `Authorization: Bearer <token>` on\nevery request (and the same var is passed to the combiner when this plugin\nstarts it). Unset \u2192 no header, and an unauthenticated combiner returns 200 as\nbefore. The token is read from the env only \u2014 never written to OpenCode's config.\n\n### Combiner command resolution\n\nIn priority order: `command` option \u2192 `$OPENCODE_MCP_COMBINER_COMMAND`\n(+`$OPENCODE_MCP_COMBINER_ARGS`) \u2192 `mcp-combiner` on `PATH` \u2192\n`uv run --project <checkout> python -m mcp_combiner` (when `checkout` /\n`$OPENCODE_MCP_COMBINER_CHECKOUT` is set).\n\n### `servers.json` auto-probe\n\n`config` option \u2192 `$OPENCODE_MCP_COMBINER_CONFIG` \u2192\n`~/.cache/secrets/<user>.mcpservers.json` \u2192\n`~/.config/mcp-combiner/servers.json` \u2192 `~/.config/mcp/servers.json`.\n\n## Host-owned mode\n\nIf **`$MCP_COMPANION_COMBINER_URL`** is set, an editor/host (e.g. Neovim) already\nowns and refcounts the combiner. The plugin then **only registers** that URL and\nnever starts or stops the process \u2014 the same early-exit as the Claude Code `mcp-combiner` plugin.\nEquivalent to setting `manage: false` with an explicit `url`.\n\n## Environment variables\n\n| Variable | Effect |\n|----------|--------|\n| `MCP_COMPANION_COMBINER_URL` | Host owns the combiner \u2192 register only, don't launch. |\n| `OPENCODE_MCP_COMBINER_COMMAND` / `_ARGS` | Override the combiner invocation. |\n| `OPENCODE_MCP_COMBINER_CHECKOUT` | Checkout path for `uv run`. |\n| `OPENCODE_MCP_COMBINER_CONFIG` | `servers.json` path. |\n| `OPENCODE_MCP_COMBINER_PORT` | Port the combiner serves on. Default `9741`. |\n| `OPENCODE_MCP_COMBINER_NAME` | `sharedserver` instance name. Default `mcp-combiner`. |\n| `OPENCODE_MCP_COMBINER_GRACE` | `sharedserver` grace period. Default `30m`. |\n| `OPENCODE_MCP_COMBINER_LOG` | Stdout/stderr capture path (default `~/.local/state/mcp-combiner/mcp-combiner.log`; `none` disables). |\n| `OPENCODE_MCP_COMBINER_PYLOG` | The combiner's own `--log-file` (default `\u2026/mcp-combiner-py.log`; `none` disables). |\n| `OPENCODE_MCP_COMBINER_LOG_LEVEL` | The combiner's `--log-level`. Default `info`. |\n| `SHAREDSERVER_BIN` | Path to the `sharedserver` binary. |\n| `SHAREDSERVER_LOCKDIR` | `sharedserver` lock directory. |\n\nPlugin options take precedence over the environment. These mirror the Claude plugin's\n`CLAUDE_MCP_COMBINER_*` set, so running both clients means one namespace per client\nrather than options in one place and env vars in the other.\n\nIf `mcp-combiner` is on `PATH` but older than `0.8.0`, the plugin logs **and toasts** a\nwarning, then falls back to a pinned release fetched with `uvx` \u2014 it will not silently\nuse a stale binary, nor silently route around one you installed deliberately.\n\n## Relationship to `opencode-sharedserver`\n\n[`@geohar/opencode-sharedserver`](https://github.com/georgeharker/opencode-sharedserver)\nis a **generic** process supervisor plugin. This plugin is\n**combiner-specific**: it knows the correct serve invocation (`--mcp --config\n--port`, version-gated) and \u2014 unlike the generic one \u2014 registers the MCP\nendpoint with OpenCode. It vendors the same `sharedserver` attach/detach logic\nrather than depending on the generic plugin, so either can be used independently.\n\n## Development\n\n```sh\nbun install        # or npm install\nnpm run typecheck\nnpm run build      # emits dist/ (not committed; built on publish)\n```\n\n## License\n\nMIT \u00a9 George Harker\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "plugins/opencode",
+   "type": "git",
+   "url": "git+https://github.com/georgeharker/mcp-companion.git"
+  },
+  "time": {
+   "0.1.0": "2026-07-18T07:38:39.824Z",
+   "0.1.0-dev.0": "2026-07-17T18:10:36.176Z",
+   "0.10.0": "2026-07-20T19:50:41.609Z",
+   "0.10.1": "2026-07-20T23:43:31.529Z",
+   "0.10.2": "2026-08-09T05:11:22.710Z",
+   "0.11.0": "2026-08-16T00:56:59.320Z",
+   "0.11.1": "2026-08-16T02:43:47.303Z",
+   "0.11.2": "2026-08-17T21:58:25.968Z",
+   "0.12.0": "2026-08-19T02:04:44.064Z",
+   "0.13.0": "2026-08-19T02:53:21.182Z",
+   "0.13.1": "2026-08-19T06:47:01.129Z",
+   "0.13.2": "2026-08-19T17:52:42.529Z",
+   "0.13.3": "2026-08-21T07:11:58.784Z",
+   "0.13.4": "2026-08-23T18:29:54.835Z",
+   "0.2.0": "2026-07-18T08:16:28.111Z",
+   "0.9.0": "2026-07-19T06:34:38.035Z",
+   "0.9.1": "2026-07-19T06:44:06.189Z",
+   "0.9.2": "2026-07-19T17:56:01.925Z",
+   "0.9.3": "2026-07-19T20:43:19.099Z",
+   "0.9.4": "2026-07-19T21:22:19.478Z",
+   "created": "2026-07-17T18:10:35.862Z",
+   "modified": "2026-08-23T18:29:55.189Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.1.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.1.0_1784360319664_0.2966311406435327"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.1.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-ZJZbGJuhQqgtL3piV465mchQSp9IO/7/Std20lp8QcZJDVLWkN4SegQfGfCIFslt12hKrH6kbma5buxIPVmkJg==",
+     "shasum": "2794ef1d7b9b203ed7104817b3e579233d6a98d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7L0IhewSrJ6guR1WJIyMK4YOn9xTBdM1W6V4pBzZN0AIgLPWYBPRO/4R2k+QErQCg3yDiN5bJgrr93h6TDwGUJp8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.1.0.tgz",
+     "unpackedSize": 35071
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "26d1af4c235e40e8d4680212548a1d171cc5c0d2",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode-mcp-combiner#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode-mcp-combiner",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.0-dev.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.1.0-dev.0",
+    "_nodeVersion": "26.2.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.1.0-dev.0_1784311836034_0.4380261068758635"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "georgeharker"
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/opencode-mcp-combiner/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-mP/0qfToUEKSfo50OELClf9su8WudkbXtWAjUrUzgfeJVzIJoncOMI0g0PkAGnMJBKxMBflTKfT7tQKpugr0Ow==",
+     "shasum": "6621acaa27b19cc1a58a4e6ceaf9444dffda1b34",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD79W/ZCXSyy03/3A1Wx3QKKpt6R8ji5RnheNKH1iE96gIhAKNarzMmKojEL4NQy/Or2QoUHXSDOr1NDYizKaON9+1m"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.1.0-dev.0.tgz",
+     "unpackedSize": 35007
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "96a92dca40ee63424fe1375393618a9f7617b3e7",
+    "homepage": "https://github.com/georgeharker/opencode-mcp-combiner#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/opencode-mcp-combiner.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-dev.0"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.10.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.10.0_1784577041451_0.2876182169940047"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.10.0"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-FC7Swtvng4n27xBPrd1/49o9kL/+N6ZLA0VBLL/jiEBG9yLsXYBt8s1mLE1dioaTnoMwjytex/0baIlPZVFW7A==",
+     "shasum": "dc1ba74ad53b388a979fb2a9c5799d075aaef1c2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCzlSO0PQ9B55EV49eHR0NO1HWjaxv4FLxSScsjhPdfbAIgLF0f8NHNs3NIv/5KnUUhThzTttoTr/14OjAknt9MgD8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.10.0.tgz",
+     "unpackedSize": 52570
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a9cd9caa1e998171183f3076e75ae4ec1af15216",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.10.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.10.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.10.1_1784591011348_0.7962509366223836"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.10.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-7BO8j8Lchjq0aF74ZhIKQYAhT1NvTXX6s81UWbohxhQddwhqG7a1zLfOo8BXLyc38ATkKyyTrNtO8sR6h+5pHg==",
+     "shasum": "8d9baf5fa66a1ca00b242536ff03c20ea53342be",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB1HxgGfZQdyrC7tIJK7SV5aowcvhAl4JOa9a03yUc5aAiEAs6vWn+1do8NfIeDzp/yRLjVrclX5R29/7YfrljdgMDU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.10.1.tgz",
+     "unpackedSize": 70315
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "287780a0a64a895544e05bd8fed0685bbc3e1a05",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.10.1"
+   },
+   "0.10.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.10.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.10.2_1786252282566_0.9446186994634711"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.10.2"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-JThqHFNy0DkqZhdcb5Ts3uHJD0dDmrHEpOWVdlQV4x70jdoxY6KCHG+/DY7qqGIvjTexw7FRRPFQKj/v5ldjCw==",
+     "shasum": "83dffc9f097933dbf601a930ac40b49c40a014e5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDs4IMaNWUFAgKISqCiHzApdMTgZ0L16QlSuJwl/n48kwIgcMvtFqjz9CS8K9gzLBytlMJ5YLMVbOJUARMrA2HXd70="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.10.2.tgz",
+     "unpackedSize": 72885
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "33913df2456e663062d8da74d7d7e05ddd12b252",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.10.2"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.11.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.11.0_1786841819162_0.6146868085976542"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.11.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-4dPcZrLit6xBuhW6xNB2xBlzawzFw3TH2hHDvDHSZlOZ/RWD/q8v+fMCEXZOZPNACPHT4DCLHJLSlomXD5B2EA==",
+     "shasum": "309021c04fdf30036220448bd62836a5a7569dce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHHbR2UipxgdWLORNQ2AyYb+tL6ZO5B27Gd2dLRpXPtsAiATNXSOmqxtBYkl/XOhJ9G91GRs/EBgar3v5oroDme+Ig=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.11.0.tgz",
+     "unpackedSize": 73531
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "80fcdcb39f52314ce4d67b20c6aa502d79286e6d",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.11.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.11.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.11.1_1786848227151_0.23188514102746383"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.11.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-q+fEGNeEVQJK1iC7r8OgIWMQ5CGSZ+aQm+4d3puk4NpYjkB2B1vQczzxD74a2FndxxGss8RlFwQ34eeYC52wGA==",
+     "shasum": "02e6b44024e421ccc0c66ca56532cf4acf803304",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGwKqioS4U1thQNw7J7wpmKbOy7JxRLL6jtdTgIwtLVeAiEAqiESBkQvM/OEWTV2KzUW8W2gU22znKV6NOQJH5f1WYc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.11.1.tgz",
+     "unpackedSize": 73531
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "8686220706ee13d46db7fe6fca69426b4cbf7f39",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.11.1"
+   },
+   "0.11.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.11.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.11.2_1787003905754_0.5323301177829041"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.11.2"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-UHRkI9oAs+481vfMSP08z6CgTyWD9n9tQpVt7lttWoxxi+RtoACLgQjEVAOY7u2fs0+VUgsDSRZLr2pFzid1LQ==",
+     "shasum": "dfb478d0a761d0552ff2667069ca31dcf97c797c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDgigOon503ytzktCelqai+tKGLvbLjdrP1OZLILvkEoAIhALo913OjWVyyv03oVNvO5JEIrCY9hA8fOZ0+8oRTPUOd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.11.2.tgz",
+     "unpackedSize": 73531
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "1a9b48e7a28142a01df32a50e6bcba7fa7a00b15",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.11.2"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.12.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.12.0_1787105083920_0.023629096311958753"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.12.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-nw5AMpdMgOcl0rRGkSF62wn2/HfTWLfzig+74b8QIkEjLR49UNqa7vNfSf5HkcjjtxDh1AvRzgwpmU1Z6xeUTA==",
+     "shasum": "18baea2690e1f317146e9cccf4a0405907dc151b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGE4Kt3vUFy2pP46SioMNrGiOipvYVFe3Zt68jWtvuwPAiA8hKbnsiWVvr30R5HOmMOHwJ5et34gg0C1zJ5D9VxHXA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.12.0.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "e7cdd600cef8ac7de324fcf8c5a5a0bbd33c7f6c",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.13.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.13.0_1787108001034_0.28554152276210276"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.13.0"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-Mlj+RJfDZjO4Ljt7zPo94KyB5YkmQhBAU816WW00dVGnS+7fAnUIRRVN2kfRii/EFClgfmvon9Nk7iN+M7gQww==",
+     "shasum": "d3b5d1239d3c3700f5e27a7a4633148f6b557844",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDM0tOhgwdcMiVV7P0CBlDoeBtsYEKxYwE5r1vL78CTkgIgdpx6lvfjJ3zq5YBrHKd3egsM3kiHPxngbY9qpjdJZiM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.13.0.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "d4c0c9012831e9000206b205279dff60434ed587",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.13.0"
+   },
+   "0.13.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.13.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.13.1_1787122020978_0.4225133180485028"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.13.1"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-pDSeKYs9UDy/oFiNkMt7+uuzpixGXsob0hpujGoNx5IHg/VPUaf8TxpVLg9KjRjS9JCpizQsHL3Vss7Wyuc0rA==",
+     "shasum": "8f2b933542dcb5a403817a866567766d4b7590db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHCT/0c0dHI2E9Yra+EB2/VEU3vbs+S+xFVI7BUq/XEoAiEAiIfbdgwkH8ii9HNPFqxvy9kVSP6jeXdneStGREkMwFw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.13.1.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "4ed40ac4ad6b22cf1f6e53562d0ad28e06a9ae8e",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.13.1"
+   },
+   "0.13.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.13.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.13.2_1787161962358_0.06186618392388854"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.13.2"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-ryv06o1EcMCInLwwhgji9ks2B5v4hZ+3m5RYxlJtVww1mEt0O0hUUWwMtBqFzLq0kkXMLu3Nrv82aONIw8xNRw==",
+     "shasum": "70699e0c6d22e364c56a6980f51e334fbf3b64f4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGm5xB7qORJL19C3khtl4LVezSwyK0ykXZ903JY6d46SAiBzI59lWm2LN5BF5xLKDnfueIPuH+rUu/ebV+thDFa68A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.13.2.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "f2dc98cbd04c6de73a7e23ec1471ee78781af9fd",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.13.2"
+   },
+   "0.13.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.13.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.13.3_1787296318633_0.6371773190539369"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.13.3"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-MqkpTLoBwd4ufpEj0dyPFhBUFGFiJ5vnaQS9igLR/sZvX4gE6V8vfxLsMfRd7Hvbts4Nf18y1SiG1JLPZIccyA==",
+     "shasum": "56a21a0fefb519cb63097c582a95f8912a752708",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAKTlu1iBBBIrfJCcNZptnp44NPdEW6ll5KFUfwkBftyAiEAkYNmy+qyE8u4qHqeWU2vTcSF+rPWVBDvU2QWsjPy9bM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.13.3.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "eacff658691b172a32947cecb8a71b1cb26afbaf",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.13.3"
+   },
+   "0.13.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.13.4",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.13.4_1787509794684_0.42225412034399157"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.13.4"
+     },
+     "fileCount": 12,
+     "integrity": "sha512-A2A6y5atxEyCI3H+KvTDgXfbKlEzIJwQcy8AubuPDWsKVP4k2a7ErpziFlg1qm5fAwHZgbszwLOBqzG6P/rsNw==",
+     "shasum": "6a42370fc5dcdc3fc5dc684c1ecdf0aed8ffeab3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCuWQMAqdNUn4pKL2B0sx1fCpdd32fJYC7pkYFkcYKAjgIgDKR69O7FbAoge/03MGf1UjHx1WGumBCt1NZsayPF9SA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.13.4.tgz",
+     "unpackedSize": 74842
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "94daa6daf8ba6412f9edf242cd6001d47e39e05a",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.13.4"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.2.0_1784362588001_0.16298638438757718"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.2.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-PociwXt7d0ZA1AfGaPuT8rtUNGdyrjVVb1nT9PSQY3mxDD3wQ3R3F/wzuYzvJ7tqrG22b+6k7lB3DeKa4Xwjyg==",
+     "shasum": "33901f7e4222398df17463ce714f45016a3d8161",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG79zPIKDhtgc2WJI1AY/rjEz3ggZXNmz0Rs1p/nlnd3AiEAzXNwWxMsfpWk34sx1Wd8KWmmUc49Ymdau4/AAwVv/QY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.2.0.tgz",
+     "unpackedSize": 35071
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "77790634447fc9a19fc2801a338092fc854f526a",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode-mcp-combiner#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode-mcp-combiner",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.9.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.9.0_1784442877868_0.14216836359647655"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.9.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-fLMKpZE9IZt6MLNgC5Xbdu3DgJLbJ5UckCB+HNGhkkHycB3vP5wgsFC49CvHf2PfEJmQh+qqF/KfYEJO0a3vzg==",
+     "shasum": "3ba2dc9a7d5018993b3557350934ec58b476d316",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHrps7R2VpcI64l+hhbGrFboXj4Wn9x5di/39C55z111AiEAvxioWsCxXqleha7n/IrHKKxgm2rWqPZmuL/aoUKUeFg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.9.0.tgz",
+     "unpackedSize": 35095
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "614a58e0e71ce639f5e6a678a1d24d79b52f4f7d",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.9.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.9.1_1784443446022_0.4953557361620071"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.9.1"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-5Lzw5Tro+RZJQ3GJVmCyIxr8QT64iGFQw2rPDTkqmCWZP8pUhGHDTzPrUfV37nsOH63CcDSGvyxIN1Tpqidupw==",
+     "shasum": "0d4db3515d1f43a7a523fb41cc732c4cf76d3491",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmIPZ84aTS/IJBWmThRj/BbcpCqc8zZpnvNpL4ym7z1wIga0zohnSpXK1cDb/66LKNukacrJk89QWkGxkH95Oy7Z8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.9.1.tgz",
+     "unpackedSize": 35095
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "979b8932856720020811649f5546190701f6bf42",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.1"
+   },
+   "0.9.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.9.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.9.2_1784483761782_0.2578136661534296"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.9.2"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-hzCuv3ebihyZC97pA6nm4Qz9AeJP4i0GwH82nb5yyAIrbNuoWc510Lu8bGMDNgBaPQWAYD2ZtMIXwIcaJHhCrg==",
+     "shasum": "f23df9a9805f67bcec6adce708ae7e40d2829604",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCrT/EAxe4NSN84rnOXaD9GuXWwCmt4wxTt0rEcjHC+1gIgERNZk2Yx+E/MlZzNfV7LvTu2cYdmezTWvqhPD1iXPb4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.9.2.tgz",
+     "unpackedSize": 39483
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "66f8e21879073de2f6d817e42e19ca63d1838860",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.2"
+   },
+   "0.9.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.9.3",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.9.3_1784493798969_0.7672138988327484"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.9.3"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-dE0qoofI9yfhpH+h5tbIo3qIoHSQ5AuWpeuizQ7bLOR9EuK/2j7KgYWmxwx2MIXIzvuqCZbuGxQ29z9+7E3wKw==",
+     "shasum": "902d5570840381852a7c689fe3fc865b91abf540",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICyUAXFnfU5UagteNpuSzHpBQpFgf+2TrwHhoBiVXaZDAiEA1sF23wxK6VkUQzOf+k1/FKcJsI1NbGDS0QOavQ8otiE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.9.3.tgz",
+     "unpackedSize": 39483
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9cf3686dadf0b28b0e5acb558e82bb2ebb3b891f",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.3"
+   },
+   "0.9.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@geohar/opencode-mcp-combiner@0.9.4",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/opencode-mcp-combiner_0.9.4_1784496139344_0.8922776101069907"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd9f7237-d390-4f13-b937-21ff1ec26b78"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3304e8ab471c]",
+     "name": "George Harker"
+    },
+    "bugs": {
+     "url": "https://github.com/georgeharker/mcp-companion/issues"
+    },
+    "description": "OpenCode plugin: run the mcp-combiner MCP aggregator via sharedserver and register its endpoint with OpenCode.",
+    "devDependencies": {
+     "@opencode-ai/plugin": "^1.3.0",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@geohar%2fopencode-mcp-combiner@0.9.4"
+     },
+     "fileCount": 8,
+     "integrity": "sha512-EPBVX2zw0sXO2ynQBO/B2Q/Hjzu2djwpfMRw7sLLv7atgLz8wOKp2EnIASU//up8AqdV+spzafJCeXaPbhHPxw==",
+     "shasum": "d362848d9a31645ee28db6e4ff5b43eceaa5edf4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICXVmE0eJgCu11S9Z7KiAnJq9XjZe84SHHwrOBFVuoc4AiEA72Ky7qV3D9V+esYmm94TE+3GoVx3tOgmRBS3sE5wB1k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@geohar/opencode-mcp-combiner/-/opencode-mcp-combiner-0.9.4.tgz",
+     "unpackedSize": 39483
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "18e8ab3c68f95979c7cbc115514c78e4be0df9de",
+    "homepage": "https://github.com/georgeharker/mcp-companion/tree/main/plugins/opencode#readme",
+    "keywords": [
+     "opencode",
+     "opencode-plugin",
+     "mcp",
+     "mcp-combiner",
+     "sharedserver",
+     "plugin"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3304e8ab471c]",
+      "name": "georgeharker"
+     }
+    ],
+    "name": "@geohar/opencode-mcp-combiner",
+    "peerDependencies": {
+     "@opencode-ai/plugin": ">=1.3.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "plugins/opencode",
+     "type": "git",
+     "url": "git+https://github.com/georgeharker/mcp-companion.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepack": "node -e \"require('fs').copyFileSync('../../CLAUDE.md.example', './instructions.txt')\"",
+     "prepublishOnly": "npm run clean && npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.4"
+   }
+  }
+ },
+ "name": "@geohar/opencode-mcp-combiner",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@geohar%2Fopencode-mcp-combiner"
+}

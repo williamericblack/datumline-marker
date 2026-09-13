@@ -1,0 +1,4879 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.40.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e8dc15bb75e6]",
+    "name": "euqns"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.14.0",
+   "0.15.0",
+   "0.16.0",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.3.1",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.6.10",
+   "0.6.11",
+   "0.6.2",
+   "0.6.4",
+   "0.6.5",
+   "0.6.7",
+   "0.6.8",
+   "0.6.9",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0",
+   "1.0.0",
+   "1.1.0",
+   "1.10.0",
+   "1.11.0",
+   "1.12.0",
+   "1.13.0",
+   "1.14.0",
+   "1.17.0",
+   "1.19.0",
+   "1.2.0",
+   "1.21.0",
+   "1.22.0",
+   "1.23.0",
+   "1.25.0",
+   "1.26.0",
+   "1.27.0",
+   "1.28.0",
+   "1.3.0",
+   "1.30.0",
+   "1.31.0",
+   "1.32.0",
+   "1.33.0",
+   "1.34.0",
+   "1.35.0",
+   "1.36.0",
+   "1.37.0",
+   "1.38.0",
+   "1.39.0",
+   "1.4.0",
+   "1.40.0",
+   "1.40.1",
+   "1.40.2",
+   "1.5.0",
+   "1.6.0",
+   "1.7.0",
+   "1.8.0",
+   "1.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@euqns/nudge-mcp",
+  "_rev": "65-9e22cac0f1504ffd89f96ad6be829bf0",
+  "bugs": {
+   "url": "https://github.com/kubilayege/Nudge/issues"
+  },
+  "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+  "dist-tags": {
+   "latest": "1.40.2"
+  },
+  "homepage": "https://github.com/kubilayege/Nudge#readme",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e8dc15bb75e6]",
+    "name": "euqns"
+   }
+  ],
+  "name": "@euqns/nudge-mcp",
+  "readme": "# Nudge MCP\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server that exposes\nthe Nudge board (this repo's Trello-like app) to MCP clients \u2014 Claude Desktop,\nClaude Code, Cursor, anything that speaks MCP.\n\nIt lets an LLM list boards, create cards, assign people, move tasks between\ncolumns, drop comments, and read your notifications \u2014 using your identity, so\nmentions and activity logs attribute correctly.\n\n## Two ways to connect\n\n**Remote HTTP (recommended).** Nudge serves the same tool surface directly from\nConvex at `<deployment>.convex.site/mcp`, over MCP's stateless Streamable HTTP\ntransport (spec revision `2026-07-28`). Nothing to install and nothing to keep\nupdated \u2014 tool changes ship with the backend deploy:\n\n```bash\nclaude mcp add --transport http nudge https://<deployment>.convex.site/mcp \\\n  --header \"Authorization: Bearer nug_...\"\n```\n\nGenerate the token under **profile \u2192 MCP tokens** in the web app; that panel\nprints the full command with the token already filled in. The endpoint also\nanswers 2025-era clients on the same URL, so older MCP implementations keep\nworking.\n\n**Local stdio (this package).** Still the right choice when a client can only\nlaunch a subprocess, and it's what the local Nudge Agent companion uses. See below.\n\nThe two paths serve an identical tool surface \u2014 `convex/mcpToolDefs.ts` is\ngenerated from this package by `scripts/gen-convex-tooldefs.mjs`, so they\ncannot drift. Re-run it after changing any tool:\n\n```bash\ncd mcp && npm run build && node scripts/gen-convex-tooldefs.mjs\n```\n\n## How it authenticates\n\nNudge's auth is Google-only with an `@joygame.com` domain restriction, and\nthe JWTs are signed by the Convex deployment itself \u2014 there's no key the MCP\nserver could re-sign with from a CLI. So the MCP uses **personal access\ntokens**, bootstrapped over a one-shot localhost handshake:\n\n1. Run `npx -y @euqns/nudge-mcp setup` in a terminal.\n2. The CLI opens your browser to Nudge's `/mcp-setup` page (you'll sign in\n   with Google if you aren't already).\n3. Click **Authorize**. The page generates a token in your name and sends it\n   to the CLI over `http://127.0.0.1:<random-port>/callback`. The token is\n   never displayed, never typed, never logged.\n4. The CLI writes `~/.nudge/credentials` at mode 0600 and prints the snippet\n   you paste into your MCP client \u2014 that snippet contains **no secrets**.\n\nReplay protection is via a fresh per-run state nonce; mismatched POSTs are\nrejected with 403. The listener only binds to `127.0.0.1` and times out\nafter 5 minutes.\n\nYou can manage tokens (name, last-used, revoke) from **profile \u2192 MCP\ntokens** in the web app.\n\n## Nudge Agent chat\n\nThe same package can connect Nudge chat to a coding agent already installed and\nauthenticated on the user's computer. It binds to loopback and opens Nudge with\na one-time pairing secret in the URL fragment:\n\n```bash\n# Sign in to any or all supported CLIs first\ncodex login\nclaude auth login\ncursor-agent login\n\n# Run this from the repository the agent should inspect\nnpx -y @euqns/nudge-mcp@latest agent\n```\n\nTo have the companion come back on its own after a reboot, install it as a login\nservice from the same directory:\n\n```bash\nnpm i -g @euqns/nudge-mcp && nudge-mcp service install agent --no-open\n```\n\n`--no-open` keeps it from opening a browser tab at every login; the install\ncommand waits for the service to come up and prints the pairing URL in the\nterminal. Open it once. An installed service keeps its pairing (the loopback\nport and bearer token) in `~/.nudge/pairings/<label>.json`, owner-only like\neverything under `~/.nudge`, and reuses it on every start \u2014 rebuild restarts,\ncrash restarts, logout/login and reboot alike \u2014 so the browser's saved\nconnection keeps working: Nudge chat and the Agent View row show *paired, not\nreachable* while the service is down and go back to *connected* on their own\nonce it is up, with no new URL and no **Forget pairing**. Later,\n`nudge-mcp service status agent` prints the same URL again for pairing another\nbrowser (only while the process is alive \u2014 a dead companion's URL is never\nshown). To revoke a pairing, run `nudge-mcp service restart agent\n--reset-pairing`: the old token is refused from then on and a new URL is\nprinted. A companion started by hand (`nudge-mcp agent` in a terminal) keeps\nthe old behaviour on purpose: its pairing lives in memory and a new run mints\na new URL, since a pairing that outlived the terminal would point at a port\nnothing listens on. See *Always-on services* below for start/stop/restart/logs.\n\nThe companion checks Codex, Claude Code, and Cursor independently, starts when at\nleast one has a valid subscription login, and reports which CLIs are ready. One\npairing exposes every ready provider, so each chat can choose its own agent and\nresume with that same agent later. `--provider codex|claude|cursor` remains an\noptional initial preference. The companion does not accept or store provider API\nkeys. It keeps local filesystem access read-only and allows only the exact Nudge\norigin that launched it. Authorized Nudge MCP tools can still update board data.\n\nThe Codex and Claude Code adapters supply their own Nudge MCP transport, so a\nfresh computer does not need a manual `mcp_servers.nudge` entry in\n`~/.codex/config.toml`. Each computer still needs the one-time\n`npx -y @euqns/nudge-mcp setup` authorization so Nudge can identify that user.\nCursor reads MCP servers from its normal `.cursor/mcp.json` configuration, so\nthe Nudge MCP server must also be present there for board mutations.\n\nHeadless runner jobs isolate Cursor's MCP config to `~/.nudge/cursor-config/<job>`\nvia `CURSOR_CONFIG_DIR`, but deliberately leave `HOME`/`XDG_CONFIG_HOME` untouched \u2014\n`cursor-agent` reads its login from there, not from `CURSOR_CONFIG_DIR`. A runner\nhost needs either `cursor-agent login` once (the usual case) or `CURSOR_API_KEY`\nset in the runner's own environment; the CLI's own error message names both.\n\nFor Codex, the sidecar reads the installed model catalog and subscription account\nmetadata from the local Codex app server; it does not query provider quota or\nrate-limit endpoints. Claude Code exposes its subscription model aliases and\nreasoning efforts, while Cursor reads the models available to the signed-in account\nfrom `cursor-agent --list-models`. Users can change models for every provider; Claude\nCode and Codex also expose reasoning effort. A model or effort change starts a fresh\nchat; prior chats are kept in browser-local history and resume their persisted local\nagent session when reopened. The folder button browses directories on the machine\nrunning the companion and switches new chats to the selected workspace; reopening an\nold chat restores its saved workspace first. Per-turn token telemetry remains available\nwhere the provider reports it.\n\nWhen chat is opened from a board or canvas, Nudge sends the active board id,\ntitle, source, view, canvas id, and lightweight counts with each prompt. The\nagent therefore has the right board context without asking the user to repeat\nit; board contents are still read through the authorized Nudge MCP tools.\n\nCreate tools return a versioned `structuredContent` payload in addition to\ntheir model-readable text result. `create_board`, `create_card`, and\n`create_canvas` include the created entity's id, title, board id, kind, and\nrelative Nudge URL. Canvas node creation also points back to the selected\ncanvas when `canvasId` was explicit. Nudge Agent chat renders these\nentities as deduplicated, clickable result cards; other MCP clients can consume\nthe same `nudge.tool-result/v1` contract without parsing assistant prose.\n\n## Self-hosted runner CI/CD\n\n### Automatic npm releases\n\n`.github/workflows/publish-mcp.yml` releases `@euqns/nudge-mcp` from `main`\nusing npm Trusted Publishing (OIDC). No npm login, OTP, or `NPM_TOKEN` is\nneeded for each release. The npm trusted publisher must specify GitHub owner\n`kubilayege`, repository `Nudge`, workflow `publish-mcp.yml`, no environment,\nand allow direct `npm publish`.\n\nAfter a push affecting `mcp/`, the workflow installs locked dependencies,\ntests the release tooling and MCP, and builds the package. `semantic-release`\nthen considers only commits that changed `mcp/`:\n\n| Commit message | Release |\n| --- | --- |\n| `fix(mcp): ...` or `perf(runners): ...` | Patch |\n| `feat(mcp): ...` | Minor |\n| `feat(mcp)!: ...` or a `BREAKING CHANGE:` footer | Major |\n| `docs: ...`, `chore: ...`, or no MCP changes | None |\n\nThe scope is descriptive; file changes determine whether a commit belongs to\nMCP. Use a Conventional Commit message for the squash-merge title as well.\nRelease tooling changes also trigger the workflow, but do not themselves bump\nMCP. Any pending releasable MCP commits will still be included.\n\nThe release bumps `package.json`, `package-lock.json`, and `src/version.ts`\ntogether in the CI checkout, rebuilds, publishes to npm, and creates an\n`mcp-vX.Y.Z` Git tag and GitHub release. Version changes are **not committed\nback to main**; tags and npm are the release history. Main's checked-in version\ncan therefore lag behind npm. The first run starts from the npm `gitHead` for\nthe last manual release, `1.33.0`, rather than replaying the full repository\nhistory as a new `1.0.0` release.\n\nTo preview: GitHub **Actions \u2192 Publish MCP \u2192 Run workflow**, select `main`,\nand leave **Preview the next release without publishing** checked. Uncheck\nit to release pending changes manually. A preview skips publishing and remote\ntag creation; only a real publish verifies that npm accepts the configured\ntrusted publisher. Concurrent releases are serialized.\n\nRelease-tool tests can also run locally:\n\n```bash\nnpm ci --prefix .github/release --ignore-scripts\nnpm test --prefix .github/release\n```\n\n### Manually bump a development version\n\nFrom either the repository root or the `mcp/` directory, bump the MCP package\nwhen a local development version needs changing:\n\n```bash\nnpm run mcp:bump -- patch\n# also accepts: minor, major, or an explicit version such as 0.15.0\n```\n\nThis updates `mcp/package.json`, both root version fields in\n`mcp/package-lock.json`, and `mcp/src/version.ts`. It does not commit, tag, or\npublish the package.\n\nRunner tasks start directly in one writable implementation turn. Claude Code\nuses Opus/high, Codex uses GPT-6 Astra/high, and Cursor uses auto. The\nformer planning, review, and up-front human-interference turns are not part of\nthe task pipeline. Intake rewrites and comment questions remain separate\nread-only flows.\n\nA runner works one job at a time by default. Start it with `--concurrency N`\n(persisted by `--save`, capped at 8) to work up to N queued jobs at once \u2014\neach job is its own agent conversation, so queueing several cards behaves\nlike opening several chats. All of them share the runner's checkout: parallel\ncoding turns can mix uncommitted changes across tasks, so prefer tasks that\ntouch different areas, or run one clone per runner (`--instance`) instead.\n\n### One machine, one entry\n\nThe runner mints a machine id on first launch and keeps it in\n`~/.nudge/machine.json`, independent of `--save`. Restarting, rebooting, or\nre-running the setup command therefore re-registers the SAME machine rather\nthan adding another row to the board's runner list \u2014 the board just shows it\ngoing online and offline. `--instance <name>` is the deliberate exception: it\nregisters as a second machine, for running two processes from one box.\n\nWhile it runs the process heartbeats once a minute so the board can show it as\nonline, and reports offline on Ctrl-C. Startup probes each agent CLI (`codex`,\n`claude`, `cursor-agent`) for version, sign-in state, and available models, and\nsends the result with the registration \u2014 that is what the board's runner\nsettings render. Installed or signed in to an agent after startup? Press\n**Reload** there and the running process re-probes and re-reports without a\nrestart.\n\nGlobally installed, supervised runners check npm's `latest` release on startup\nand every five minutes. When a newer stable version exists, the runner stops claiming\njobs, finishes active work, updates its own npm prefix, and restarts. Failed\nchecks or installs are logged and retried at the next five-minute check. Set\n`NUDGE_RUNNER_AUTO_UPDATE=0` in the runner's environment to disable release\nchecks. Local checkouts and npx installs are not automatically upgraded.\n\nRunners sharing an npm prefix serialize updates with a process lock outside\nthe package directory. The winner installs into a staging directory and checks\nthe real CLI, its imports, package version and bundled Codex executable before\nactivation. Waiting runners reuse that verified version. Failed installs leave\nthe running package intact; failed activation restores the previous build.\nThe previous package is retained beside the installation as\n`.nudge-mcp-previous` until the next successful activation. Restart watchers and\nsupervisors wait for a complete, unlocked installation before loading it.\n\nA running runner picks up new builds by itself. The process supervises a child\nthat watches its own installed code; when `dist/` changes (a rebuild, or an npm\nupgrade in place) it stops claiming jobs, lets in-flight jobs finish on the code\nthey started with, then restarts and re-registers under the same machine id.\nOpt out with `--no-auto-restart`.\n\n### Always-on services: survive reboots, crashes and logouts\n\nA runner or agent started from a terminal dies with that terminal, so a reboot\ntakes the machine off the board until someone relaunches it. Install it as a\nper-user login service instead \u2014 the OS starts it at login and brings it back\nafter a crash \u2014 and manage both kinds with the same verbs:\n\n```bash\nnpm install -g @euqns/nudge-mcp          # a stable install path; npx's cache may be pruned\ncd /path/to/checkout\nnudge-mcp service install runner --convex-url https://<deployment>.convex.cloud \\\n  --token nrun_... --concurrency 8 --cwd . --save\nnudge-mcp service install agent --no-open   # the Nudge Agent companion, same idea\n\nnudge-mcp service status                 # both services: state, version, machine, board / pairing URL\nnudge-mcp service status runner --all    # every installed runner instance\nnudge-mcp service status agent --json    # machine-readable\nnudge-mcp service start   runner|agent   # bring an installed service up now\nnudge-mcp service stop    runner|agent   # stop it (it still returns at next login)\nnudge-mcp service restart runner|agent   # e.g. after `npm i -g @euqns/nudge-mcp@latest`\nnudge-mcp service logs    runner|agent [-n 100] [-f]\nnudge-mcp service uninstall runner|agent # stop it and remove the service for good\n```\n\nEvery verb takes `--instance NAME` for a second runner installed with\n`--instance`. Everything after `install runner` is passed to the runner\nunchanged; a relative `--cwd` is pinned to the directory you ran the command\nin. Add `--dry-run` to print the service file without installing.\n\n`install` and `start` wait for the process to report in and then print what\nmatters \u2014 the runner's registration (board, agents, checkout) or the agent's\nfresh pairing URL \u2014 so you never open a log to find out whether it worked. If\nit did not come up, the same command prints the exit code and the last log\nlines inline, followed by the exact command to run next. `status` does the same\nfor each service:\n\n```\nrunner  com.nudge.runner\n  Service:   launchd \u00b7 running (pid 4242) \u00b7 ~/Library/LaunchAgents/com.nudge.runner.plist\n  Process:   nudge-mcp 1.24.0 \u00b7 pid 4243 \u00b7 started 3m ago \u00b7 managed by launchd\n  Machine:   mac-mini \u00b7 id 0123abcd\u2026\n  Board:     Feedback Loop (org/repo) \u00b7 https://<deployment>.convex.cloud\n  Checkout:  /path/to/checkout\n  Agents:    codex, claude \u00b7 up to 8 jobs at once\n  Logs:      nudge-mcp service logs runner   (~/.nudge/logs/com.nudge.runner.log)\n```\n\nHow it works: both processes write `~/.nudge/state/<label>.json` at startup\n(version, pid, machine, board / listener + pairing URL). The CLI treats a\nreport as current only when its pid is alive and it was written after the\ncurrent boot, and `install`/`start` only accept a report written after the\ncommand began \u2014 which is what keeps a stale pairing URL from ever being shown.\nThe agent service also keeps `~/.nudge/pairings/<label>.json` (token + port,\nmode 0600); a fresh process reads it before listening so the URL stays valid\nacross restarts. A pairing file that is malformed, a symlink, or readable by\nanyone else is ignored and replaced by a fresh token. Service files carry only\n`PATH`, `HOME`, locale and stable `NUDGE_*` settings \u2014 never the pairing\ntoken, the runner-job id or the supervisor marker.\n\n**Platforms.** macOS writes `~/Library/LaunchAgents/com.nudge.<kind>.plist`\n(mode 0600, since it can carry the token), loads it with `launchctl`, and logs to\n`~/.nudge/logs/`. Linux writes `~/.config/systemd/user/nudge-<kind>.service`,\nenables it with `systemctl --user`, and logs to the journal; run\n`loginctl enable-linger $USER` if it should start at boot before anyone logs in.\nBoth run the same node binary and installed copy you invoked, with your current\n`PATH` baked in so `git`, `gh`, `claude`, `codex`, and `cursor-agent` resolve\nexactly as they do in your shell. Once a runner is a service, the auto-restart\nabove still handles rebuilds; the service manager handles reboots and crashes.\nWindows has no user-level equivalent here yet: every lifecycle verb prints the\nTask Scheduler action to use instead, and `status` still reports a runner or\nagent started from a terminal.\n\n**Known limitations.** `stop` keeps the service installed, so it comes back at\nthe next login (use `uninstall` to remove it). launchd services live in the\nGUI login session: they start when you log in, not at boot, and a `stop` from\none login session is undone by the next. The agent service keeps its pairing\nacross restarts and reboots (see *Nudge Agent chat*); only if its saved port is\ntaken by another process when it starts does it fall back to a free one, and\npaired browsers then need the URL `service status agent` prints. A companion\nstarted by hand mints a new pairing per run. A runner started with\n`--no-auto-restart` outside a service has nothing to respawn it, so Agent View\ndoes not offer it a remote restart.\n\n**Agent View.** The web app's Agent View lists every registered machine with\nhealth (online / running N jobs / stopped cleanly / offline with no heartbeat),\nlast heartbeat, nudge-mcp version, machine name and OS, board, checkout, and\nhow it is kept alive (`managed by launchd`, `managed by systemd`, or terminal).\nOnline machines get **Reload** (re-probe the agent CLIs) and, where the runner\nreported a supervisor or a service, **Restart** (drain in-flight jobs, then\nrespawn on the new build). An offline machine cannot be reached from a browser,\nso its row shows the exact local recovery command to copy \u2014 `nudge-mcp service\nstart runner`, or the relaunch-from-checkout command for a terminal runner. The\nsame section shows this browser's paired Nudge Agent (connected / paired but\nunreachable / not paired) with its version, machine and workspace, and the\nrecovery command when it is down.\n\n**Verify a reboot by hand.** The install-time checks are automated; the reboot\nitself is not. Once per machine, after installing:\n\n1. `nudge-mcp service status` \u2014 both services `running`, the runner shows its\n   board, the agent shows a pairing URL.\n2. `kill -9 <runner pid>` (the `Process:` pid) \u2014 within ~10 s `status` shows it\n   running again with a new pid, and the board's machine row never went offline\n   for longer than a heartbeat.\n3. Log out and back in (macOS) or `loginctl terminate-user $USER` and log in\n   (Linux) \u2014 `status` shows both running.\n4. Reboot \u2014 after login, `status` shows both running; the runner is online in\n   Agent View; the Nudge Agent row and chat in the already-paired browser go\n   back to connected by themselves, and `service status agent` prints the SAME\n   pairing URL as before (`Pairing: \u2026 (persistent \u2026)`).\n5. `nudge-mcp service stop runner` then `start runner` \u2014 the board row goes\n   \"Stopped cleanly\" and back to \"Online\".\n\nRecord the date and OS version alongside the board's runner settings when you\nhave done this; it is the one check the package cannot run for you.\n\nDuring the work turn, `get_card`, `update_card`, `add_comment`, and subtask\ncompletion use the job's board-scoped runner token. They are limited to the\nactive task and its direct subtasks, so task management does not depend on a\nseparate personal MCP login on the runner machine.\n\nAn `@agent` task created from the cloud-board composer is an intake job: it is\nqueued with its frozen title, instructions, assignees, labels, priority, due\ndate, and team before any card exists. The runner reads the linked checkout as\ncontext, then performs one rewrite-only turn that creates exactly one card with\na polished title and structured Markdown description covering context, scope,\nacceptance criteria, and verification. Intake checkout access is read-only and\nits MCP surface allows only reads, `create_card`, and `ask_human`; it cannot\nimplement, edit, run CI, complete, move, comment, create subtasks, or request\nreview. Creation atomically writes the rich description, derived preview and\nchecklist fields, frozen metadata, and the job attachment. A cardless intake\ncannot finish successfully.\n\nRunner work turns expose two job-scoped GitHub Actions tools when the board has\na linked repository: `list_ci_workflows` discovers its workflows and\n`run_ci_workflow` dispatches one with explicit `workflow_dispatch` inputs. The\nrepository is fixed to the board setting, and the tools are absent during the\nread-only intake/question turns. The runner uses the machine's existing `gh` login; no\nGitHub credential is stored in Convex.\n\nBy default, a dispatched workflow stays attached until GitHub reports its\nterminal result. A successful workflow that fulfills the card is treated as\ncompleted work: the agent sends the card to Review and finishes instead of\nasking the requester to verify the run separately.\n\nBy default a dispatch waits for completion. Queue, running, and conclusion\nupdates stream back to the card as a pipeline rail with the GitHub run link.\nOnly input names are persisted; input values remain local to the `gh` process.\nInstall and authenticate GitHub CLI on the runner machine before using it:\n\n```bash\ngh auth login -h github.com\n```\n\nNudge MCP actions are pre-approved inside the companion because the SDK runs\nCodex headlessly and cannot display or answer a second approval prompt. The\nbrowser pairing and the user's revocable personal Nudge token authorize the\nserver; Convex still applies the same board membership, role, validation, and\nrate-limit checks as the web app to every call.\n\nUseful options:\n\n```bash\nnudge-mcp codex --cwd /path/to/project\nnudge-mcp codex --app-url http://localhost:5173\nnudge-mcp codex --port 47653 --no-open\n```\n\nFor local development from this repository:\n\n```bash\nnpm --prefix mcp run dev -- codex \\\n  --app-url http://localhost:5173 \\\n  --cwd ..\n```\n\n## Install\n\n### TL;DR\n\nIf you already have **Node.js \u2265 18** on your machine:\n\n```bash\nnpx -y @euqns/nudge-mcp setup\n```\n\nThen paste the snippet it prints into your MCP client (see [Configure](#configure)). Done.\n\nIf `node -v` errors or prints something older than `v18`, follow the section for your OS below first.\n\n---\n\n### Step 1 \u2014 Install Node.js\n\n`npx` and `npm` ship with Node.js, so this is the only prerequisite. Pick **one** option per OS.\n\n#### macOS\n\n**Option A \u2014 nvm (curl, no admin, lets you switch Node versions later):**\n\n```bash\ncurl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash\n# close and reopen your terminal (or: source ~/.zshrc)\nnvm install --lts\n```\n\n**Option B \u2014 Homebrew:**\n\n```bash\n# install brew first if you don't have it\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\nbrew install node\n```\n\n**Option C \u2014 official installer:** download the `.pkg` from <https://nodejs.org> (LTS), double-click, follow the prompts.\n\n#### Windows\n\n**Option A \u2014 winget (built into Windows 10/11, open PowerShell):**\n\n```powershell\nwinget install OpenJS.NodeJS.LTS\n```\n\n**Option B \u2014 official installer:** download the `.msi` from <https://nodejs.org> (LTS) and run it. Leave \"Add to PATH\" checked.\n\n**Option C \u2014 nvm-windows** (multi-version management): grab the latest `nvm-setup.exe` from <https://github.com/coreybutler/nvm-windows/releases>, install, then:\n\n```powershell\nnvm install lts\nnvm use lts\n```\n\n> After install, **close and reopen PowerShell/CMD** so `node` and `npx` are on `PATH`.\n\n#### Linux\n\n**Option A \u2014 nvm (curl, recommended):**\n\n```bash\ncurl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash\nsource ~/.bashrc   # or ~/.zshrc\nnvm install --lts\n```\n\n**Option B \u2014 distro package manager** (versions vary, confirm `node -v` \u2265 18 afterwards):\n\n```bash\n# Debian / Ubuntu\nsudo apt install -y nodejs npm\n# Fedora / RHEL\nsudo dnf install -y nodejs\n# Arch\nsudo pacman -S nodejs npm\n```\n\nIf apt gives you something older than 18, use NodeSource:\n\n```bash\ncurl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -\nsudo apt install -y nodejs\n```\n\n---\n\n### Step 2 \u2014 Verify\n\n```bash\nnode -v    # v18.x or higher\nnpx -v     # any version number\n```\n\nIf either command is \"not found\", restart your terminal first. On Windows, sign out and back in if PATH still doesn't pick up.\n\n---\n\n### Step 3 \u2014 Run setup\n\n```bash\nnpx -y @euqns/nudge-mcp setup\n```\n\nFirst run downloads the package (~5 seconds, one-time), spins up a localhost listener, and opens your browser to `/mcp-setup`. Sign in with Google, click **Authorize**, and the CLI writes `~/.nudge/credentials` and prints the JSON snippet for your MCP client.\n\n> **Corporate / locked-down machines:** if `npx` can't write to its cache or hits a proxy, set `npm config set cache \"$HOME/.npm-cache\"` and try again. If your network blocks the public npm registry, you'll need an internal mirror or the standalone-binary route (open an issue).\n\n---\n\n### Local development of this repo\n\nSkip the npm package and run from source:\n\n```bash\ncd mcp\nnpm install\nnpm run build\nnode dist/index.js setup   # uses the default app URL\n```\n\n## Configure\n\nAfter `setup` succeeds, copy this into your MCP client. The token lives in\n`~/.nudge/credentials`, so the client config is the same on every machine\nand contains no secrets:\n\n### Claude Desktop\n\n`~/Library/Application Support/Claude/claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"nudge\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@euqns/nudge-mcp\"]\n    }\n  }\n}\n```\n\nRestart Claude Desktop. The Nudge tools appear under the tools menu.\n\n### Claude Code\n\n```bash\nclaude mcp add nudge npx -y @euqns/nudge-mcp\n```\n\n### Cursor\n\n`.cursor/mcp.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"nudge\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@euqns/nudge-mcp\"]\n    }\n  }\n}\n```\n\n## Overrides\n\nIf you need to point at a non-production deployment (PR preview, local dev\nagainst `convex dev`), `setup` accepts `--app-url`:\n\n```bash\nnpx -y @euqns/nudge-mcp setup --app-url http://localhost:5173\n```\n\nYou can also bypass the credentials file entirely by setting\n`NUDGE_CONVEX_URL` and `NUDGE_TOKEN` in the MCP client's `env` block \u2014\nuseful for CI or containers.\n\n## Tools\n\n| Tool | What it does |\n|---|---|\n| `whoami` | Identity bound to the token (id, email, displayName, team). |\n| `list_boards` | Every board the user is a member of. |\n| `get_board` | Board layout: lists, labels, members, your role. |\n| `create_board` | New board (caller becomes owner, default Backlog/In progress/Review/Done columns). |\n| `list_lists` / `create_list` | Read or add columns. |\n| `list_cards` | All cards on a board (subtasks hidden by default). |\n| `my_cards` | All cards across all boards where the caller is assigned, soonest due first. |\n| `get_card` | One card incl. its description doc. |\n| `create_card` | New card in a list (pass `parentCardId` for real, independently tracked subtasks). |\n| `update_card` | Patch title/icon/dueDate/assigneeIds/labelIds/priority/listId/description. Description accepts Markdown and becomes native rich editor content; pass `'none'` to clear `dueDate`/`priority`. |\n| `move_card` | Drop into another list. Auto-completes if landing in a Done list. |\n| `set_card_completed` | Flip the complete bit explicitly. |\n| `delete_card` | Hard-delete with cascade (subtasks, comments, activity, notifications). |\n| `create_label` | Board-scoped label. |\n| `list_comments` / `add_comment` | Comment threads on a card. `@username` mentions notify. |\n| `list_members` | Board members (use the returned ids for `assigneeIds`). |\n| `find_user_by_email` | Resolve an email to a user id \u2014 handy before assigning. |\n| `my_notifications` | Recent notifications (assigned / mentioned / commented / moved / updated). |\n| `update_runners` | Update `@euqns/nudge-mcp` on every active self-hosted runner and restart them gracefully. `plan` (default) previews; `apply` needs `confirm: true`; `status` re-reads a run. Runners finish in-flight jobs first; the result lists per-runner success/failure and which interrupted jobs must be rerun. Locally it also updates this server's own global install. |\n\n## Boundary notes\n\n- The server runs every call as the user the token belongs to \u2014 board access\n  is checked against `memberships`, the same table the web app reads. There\n  is no \"elevated\" mode.\n- Convex actions run on the same backend as the app, so MCP-driven changes\n  appear in real time in any open browser tab.\n- The token is sent as a regular argument over the wire (HTTPS to Convex).\n  Anyone reading the JSON payload would see it, which is why we hash on the\n  server and only ever return the plaintext at creation time.\n\n## Development\n\n```bash\nnpm run dev   # tsx watcher \u2014 useful with `node --inspect` on the MCP host\nnpm run build # tsc to dist/\n```\n\nThe server doesn't reload tools at runtime; restart the MCP client when you\nchange tool definitions in `src/index.ts`.\n\n\n### Local Codex runner configuration\n\nThe runner regenerates `~/.nudge/codex-home/config.toml` for each job.\nPut machine-owner TOML overrides in `~/.nudge/codex-overrides.toml` instead;\nthey are appended after the generated model defaults. This can explicitly\ntrust a project so Codex loads its `.codex/config.toml` and project MCP servers:\n\n```toml\n[projects.\"/absolute/path/to/project\"]\ntrust_level = \"trusted\"\n```\n\nProject workspace networking can be configured with\n`[sandbox_workspace_write] network_access = true` in that project's config.\nThe runner still sets the job sandbox mode and approval policy explicitly.\nOverrides are read at each job startup; already-running turns retain their\nexisting settings. Do not repeat generated top-level model/auth keys in the\nTOML overrides. Desktop MCP servers remain isolated unless explicitly enabled.\n\n### T3 Code desktop runner threads\n\nWhen T3 Code is running on the runner's machine, new **Codex** jobs on macOS\nand Linux execute through T3 itself. Look for **Nudge \u00b7 running \u00b7 Board \u00b7 task \u2026**\nunder the matching checkout's project. Open the thread to see the prompt,\nstreaming responses, and tool activity in the conversation pane. Nudge receives\nthe final answer and token usage, and updates the title with the job status.\n\nNudge resumes and steers these jobs in the same T3 conversation. Cancelling or\nsteering a job in Nudge interrupts its T3 turn. Keep using Nudge for job questions,\nreview, and scheduling; T3's composer also operates the underlying conversation,\nbut does not create or reopen a Nudge job. Completed conversations remain\nreadable in T3. Their dedicated Nudge provider is removed after completion so\nit disappears from both the model picker and Providers settings; resume the job\nthrough Nudge to recreate it automatically. Cleanup also removes previously\ndisabled providers for completed jobs. Active jobs and jobs waiting for human\ninput keep their provider.\n\nThe Codex bridge preserves the runner's Nudge MCP tools and sandbox: intake and\nquestion turns stay read-only, ordinary tasks use workspace-write, and jobs that\nexplicitly need repository/network actions retain their existing access. T3 gets\na separate Codex provider instance per conversation using Nudge's isolated Codex\nhome. Job credentials live in an owner-only context under `~/.nudge/t3-native`,\nare removed when execution ends, and are never put in T3 titles or prompts.\n\nClaude, Cursor, Windows, and conversations originally started by an external CLI\ncontinue using the terminal log view. Their previous conversation IDs are kept\nwith the original engine. Existing log-only threads and jobs already running\nare not converted or backfilled.\n\nDiscovery reads `~/.t3/userdata/server-runtime.json` (or the `dev` variant) and\nonly connects over loopback. On macOS it finds T3 Code or T3 Code (Nightly) in\n`/Applications` or `~/Applications`; other installs need a `t3` executable on\nthe runner's `PATH`. The installed CLI issues an expiring local session and\nrevokes it afterward (24 hours maximum for native execution, five minutes for\nstatus updates). T3 API credentials are held in memory. Windows gets the fallback\nthread and status updates, with its log saved locally.\n\n| Runner environment variable | Purpose |\n| --- | --- |\n| `NUDGE_T3=0` | Disable automatic T3 threads. |\n| `T3CODE_HOME=/path/to/.t3` | Find a nonstandard T3 data directory. |\n| `NUDGE_T3_CLI=/path/to/t3` | Use a specific installed T3 CLI or executable wrapper. |\n\nT3 must be open before the job starts. Missing T3 is silently skipped for new\njobs. A native conversation must resume in its original T3 environment; if that\nenvironment is unavailable, the job reports an error. Once a native turn has\nbeen submitted, the runner never falls back to a second CLI agent. Verified\nagainst T3 Code Nightly `0.0.41-nightly.20260908.1400`; native execution requires\nits HTTP orchestration and provider settings RPC interfaces. Fallback JSONL\nlogs are owner-only under `~/.nudge/t3-logs` and\nretain up to 8 MiB of live output per run, followed by its final result.\nThey remain available after completion and can be removed when no longer needed.\n\n### Runner output files\n\nA coding turn can optionally write the JSON manifest at the absolute path supplied\nin its prompt (also `NUDGE_RUNNER_ARTIFACT_MANIFEST`). It is an array of\n`{ \"path\": \"report.md\", \"contentType\": \"text/markdown\", \"name\": \"report.md\" }`.\nPaths are absolute or relative to the checkout; `name` defaults to the basename.\nOnly explicitly listed files are uploaded. Engine integrations may instead return\n`EngineResult.artifacts` with the same descriptors. No manifest means no uploads.\n\nThe runner uploads before `runners:finish` using\n`uploads:getRunnerArtifactUploadUrl`, a direct signed S3 POST, then\n`uploads:confirmRunnerArtifactUpload`. Both actions require the runner token,\nrunner ID and job ID; confirmation also requires the returned upload ID. The\nserver checks token ownership, board, active lease and job attempt, verifies the\nCDN object, and persists `{ name, contentType, size, url, key }` in job `artifacts`.\nCard job history and job details show Output files with names, types and download\nlinks. Text (including JSON, Markdown, CSV and HTML source), images and videos\nopen in an in-app preview popup. Video uses native browser controls; codec support\ndepends on the browser. Other types remain download-only.\n\nLimits: 20 files per job across attempts, 10 MiB per file (empty files allowed),\n255 characters for names/types, and a 64 KiB manifest. Types are opaque metadata,\nincluding custom types and parameters; bytes are never converted. Files are\nserved as attachments. Previews fetch the bytes and use local blob URLs for\nmedia, so attachment disposition does not force a download. The CDN must allow\ncross-origin GET requests from the app origin, as for Docs text previews.\nText previews show at most the first 256 KiB with a truncation notice;\nHTML is displayed as text, never executed. Download always links to the original\nfile. URLs use the existing public CloudFront attachment model: anyone with a URL\ncan read it.\n\nConfirmed files survive success, failure, cancellation and retries. A failed\nupload fails an otherwise successful run, retaining earlier confirmed files.\nUnconfirmed reservations expire after 15 minutes and their S3 objects are deleted;\nconfirmed artifacts live as long as the job output. Deploy the updated Convex\nbackend before updating runners; existing S3/CloudFront configuration is reused.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp",
+   "type": "git",
+   "url": "git+https://github.com/kubilayege/Nudge.git"
+  },
+  "time": {
+   "0.1.0": "2026-05-22T07:08:16.324Z",
+   "0.1.1": "2026-05-22T07:47:20.662Z",
+   "0.10.0": "2026-08-10T05:14:44.015Z",
+   "0.11.0": "2026-08-10T06:01:40.098Z",
+   "0.12.0": "2026-08-11T07:35:29.445Z",
+   "0.13.0": "2026-08-11T08:10:30.159Z",
+   "0.14.0": "2026-08-12T13:03:53.282Z",
+   "0.15.0": "2026-08-12T15:47:33.807Z",
+   "0.16.0": "2026-08-17T13:02:54.690Z",
+   "0.2.0": "2026-05-22T08:36:14.742Z",
+   "0.2.1": "2026-05-22T13:06:19.721Z",
+   "0.3.0": "2026-05-30T21:13:13.565Z",
+   "0.3.1": "2026-06-01T11:17:39.316Z",
+   "0.4.0": "2026-06-05T08:42:22.296Z",
+   "0.5.0": "2026-07-22T07:38:05.756Z",
+   "0.6.0": "2026-07-22T11:12:24.775Z",
+   "0.6.1": "2026-07-22T12:00:17.616Z",
+   "0.6.10": "2026-07-22T15:10:17.540Z",
+   "0.6.11": "2026-07-22T15:29:54.313Z",
+   "0.6.2": "2026-07-22T12:11:20.619Z",
+   "0.6.4": "2026-07-22T12:18:13.715Z",
+   "0.6.5": "2026-07-22T12:25:39.631Z",
+   "0.6.7": "2026-07-22T12:47:59.532Z",
+   "0.6.8": "2026-07-22T13:42:34.085Z",
+   "0.6.9": "2026-07-22T15:01:56.829Z",
+   "0.7.0": "2026-08-09T20:42:44.337Z",
+   "0.8.0": "2026-08-09T21:30:41.445Z",
+   "0.9.0": "2026-08-09T21:48:15.562Z",
+   "1.0.0": "2026-08-17T14:13:12.442Z",
+   "1.1.0": "2026-08-17T15:12:30.561Z",
+   "1.10.0": "2026-08-19T13:51:20.957Z",
+   "1.11.0": "2026-08-19T14:21:32.082Z",
+   "1.12.0": "2026-08-20T08:06:12.256Z",
+   "1.13.0": "2026-08-20T08:35:13.200Z",
+   "1.14.0": "2026-08-21T11:35:05.785Z",
+   "1.17.0": "2026-08-31T18:32:08.882Z",
+   "1.19.0": "2026-09-02T12:09:44.178Z",
+   "1.2.0": "2026-08-17T15:38:33.345Z",
+   "1.21.0": "2026-09-02T15:23:00.099Z",
+   "1.22.0": "2026-09-03T18:07:46.925Z",
+   "1.23.0": "2026-09-03T22:28:05.852Z",
+   "1.25.0": "2026-09-03T23:20:50.214Z",
+   "1.26.0": "2026-09-04T00:46:30.692Z",
+   "1.27.0": "2026-09-04T08:10:36.415Z",
+   "1.28.0": "2026-09-04T08:28:45.505Z",
+   "1.3.0": "2026-08-18T11:36:26.137Z",
+   "1.30.0": "2026-09-05T11:15:47.108Z",
+   "1.31.0": "2026-09-05T11:34:10.854Z",
+   "1.32.0": "2026-09-05T12:01:19.484Z",
+   "1.33.0": "2026-09-07T14:54:59.713Z",
+   "1.34.0": "2026-09-08T13:31:26.657Z",
+   "1.35.0": "2026-09-08T14:08:30.970Z",
+   "1.36.0": "2026-09-08T15:53:01.512Z",
+   "1.37.0": "2026-09-09T08:31:32.248Z",
+   "1.38.0": "2026-09-09T09:14:19.184Z",
+   "1.39.0": "2026-09-09T09:47:00.294Z",
+   "1.4.0": "2026-08-18T12:13:09.789Z",
+   "1.40.0": "2026-09-09T21:45:29.216Z",
+   "1.40.1": "2026-09-09T22:38:51.544Z",
+   "1.40.2": "2026-09-12T09:14:33.915Z",
+   "1.5.0": "2026-08-18T14:04:45.266Z",
+   "1.6.0": "2026-08-18T21:49:28.512Z",
+   "1.7.0": "2026-08-19T01:44:16.817Z",
+   "1.8.0": "2026-08-19T10:33:38.457Z",
+   "1.9.0": "2026-08-19T11:19:32.146Z",
+   "created": "2026-05-22T07:08:16.014Z",
+   "modified": "2026-09-12T09:14:34.059Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.1.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.1.0_1779433696194_0.6428248035773021"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-0DTkHxHWiX+OeFTMP+R1K5ur4K+47s7nHVec7W37qIIALxBZkXqLuWAthq3lTlZQhhG6ByQYyEXBxRJ1/NznUA==",
+     "shasum": "c8981d3ce8ab615fa2a58bb2080bfd5e7ed97c2f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD4nJS1u6/O2EYR0Urcy3bta+gtWMIjXXKXVhlGaXhYywIhAJuqr5y6gX61MNbE5epDebizPw6if044bNzfN8BYtzPq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.1.0.tgz",
+     "unpackedSize": 45570
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "087a3837e6f1f2078d39e01281d4280ce8e8c093",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.1.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.1.1_1779436040498_0.9810967524411982"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-T2T1gUhmp5D4DuxV9fb/gBCL8nHXNhFLCLBmi0jrvEsuRotYxyzWh62rskI/ttoTRSZeFgvMFokSZUyjgCeMIw==",
+     "shasum": "5d13e978ea525b4ffd3e5789cf496d2ccc670495",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAWTa9uQdWmMBZWFc3GVHUDXAp2IiSpKLMc+pDicKen2AiAwyDJyIi7pjrKJtolD7JnfM7TewAkD1mUGpss77ricyg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.1.1.tgz",
+     "unpackedSize": 45438
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "14ee0f239a7f6ac32bd4c949ee53f0b48318c46c",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.10.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.10.0_1786338883856_0.7726978048506283"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-ioPpYNiqW7mK3vcP0XuZn/P/zKnfa4rrK465XKY4/QJlLjiY2wLAjdiSNl4/UmhLmFj9lHK7pVSXQkFke9miuA==",
+     "shasum": "f99b399e8d678b8db0168d82db8b20a3dd2bac0b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCClzB+gepVqD0qWEBCwr5jah7MfKV3to/Fvr/vm8PKxgIhAK5U66/rWcymxfIRPchdy9NS+t/RNIvfm/rDaR4TPbco"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.10.0.tgz",
+     "unpackedSize": 278649
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.11.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.11.0_1786341699966_0.5205434282057517"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-BQTeK9UvehD+VTl6Gu6JRVA5EkVN6EHBsqxj47evrQMMNI2u1cLYeXENKdpp1TpsJeI+OaBsaqOwm/sNhxtCaw==",
+     "shasum": "ded418f0908390db14633c6cc4451e744779aca7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBm5v3R5xYrbm5AmswdIhR9obwD0Op+OCWEHrmSDp4IuAiANe9opoezp4Y8L5PczkpZwosRL7uQ1mnMSJ93lW+wajQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.11.0.tgz",
+     "unpackedSize": 281501
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.12.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.12.0_1786433729307_0.413329518467237"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-nRrTo+jwTWrNuBeu0MfltHo5fQm+4dVUWqCBoKYplSjDsSMlSXxml5b/bilEW8/xP4k1o/2TXDAc/cbemtZryA==",
+     "shasum": "c84513defcbce9b0a9d5de68df4acf30677eb265",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC+Cau+2c3XeKwJKnO5HO1c0TfI20ERTZ1WR4Ki4W0JcgIgL00jSfPlrgtHT87sjVMfixsL+DFnR3UFH+fYv2nSCj8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.12.0.tgz",
+     "unpackedSize": 298737
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.13.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.13.0_1786435830000_0.9317697710743149"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-ksRcwggeVvperWJ/xnK+A+6dlxstsFzF9duXJK3Vv2UVIwf1fdblBvwzQ9KHAZQ+uK7o1rxDErX77mkkmGIYGQ==",
+     "shasum": "b8f261c39cd24faa6b2ef3273529cfea8137d630",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD2AgQs8OKR9HggMOhL2BBUY3GE0jXUNS1rxaXzfZcXgAIhAIy8e36YoTWM/+ApQbTeSX92256BJ7T8+118y+zhZbzI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.13.0.tgz",
+     "unpackedSize": 302326
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.13.0"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.14.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.14.0_1786539833130_0.4320204789155804"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 34,
+     "integrity": "sha512-IusZvZIALA40jMnJMohjZdseu+BO7Wm/hbFkoReuniTedLrLUNSk1RCcB+ef4hqyXwJUjzOKdb681PW688nOUg==",
+     "shasum": "820af368b8ded9d0475c45dd1e37cd7cb2d1b7ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDAaJve1b2blsCth3/cpCEfImZI3nOhKwFf6J2FBub4GgIhAMz056qM7GqkusTnwK7JmRxwn737Uw4w9GpZb2LIht6V"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.14.0.tgz",
+     "unpackedSize": 338204
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "90d927598e04c90020f708ac43d88ce40c3ecdd3",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "0.14.0"
+   },
+   "0.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.15.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.15.0_1786549653654_0.49777990898729807"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 36,
+     "integrity": "sha512-uioJ2EMZZCBKuPb6S0/hPFlVTWbrPL6mLOhXVgRozWeL0icM70IXMckP8U9XTTG9LmTFXocS8bqSaXKL38ibJg==",
+     "shasum": "9c257d626af63d808ed504c6b3ac1231fff815c4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDO3KUlzvhhwfBt2/K8BTxvVRJi/OkeMlvdRxihyeJLTwIgMsCajJKqfq2oLByYpjTCDAfk/LYE8iFYrohlYXgtBPw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.15.0.tgz",
+     "unpackedSize": 340506
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "90d927598e04c90020f708ac43d88ce40c3ecdd3",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "0.15.0"
+   },
+   "0.16.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.16.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.16.0_1786971774549_0.24599596921844924"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 36,
+     "integrity": "sha512-75fA7g18094orX2Jr705olim7ujBX+IA51WcLYdATcrqc32UhpRdQxg5EvPgeIaFlepnmBe+VF52jAi5Ep+ppA==",
+     "shasum": "7c347ea66dfa3c812649d0d55422645c6c36f123",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCjq2N5h5zSX9T8e9m2DoKpbKsnegegSZlS9pfvTRQDuQIgGqKN3hcAo2+5h97DDNFlQykH0vuJ6AMQgAwTm83Ow1I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.16.0.tgz",
+     "unpackedSize": 377160
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "0.16.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.2.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.2.0_1779438974595_0.6887223716126318"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-qzQuwLHZcf2q3SqrBoTjTBuHNQ9gaxKN80xeAmJTNGNP6C69amHVj7guFrJqSmOFi2gIAe/KZSmOqAhJdQYh6Q==",
+     "shasum": "323c9c077020c4c32f31e17b3f114f95a2e95084",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF9624mwfeZDhulOxFHgVAxYCqNqlRtLX4D/XVh3fWtDAiEA5tgZma2cyoXISyVwgF1lDss1m/zF070XCOkyRVYQSPI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.2.0.tgz",
+     "unpackedSize": 49857
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "14ee0f239a7f6ac32bd4c949ee53f0b48318c46c",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.2.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.2.1_1779455179547_0.4466499503152246"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-sE0cTblO1VsiQivnPMAbWZabcxchKZvpOG7tTGbWWvLLTG0CVcI+8DyquA9Cqh/inf4zGbjcqui4/RW/+5QukA==",
+     "shasum": "af082f6ede3d1f2e11efe2f499f7032b05b07b36",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDoi5LBULriTeIsi7mOCr5+IRBaYVTKqWt82N2hZI+T8gIhAI7LBOcxV2SjKASXTpZrRERNV9wdKnTXrW29l6Mo+tym"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.2.1.tgz",
+     "unpackedSize": 54946
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "14ee0f239a7f6ac32bd4c949ee53f0b48318c46c",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.3.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.3.0_1780175593424_0.4718913952742543"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-IBqliwRh1bXrGZBKTnyf9XUkoCozex1OC3ajO4dlhTD51fNSIOoGf7udv8NsxzP7a90MDuR3MfG8K1MC8vr4lg==",
+     "shasum": "cf6c134ba4a0693b6f670b7bd34ebcf74d6dd6bd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFxTmYDdc9bEyBtJybIN4beVTgUZQnOdwvSRumJrVarAAiEA7QGx0uDyeqPG5eVVE5TI942DUT++fA2/QJM2BjyhlEE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.3.0.tgz",
+     "unpackedSize": 65791
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "9f3fd3f76eee048ab3935a3522a402eb8a7199be",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.3.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.3.1_1780312659190_0.827856951402528"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-ZdezeVMui4oCvgAUJAYu34JSsGYPwY/EzaVRTvjIFN9UnOl89qTeMvyAXrw18z0pgN7aG9XrIUxC8/9XQwybBw==",
+     "shasum": "4a86a5d1da12a6bc3beee6434f70f94371b8ecea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDTrA/SVDzLIYTU4QpimhORBGxLe5018aOGpRIlDq2cuQIgR1oYNKGA/6l92asNeddMzSlN5vpdT0rukBlOPJGwLdM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.3.1.tgz",
+     "unpackedSize": 66117
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "185bb45cb600f2363fe7e3ee7f5ca3d07bcaa14b",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.4.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.4.0_1780648942158_0.9702982355472947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-JhB9XKeZ88myxNbnskxaaacpbTNiJCxB8MM6gLroISdX970P4Q1jm5WfPzdeYSos9XDDBA0n92N0HCNFa/RQ4g==",
+     "shasum": "41f24502b020088d952baa528749e86f2f9a97f8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDpivVTOEzNYkZGvhcFILg0UWwcYhLtuVtQ40JEVZ/Y9AiEA2VadC06II1hUmxd5EtVN8S/lK0NKsd87E4TV44I1XG0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.4.0.tgz",
+     "unpackedSize": 77540
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ba749a8a8b38872afbcd1cadbfa53019120a3e5b",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.5.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.5.0_1784705885624_0.9388581208620963"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-eFZxrT1KJ15tLQ2JPvkYQDtTzlDL7FAXvEmQy+WE8Y53E1HY4IUSNlYMN3J/0ErES6Vurrgq6iwMuFzGk38ywQ==",
+     "shasum": "58d10b15cde9695a2d1367587a7fda4866362dc8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCNs7idtMeZt/xsd1J5lm5qMXt6YB5G7O4By38Px0NKHgIhAInRaAt1Z4SsE1vK/ASIA7Y5u6q1lsjDCE1sHjPfDR/5"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.5.0.tgz",
+     "unpackedSize": 82976
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "8cc138ac83eccd04bd1b2ab5d14bb175c3681578",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.0_1784718744647_0.39850033420320075"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-dNuT7n4Ijl7QTEA6ZNPQgV+bIcnF/wIui44RT5KHJnlqHdGFdswOgDWNOmlU3qwECWawV743waRmM7Gpy53pRA==",
+     "shasum": "2060ecbd5ca215024a5596a55c167e7ef84405d4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEETHVwAxPpMd5kYOK2B1aLbyfsCIdkpuOiixJSOBvh1AiA++z/9OTvNrIOncGm4HO5rOJ8pNOC8HfDy887dLJMI1g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.0.tgz",
+     "unpackedSize": 83988
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.1_1784721617451_0.9299058324383715"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-hIBcS91Omxl2Xbay2kTpebXCutLm4IuNWJxX6ri1PQlOiqczOdNXW0lDl3kNuzPJITOfohg6xkZMcLrSF5FX7w==",
+     "shasum": "2813670c2254e66301cd690674b33e4a6db0ac9e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDURjvnRkNA+B+gTQwGdT1xvyvQx0jVDtxbWwFNH0N5KAiB0gKdqt9humaH1avZnNflZ3aDugZSKOTuJk3zogrBK0g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.1.tgz",
+     "unpackedSize": 108275
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.1"
+   },
+   "0.6.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.10",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.10_1784733017354_0.7887490558236496"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-1ghnWa27VXcvd3GJL9rT8ie1qS2bY4YBU8x8J2RIQx7FCbD5aqBrNDFzi5iOtTtn+XeWfnEVdX29EE9Rf3vGig==",
+     "shasum": "eafd4871367e9389542a465aefd9c772b785fe6b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCki7oqKLhAZWEHlLiHSRYN0x0spAFBv9pJh9TOZnEHSQIhANJ7vwRAWzVUZPuwyVYU1CvmIm2qV0yUMKDFaPxOx7Zw"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.10.tgz",
+     "unpackedSize": 158445
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.6.10"
+   },
+   "0.6.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.11",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.11_1784734194196_0.29738268320144723"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-Zg4JhkrqJOao/4eULgOkYPSGUPxnEVuaIGRtza7xPmnvaUZ6+rT2rKfs4GwiH4ZBe+QY1vD+tMuHrfSfTBVBKQ==",
+     "shasum": "5f2ac2fd95710119a2e90ca3e96e90e8cd541d29",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID71BmrEfREHkyO0xA1Ka/vpcGEuM9RqjuTNjZRfdf4DAiEAg6ANu/pfUQhZbt2mZKUOJNlHCdsx31886kYmaiPwOdg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.11.tgz",
+     "unpackedSize": 160747
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.6.11"
+   },
+   "0.6.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.2",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.2_1784722280418_0.6565734053998231"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-9fmaAEuaZAT0kgBi9MVg2ELFSihP9PrIKeMek7ietyrmtJ5AIU0bZIiCY55x6fqMqZ97IM0H3JvtXVk9KGJBuA==",
+     "shasum": "36c91a91ea4db8ebcc497745b3a22a25395adfed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDc/K5VdbmorOnlBIm0W6ILuHx1Y2uAHgOKXHW0ngWZzQIhAJUSfMf5gNWmFJA+4oc9wpOD3kewqmM/mJ6O5y1+ep1h"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.2.tgz",
+     "unpackedSize": 108267
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.2"
+   },
+   "0.6.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.4",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.4_1784722693567_0.4231625135542354"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-Zfh9Pe2OlOBdBEvP8dnlMtheX7tPEVjkdHpaNYzd8/mhbLk9BvpygRxzqpPMFtfuvjEiVkmXGem6I3yhkWpmqw==",
+     "shasum": "9ac12d5ecc734cf7ac5978442b07684fc7c91ab8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCeVHMbYzrN4pDWBCMYj2AxbeHYpfvgZknXtrzW5SJHXgIgJYIAKVYnQqDZ0rB3Fynlq7n9mEJRPHf+7PPMQNMLeP4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.4.tgz",
+     "unpackedSize": 110245
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.4"
+   },
+   "0.6.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.5",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.5_1784723139490_0.718361689977707"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-Z+qRuy+GHQC2LBoLJU+i01JFDgeupIGyUPlhv+9+7hA3NMW+GMqDVHgkv3Ywz8c3+K1DB5N6isAUEIzzD40FDg==",
+     "shasum": "eddbf70a6dd23d00061f271d96af1df15fca3721",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDVJTWzrsaTXCdI0Fs+gsrP/58HU0I8y+4jMZvWC5yMSgIgRMUcut6WQj33J9N6WmyZLDCyOnzgKJdOY49lUZWNLyY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.5.tgz",
+     "unpackedSize": 114459
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "version": "0.6.5"
+   },
+   "0.6.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.7",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.7_1784724479382_0.7789840994728083"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 12,
+     "integrity": "sha512-IlzxpucPfLIQIGS5XuRIME+x6hUye7i4Zd8teDWlUSXMEMrnOgP7XlQDU2Ex7CH49xLY98QuciYFSQ/5mSZY1w==",
+     "shasum": "ac86069012e114e9935b6eaadd6d823d9c678793",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDGQVhaRUY2CfysnElHpf1kq1YF9MhTRQy0Ce6yW6pVhAiAiB+HIulxkMwqeSn/pCi3J3hHk8id35Rf3LdGKtFMmTA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.7.tgz",
+     "unpackedSize": 141110
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.6.7"
+   },
+   "0.6.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.8",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.8_1784727753912_0.8003299631187992"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 12,
+     "integrity": "sha512-9Db0i0y0bIaMupbcdoRmTwuqwBi1JiTLbSIWpEGogHl216B/X9/z0OOBLC4q3GrLlmsYTWptBf7Y5AlJhs7B2w==",
+     "shasum": "2b1dfaf678a01cf4a31bcf7e790ccef559133082",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC/oRyLNH5fsjM1fonW6Z6XAxn0DYILK5NThM9zriouVAiEA9TabWEJk+KT1pXx5tv/i6pkKor6zZ77YCsG/5p64tu4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.8.tgz",
+     "unpackedSize": 149188
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.6.8"
+   },
+   "0.6.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.6.9",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.6.9_1784732516678_0.3209819645651739"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-rKDw2yMgLuzylCFcE7AWd6v3DNPsMD0hbXSVo/ZAaGw1E1XuoTC4vZznG9+6Jssm7We31iEFEfgIAl4aKo/HwA==",
+     "shasum": "2a8780fb606adf50dc5c3538dca6a707aaf02a0b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAJaybyKuMxLXjwzcgaRpztfk2Jqom4Fo7/YZaxYpRFWAiEA+RQU/af+Mucz8/dAaWmVR2mbtf1iyRvbopnzFpCnSPU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.6.9.tgz",
+     "unpackedSize": 158316
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "1e6d28eeedc686c5f93b434be8e5c1c224072fcd",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.6.9"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.7.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.7.0_1786308164166_0.7550162042911464"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-LfOhncFIfLpNlhzyz2P+M5dns5xiA2Yd7LS1ezUHTaB4e8Q1dSAz4vFHmoVMwIJMq33eyrSuAKJ4bIFMgoFO7g==",
+     "shasum": "22e6c0e28dbfc452f7dc24e55ce7fcf100c5175c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDhc/dziaTLom+B5Pj5kBZOWmdFK6SiR7cqrOgnfdvYkAIhALhJQCZ25VqTArM1S0Te5tnncJ8fMrafc76qiCFE+iCi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.7.0.tgz",
+     "unpackedSize": 199023
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.8.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.8.0_1786311041301_0.9671347148922076"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-r4aOq5Q/xfbb2hQpZbas296cGh6fPlfQ0rN2ifHoM/wgVJa1GS00BFAT/sjDXdlTsE2K+F6jIBWouFOX1QR5ig==",
+     "shasum": "2d50bb8ffc7462e1740424635050d54d6496e5d4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEzmwXFovAxmS0vs6P6n6Sg1x9p/dbs2GsEjx5oQYaW7AiEA2/C35jd69Uvz+Fyxjc0XoiSrX6HLkcwYyRbwG2z2F54="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.8.0.tgz",
+     "unpackedSize": 239159
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@0.9.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_0.9.0_1786312095418_0.8580035868727305"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-CuLyAnR1OojryfEAAUWKtSFcB3TPUaYmQe3Coww0imabC3iIyoWqSiUa+o6gOdHEUm+lzQGUaN4hEfQh4c80ug==",
+     "shasum": "3e58dcac4dde9515546588778e2f4b14a26aee25",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDP5ev+XFD5G5UP9tfH+V1mldIB+e28crHjikp7jM9opAIgMMkhZVfKQv9oCpaJSFeSrwPFL2q5WpXJ1EzmYaW/cro="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-0.9.0.tgz",
+     "unpackedSize": 255887
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5320d03163c01c7aca202e95462bc22e21067427",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/codex-companion.test.ts"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.0.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.0.0_1786975992292_0.05060629021393015"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 36,
+     "integrity": "sha512-k/1tlzZgWgdcwwzh03lkUgnHg+z5+sxFRF7G0tSD35rDFyoV9pr2wu49CTyJgUiuyAZo2hioo9lDNZh2aKKWcw==",
+     "shasum": "92e51d555ca8cee575adaad75dfb0ba22f798e88",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBQNxpXiJTWmXfcu/BR3TRYnxOStOErD3iRp4WTHZoZNAiBDtcnJeHqO9K9cMAn1kfzLImxjI5EASVBd8YM8Fp59Yw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.0.0.tgz",
+     "unpackedSize": 403034
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.1.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.1.0_1786979550416_0.35716931469910174"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 36,
+     "integrity": "sha512-gI0KNp4DE84d44uU9IBHljB6t2Lvi1NAZ5gMFI9G+mwMYOAvOiafmLEH2FQ/BHIvBnhK2dxWlWzoI4yBfUTEpw==",
+     "shasum": "12821983d520809332002eb738e701cf36a7a8ba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEylMkWqrJVWxpHC0bM9sF8p9Ca2Gziq5lNbH7J/Rl6xAiBnMswbeF95c8nLRz4P1ZEFrSYsyPe/PdeYYRED44lrvw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.1.0.tgz",
+     "unpackedSize": 412046
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.1.0"
+   },
+   "1.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.10.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.10.0_1787147480802_0.93169742915252"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-Vmf4YDG7Se/SHFIkGIhO7cmqZdvO1rD297VshN9CXGeoOYnAGcWBFt5duIKI3qvjukS2lUyfbln54IiuxQfVAA==",
+     "shasum": "898bade003f938288757f4825ad8312321a4e708",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCRbHy6TsVIl8fVv8SlBlsoT/Xeu6cAww65dAQkyebvhgIhALCw/DI5BScoVDIyvHQYRoPRzoahtHpLW5yuGE0DKELg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.10.0.tgz",
+     "unpackedSize": 513850
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "31b982883a315bbdaceef6b0164c78e1ada633dc",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.10.0"
+   },
+   "1.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.11.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.11.0_1787149291927_0.3578585993623864"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-Cy1XiSaLxUk0xq8dQmzfgSWFhVyMNpoVl/SwK1+mxJmsjoaCPnWPu9Y4zAzkNt/QLe7wtkm/4oxCSkpVB6uBRQ==",
+     "shasum": "80eff65ef80962a4671b46a0eb68a9d8ecfa5bb2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDiO9LWGN0Rq0DDk/6mDIp1pfzf1YdfKpDtK/ozVUGKDAiEAkAKuz0psCklCroQd59MPGcFkNJCW+UFpp45bXDrsjgI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.11.0.tgz",
+     "unpackedSize": 515091
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "01d5676d983b5f2a2bdcee9cf56fd55cb79fdfdb",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.11.0"
+   },
+   "1.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.12.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.12.0_1787213172098_0.05938703283117586"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-188Ky9fsfvelUAvRS6NrOT5ztSAnRTYNMCM2XQyLnGNqbMrBUsEQDhFDqISbGY6u9xRcUvyArxb+phPl1XWAtQ==",
+     "shasum": "087316413090a30e3c77b2953dade97c0634e047",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIERKCO6agBvCQZYhFLK08uYEGyaVwZnuNYwW02cY0qH2AiA576OBJyDBMtaXL+VNJKsjaAgT6dqTyKb7p19YBJAo/g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.12.0.tgz",
+     "unpackedSize": 515091
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "01d5676d983b5f2a2bdcee9cf56fd55cb79fdfdb",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.12.0"
+   },
+   "1.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.13.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.13.0_1787214913070_0.5881911879879422"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-OXcQ9mQW9cfRQv/NnIXAfGDrtUjwn8/RZPgL9m2Uf8leQo1m13YgCJuEesOiGSFe1l4E5JOh/FjCJ2z5lVQfkA==",
+     "shasum": "7e521e001b641e5665b097a748b9bacb0ed4a5a3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEvFPlo8QAQPVziwrWS1ZNQM8MxLRidC6g7PW+hPx8DwAiB+yTdK39yEryfaOHO6rFRam4hXXqYivB1ODoxD73kkrg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.13.0.tgz",
+     "unpackedSize": 515091
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "01d5676d983b5f2a2bdcee9cf56fd55cb79fdfdb",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.13.0"
+   },
+   "1.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.14.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.14.0_1787312105553_0.9451785184089534"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-YMyi+pHOUdTz4yYg1il6NXALxP6/etbkllVvF2+z/ieCoBVzzs74mCW4GkyJplbRsrB5jLr1x8Sj4g9QqUm7NQ==",
+     "shasum": "c5599318d7948e5feecd1afca35240a51015a596",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICJUpbPcXHzBPqpbEQ1p1JPo0RUizaKqp1PMAf7vU6SvAiAydsKLbyrZ2sg8A0rcb5UgQzIahXpw7Hf/lqON6aCn6w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.14.0.tgz",
+     "unpackedSize": 515091
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "01d5676d983b5f2a2bdcee9cf56fd55cb79fdfdb",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.14.0"
+   },
+   "1.17.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.17.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.17.0_1788201128704_0.24097004984915316"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-hCij534XLU+j8/+SkNkpFX4uAYhrXHyQWdfE2BS6907SirOIADdPKTbZyBd/pGHq7j7P7S+Ei5S448+vACjoMA==",
+     "shasum": "fac9dc820ce3ca15300ef002237d9c963a96a379",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAlzDLVugI/ZLGLolMgr8Z8axCOx0K1hyIC+AyjmFjpDAiEApHtB7N+Ztl7nVxi6iPZAnSpcmnDa0QFKqcOTMvoD4yU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.17.0.tgz",
+     "unpackedSize": 539596
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "01d33fb9f3b3c47b4abd502346f192d2dc64dd8c",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.17.0"
+   },
+   "1.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.19.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.19.0_1788350984038_0.8888291982833456"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 62,
+     "integrity": "sha512-/OIunOaF99akzTajf8Cg7om3MnKLGVqj5q0xujJ6RLz1UXxJLbMYVZPcWKLwbeGCAFvNOrn9RMGPUhQYWdTYVQ==",
+     "shasum": "709e0256f65a7fe9ef0eb1c4ef19f5fef0323212",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDMwNaSzwH+Os79KFA1ymGxfnjgyVgXfaP71PPEGMGNtAIgb7J8vOwxOlsoHQIVP4UoNFnMt6NSHAWZ3mzQ+Xqb42A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.19.0.tgz",
+     "unpackedSize": 599697
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "980c2bc166934a8848301f8ae8c2b4597ed65b71",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.19.0"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.2.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.2.0_1786981113183_0.6670397147513032"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 36,
+     "integrity": "sha512-vzzxl+fFpO2vQZNgLapp6fiN5VE0pye6t8FiDpL7LpianwcupGEtyY3fTLMLvfZ/hirth80cTkqUGE8HWJLXdQ==",
+     "shasum": "6d074dcf9a4f82db06dac9fc42f85fcbc60ac2b3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCGhxlifgKO86P7XL92+DMfFdA5voY/QmHRkzLEGCjqeQIgBMCp2fMzp9V9PlZgJGCWAOTqDWF1vuVpr+1eDRjZWtg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.2.0.tgz",
+     "unpackedSize": 414613
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.2.0"
+   },
+   "1.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.21.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.21.0_1788362579871_0.7978399188145582"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 62,
+     "integrity": "sha512-I+szfyrgBCtrojfieLcLYBGWTdIWiQapzvlTI4b3wain2UiczLEjqhulxgkEqwKkGxnRdBp7eZnKn9U2oseFuw==",
+     "shasum": "874d63e6c5a464450709156f3ed190fbc63a7c8c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCoECyX4obDvu3bpLbZnnycPYXBDBkg2gk3eHWrXnQZawIhAJ7uNBS2956i553QRhwXQyzd/Qy6jN72bwcEZ+OJlFAD"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.21.0.tgz",
+     "unpackedSize": 600577
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5bd295855931624c921237d774e38821e2ed0f1c",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.21.0"
+   },
+   "1.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.22.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.22.0_1788458866842_0.19700708156030688"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 64,
+     "integrity": "sha512-50uA9SEW7zNZfhNMTwZSTYnu7uAoYQ1Xypqg4SaT+xhlr2lUGJT5ILk/uqoAIMPxSf3VYqD6J7k7IqanuzfgRw==",
+     "shasum": "ec34ee18442b3e34415d3a3c18436e4a6b1c6569",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDQyJIndZGlSw2Kb7gz3XxDrH0N4aXa0/iSKAKcSJf0WgIgCN4f3eZHROVUeN9xyp2WYEK4NjrLAg/52m/PYQ5v7+s="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD1WybDvYKFnY977Re3DO3vuK/Yq8O1woGydAJqPqSJUAIgXM+mY+TumKvTdbFH5E7LrcdM0y0MnZGGYcWd0cp2E7k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.22.0.tgz",
+     "unpackedSize": 602812
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "b55fac4ee6d5e65cbb3db1d1850695fbe79cec16",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.22.0"
+   },
+   "1.23.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.23.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.23.0_1788474485606_0.4957134350190944"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 64,
+     "integrity": "sha512-/1S/XPoW3X5PlXXXmnqhasUwiXq44vvzdjOLOnTcvp1SCKo+MIAD/qgDBE9LiDF8y1kJVAL05ViH98FdZDnpmg==",
+     "shasum": "0cc79d46b15f5177768e0e98d05a5272d44e5373",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGS3S1oD2yPq1Uqd7oPqOFSyvMithEiiIsNt7uDwRMsgAiEAlB+A9rHEYScsMx6d6CTsoEt9Wl1aVAd9RipWl801lzk="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEU0rqif0YJEsU9AsyaY3eVHAJ1wKdRYD1FLN6NUkbl+AiBwVPPEtwfDq4ZDQiiNDVLC35BjDVTqLjGjer8+CnVCFA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.23.0.tgz",
+     "unpackedSize": 603524
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "31437b4330c4a40f6d29e260d3a57aa8150d1021",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.23.0"
+   },
+   "1.25.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.25.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.25.0_1788477650106_0.4751924951937738"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 68,
+     "integrity": "sha512-4hHyXun0rggm3HMbgt8NNENaOzMeVBG53J96HT2Q0/td8QP1XO6pJzPCycHiwAUJhxbRbIQJG1Ic/jeQfKOJ5A==",
+     "shasum": "8002e31fbb78ac4b1d5c80c80d467264a6e011dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFXSEKhy3fg9JatG0s69muezFuNmulkPEQ4gjX4E76f2AiEAmeV1Sd1fdNhmL59xZx993+wpx5s/QcyaTpR9MdI1dsQ="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDSrIsBMLWdgpwlEKvMz/dqKoD1Uot/ti/bL24a/TVrKwIgLN+T8Oj1lo7+X5cNrXTFLnrTM4vTJ72J4nIxNcxM048="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.25.0.tgz",
+     "unpackedSize": 731364
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "c393083b335c51b58c0c5df7d038879d47b152ae",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.25.0"
+   },
+   "1.26.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.26.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.26.0_1788482790589_0.054092009661212526"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 74,
+     "integrity": "sha512-ff3RhITkqsI4bnXwDarZsb0NhGhy8PAeuuahHxTk5AaW1Syc9hFi9b9V0zyzX2HzbugFXYO7bJaiR47rK7Yq7Q==",
+     "shasum": "18e4a4a22a5a4532834b110edbb491e3d47a4817",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICcmQ4qEKc6D/SDFevhuWo5UH5R92snG4EsqjHX9ot4fAiEAitY36i5m2Qag8dm2ZSlsOrBK1w4di6ICiqI9XxN60MY="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID4KoD6ZD2yNGlYjbwd2WWtcqkafYVauctYsJqKUNo1GAiBarqRiOxHtEibI3NOUqn3xzoxbYdH0hPJTHkSHHtvBUg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.26.0.tgz",
+     "unpackedSize": 746352
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5380c68f378f530674ebd8617ec859779dfd73cc",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.26.0"
+   },
+   "1.27.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.27.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.27.0_1788509436308_0.4853708635215013"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 74,
+     "integrity": "sha512-LCwKnQY+OvhD6f7hb/FNIhJLbd/UlYAbKkhc0SVzvFUFSUPfU5kT1L2/0NT3Bz8/GFTIdEMgSqConVAr5aLl9A==",
+     "shasum": "e4bfb34411584d84f737e8eb8b01039b226f3583",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDzsCthN5E2r4qxwB1yDSKsUUXV2+C3HA9E9A5mMcNbuAIgDd1xWonOrRCRE2pVwUwgGEdNssg8/OxyrYDg3VwK71Q="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBx4LGUoJphXjLu7HlCX6HXbso8AxqYD91MV8yoDi4wQAiEAnTGGCF6xgNSNaY8nYF2YduL4QihV6PMsFHW2+lo8bl0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.27.0.tgz",
+     "unpackedSize": 748873
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "5380c68f378f530674ebd8617ec859779dfd73cc",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.27.0"
+   },
+   "1.28.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.28.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.28.0_1788510525415_0.5234734535030989"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 78,
+     "integrity": "sha512-6l5/pc2cPku8oYOBkDdKqW8C1wKry3yC/0DfUlWLdCh0LbHm8NkTuvrpMUct8wPQfpBdA2A6dXGYgEcUeScVFw==",
+     "shasum": "d67479383331a6d11e108815017c20856db2eaa8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID5Ah+A1tqqeinufCK2bj7qvm+9omNwcl6vg5GEQxPkNAiAlW3WSFU4w+CZfHN+EIxGEtzlrCX2Y0kEsMQhptKfrYQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAIMt5IkbEcyWIPJCmvTJXxUw7mtUqhMOlpbZI1HctGDAiAwHWM4Fwx3x+gQRqaZ050V7gCnX+uGezqzjOFLJiG4OQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.28.0.tgz",
+     "unpackedSize": 782562
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "8777ae392f616b2da115b79a425de43feb76e72e",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.28.0"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.3.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.3.0_1787052985986_0.4197017637748368"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-lBQY3kgnZf4YJeyEMC/jejkbr9rW6qA8D9rgzvIEBqWreMAqH2ValE0eEfmXYkxvP/7C/nVVQgsCkiy198V5gQ==",
+     "shasum": "c606fe5b18a10e2f32ec4e4911522addd25917ae",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH+xP2NuAS5QccJq0SxViDjK7FxTIUl2LcfVUcAe3FtlAiEA3DGcrYNZqMMSfunRoAw4EPF8ldC4VDZjy7mYF51wRA0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.3.0.tgz",
+     "unpackedSize": 429492
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.3.0"
+   },
+   "1.30.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.30.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.30.0_1788606947027_0.680930470735313"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 84,
+     "integrity": "sha512-5xGR20Pq2DQhwlaaJij6BMSzCvlp+9lrnI4BGO2JHmHcaKYw0gwuDgp8hRfZ+g1PQw2mdKem6fHpIy2l0wmnXw==",
+     "shasum": "539f1008802f6466aec36b5bbe0ea0e0e56dc6fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDqeIdGYVaT6jPnDqD79bJIb3fCkc7fSMBc7tkP9eZNQAiBihYsZHzbEqeVB5t7l/78fUyGW/4Z0Ogfqj+Ai8r0cKQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGSXOLXd9CfyO6rwWQA3oVDmHpC9M/XQSJLlJtgJO/uqAiEAqXCaLAUJqTe+mVrE4zZc/63Jhmqai1zqGf++RWwo6p8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.30.0.tgz",
+     "unpackedSize": 821716
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "025fdffd5ad6f1779eed4af165f58a11fb52f9c3",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.30.0"
+   },
+   "1.31.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.31.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.31.0_1788608050766_0.9541819760714776"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 84,
+     "integrity": "sha512-hawZgWfJPvRTe8oIvo1inDC8FwDmj4hXHCnMn+DwX03bB+lJvwrVTV2+Dn7MzynS9e98VABF622fDDVnMI75yg==",
+     "shasum": "b6ab1d289260f16dedfb60e3ed4719417390a5bf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD/+tA0fl/nX6R6iPsE2n1t+g0Pi66sPhCqLftekFCp8QIhAPRbWAeHUagCUNJB7b+z2cD2uxpP5qBpxSfa/kO903KJ"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAJCKvCkwuVBBy2ktOyLwjoqK3f2tVe/C+k5oC6jHHUPAiB8u6FvyQd+57S4LiP2vPgt2laxkPQb06NR+WAtKnAOUA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.31.0.tgz",
+     "unpackedSize": 822003
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "2065c896b40982ea1365fc2f3faa66475ee2c3e1",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.31.0"
+   },
+   "1.32.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.32.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.32.0_1788609679382_0.36533678646649426"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 84,
+     "integrity": "sha512-8xcp+C1SZAXes3sygih6o8O14Xws7TG8nVFmENQmlE1pFjK9rYqVmLv2bz/gZokM4IWfNrywxvJM8R1OLkTUyg==",
+     "shasum": "db22ce273748318928203f771fd7aee03e416f21",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDG+qtHV/184H7WVMm8Z9fLXU2akCcHX0KvPhB02D52JgIhAPsUDA7Y4AsicNYggVkpgyEb4EVXlLrS/mHP8Zv5BPcv"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFrZpKH/5Da9N9kOEVsIzRk9Boew/PF+NawWyHuTMxteAiAylbKpDhPwmTR7Cm9qRa7nMiFPFhiFMfRsuWHNOOk2Fg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.32.0.tgz",
+     "unpackedSize": 832958
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "7e03c8bd704d0f80238fef35d0d7f38a533bd80a",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.32.0"
+   },
+   "1.33.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.33.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.33.0_1788792899607_0.41252511073561204"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 88,
+     "integrity": "sha512-IZ7y5084bDo1WblFBiL46frdPXJ3xxK+C7XvwuRp0vHRm535dH1AB8Bn/4VdQ3slkjKGRunc3NeZmf1JFmUoqw==",
+     "shasum": "887cf5f4ac894d24919af0958d6769768a9b3e9d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFRcHwwenqgvi5yF1U9/pprhmcQ1n0fR6ZwIGluNpGqVAiBevSNL+tDF9rZLBzr7eiPNzx8Ngu4fX+eS6oI/JRJUYQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEa/RA1FHoTRp2ow15m0yAuaTQMKLZK+WjUv1vyKNyrMAiEAuwAy1/b1q3Vm7/KbdsoJcugjpwCTs2Xx4pvQKia5EBc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.33.0.tgz",
+     "unpackedSize": 856560
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "77473d3d194ebf1835744d969a00ec90939a370f",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.33.0"
+   },
+   "1.34.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.34.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.34.0_1788874286509_0.9286323327209516"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 88,
+     "integrity": "sha512-IvcfaxWo+Uyi59IsA5nDHTF3LbHv+L1X5vWg4AQWoV4/ArOaW6CEcYWhp7LmcSe54o1IhUldNKGw3N0iEkZvzw==",
+     "shasum": "cb2f7f56e665971a083f4239dd67ea0f10af8189",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAu7zofYYemuJHhxGGwWTaGfeKN86rfKZGV0NclSqUSyAiEAma7ijeHf/DpxPhWC8QHjJOaRmEl5B+UGfoJBQTzESc8="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCxA2I+bv1LLSQDpMJd75HvHf1XO2FLQAtzy2pggitScgIgO8EGcmyajiS/o6SxqvwkjBrBMtzGQRRC2WhNVuyBfmM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.34.0.tgz",
+     "unpackedSize": 859788
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "183e2049c8e56b8bd2c90747e7634ae7c2aeedae",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.34.0"
+   },
+   "1.35.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.35.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.35.0_1788876510854_0.44835128568908256"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 88,
+     "integrity": "sha512-D+c7wH2z09se7ANJiwWNgbYzA3Wu1Di6JW3OJ/7LmoZextPBjnfPD9V7Jx0nvJ4GzevW4LlCbRa6e0rY15WMeQ==",
+     "shasum": "23de6a8ae872a033815490d6a2b1f1552d7c746a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCdRoZPQfkfHjV/k7RVtohXfbzC9ckRwtxFy1Vel43dpgIhAM3ZctYC13qxqZDNWxTCfdSCA38ehZEomnCKvuncjfBC"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmbJBl7tlhEWtMLgbiqeZrJzJXzAJeTr4ERNPyGpvg9wIgPImZAEheRR3+VzQgXzhF04bx8WDRHcZd+phH8ur+qRI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.35.0.tgz",
+     "unpackedSize": 860415
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "d418c170148c5cfbc394063ba9f6de6547bcd79c",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.35.0"
+   },
+   "1.36.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.36.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.36.0_1788882781420_0.4608641102202815"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 92,
+     "integrity": "sha512-ncPjZtvyb3DRZ/KYPQh9J64MludJmcp9aoD4hRHo3J8rypqtyV2UV326JhhBuhL7VV6O5eddHbuTBzpGTFLSYw==",
+     "shasum": "21148dd033c70f15a525bbf9f2c570733dd75c4a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGygGbehkFR9F1RPonsK1DyDtWShFSs6KPEjakAlcCqsAiBuGVEDEky156x1WRWplK36whydlPyLDwagojXQ7gzJQg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC6f2c08lt7wNz2/3y6QJVA09pZ+X2iS5brMmmYt2eRRAIgakiTY8X+NjI4thgbEctQ2Pse7vUfK2dA4l6LaFg9kfs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.36.0.tgz",
+     "unpackedSize": 909124
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "05c3b75fd791bf40b8fa9fced1703d1b90eaa898",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.36.0"
+   },
+   "1.37.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.37.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.37.0_1788942692115_0.4184572273061269"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 98,
+     "integrity": "sha512-EHpP/UVpHNpZZsb8CVDB02HuPkmm5TIEOFhZl63mEWrAHWA3aJ1Xvqk5hh8fTumZzguWVWKRrGEMDjo/qkgP1g==",
+     "shasum": "fcaee85cf8c141a97ac127354da2e13ea8d2b535",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDJRgQT0s7Dyg8W9dDYEh5n5EEo1be2eXxuIDE3543DygIhAP5vqUr+SqP0C5Vt4SGYeIglgit/n0F1RG8AdRqQlz4x"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCfiv2Q3fSK/L7l6ry0wJGJx9l216xnKsA5fwEeUh03mgIgBJycno30VLe+VgbdGm6W07ya6JY734kBVt8Df26WzeA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.37.0.tgz",
+     "unpackedSize": 966075
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "75333bbf8aab4f3545e2f935276c5031732709d7",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.37.0"
+   },
+   "1.38.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.38.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.38.0_1788945259085_0.8610137498735959"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 104,
+     "integrity": "sha512-6zFvfWdFKa3Op+jI6T4s0hzMIXrz08AJqED1Vp69YZg1hxRCTJMmHaRH0Mg79D0AoU9VOswbAkYLx2aafpcBaA==",
+     "shasum": "c6937691463fe18241c74e334a55157cb2bc786d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGZqZ2mQRLbFIk0QBVcJgDf9xOe3bwl787Rn1Lu2fVehAiEAxKLk13mKq+gXEyPVGH4r48YdbsRpOyRr8IQkJ9ACKng="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHAtoHF7G2n+S7Hd/kGQRAoxazRY7H3V03bfQCPJuRO8AiAsgzhKMY6aS/Bv08TuEeumTjwzIfOJiZvRSghWh8nu3Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.38.0.tgz",
+     "unpackedSize": 1020951
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "fde2c236df4fad72cdb0e540d98b1e7fc6eee99f",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.38.0"
+   },
+   "1.39.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.39.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.39.0_1788947220202_0.3675960941411913"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 104,
+     "integrity": "sha512-Ye+jrUOg4QUXApNzVGLyiwqFhMvKOR09c0t5esePdNiyB9dYqcUqO5rAqEsGM9l8W1GtrPaKD1xdAwsLKVQpwg==",
+     "shasum": "3d927d88685281fca385c3efae569b92925e38c2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDQHY3selKhrT7ORcFI9Sy6cjYwA/b5R7kqV+V5R9Ur+AIhANK0cJrkUYNWC15zjeycOe3KpiTMySBtVLmyDcn1+jUE"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGbdWMcnNB8YlHXm+Zdj8a6E8y0RgrdN1CN6f/LTJW04AiEA48TD4n6Sf4c9QOOhUGRXqnW0hPAb4Ynl6UDPkNTt4uE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.39.0.tgz",
+     "unpackedSize": 1031637
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "8ed33c1a9b187cfc3bffd633be800390478b8fac",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.39.0"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.4.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.4.0_1787055189605_0.14997482245248817"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-WEOJFPIpkxlVHI501VsfnU7f/AcSsiKIJCrqRfEVB1f+UsZGPG67Nx+Ynz00ER5EjEANsyjRiWwAhLv8Wewqxg==",
+     "shasum": "c7457a068dcd5cb1c4c96318f981ffad744360d9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDXW9OBD+WXty1wdH7HuxLpNxF4Afox76dFG/tKs2UZkAIhAKNRCxM2Ncanln3gNdOpbn+JNXvH/o5AP2vQzeYK2lOi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.4.0.tgz",
+     "unpackedSize": 429492
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.4.0"
+   },
+   "1.40.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.40.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.40.0_1788990329127_0.10790734232063381"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 108,
+     "integrity": "sha512-RRX2sWrRQuzuOlepM4O03QmiOqA1B3HESfoq25mt4OO2Pp8ZzzvVH5+OyBd2G6789/PvVocK31Fw2/R46a5jQA==",
+     "shasum": "7ce173b16a57f7769e429a8b8377d2f3492bdc89",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH/HNEHUnljeokNfmI2lMCZyOwc9TT4M8HBLcE3qS1k7AiBkeTUywF7yQmDoF+uIyovmfLZIUU0Dw56BqGj2+9iovA=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBQF//2MLUeaYgof1/Iv6EEQbaGIXQ9br1I2acBGX3uNAiAbE7+gIwD2NUkTf9avC7M1ggA5sh458qQRBGSnHAFVhg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.40.0.tgz",
+     "unpackedSize": 1076306
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "8b5c51bbd4c12f0c38e43b904774bfdad75b9264",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.40.0"
+   },
+   "1.40.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.40.1",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.40.1_1788993531422_0.05061133688331543"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 108,
+     "integrity": "sha512-20OCDHXOuhWV0h+ZN0WbAkA24mgqryGvSSyJL6ScUvf42GJfFwu5AaEp4d52zj5C4UCkFwWHQnM7dQmgsPc+Iw==",
+     "shasum": "e9039995b5d0638d2e4c1cb209bf199ab08f2f7c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCC+K2XaJwS9h4BMlxiT6BtZGn+ayOswKnuXcPYLKBr6gIhAMWnFJA0eNd0ZvhXDpZ7Ba8HJTsq0ETeoQzGXt3fQm5o"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH+yYkEB9w0sTjxqg9sJc1jpt+Osdt2ERDHuhiAbqhigAiEAl1vU7s4MJjXTk/QuzUDT3UAcijaM8YA56KqdqXXcnGk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.40.1.tgz",
+     "unpackedSize": 1081640
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "89a557a473321bc5f3319d12d30cc2a487b6b200",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.40.1"
+   },
+   "1.40.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.40.2",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.40.2_1789204473836_0.2956248059160589"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:1cc5d733-9495-455e-9b78-34b9ec59c7bc"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/kubilayege/Nudge/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.153.4",
+     "@openai/codex-sdk": "0.153.4",
+     "convex": "^1.39.1",
+     "ws": "^8.21.3",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@types/ws": "^8.18.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 108,
+     "integrity": "sha512-XtS3GBV1AaP6JmsfEG3dpgdldAa6GIYLLv9Ra8rIqRc8w19n1fuzCL3Gzm/UHYSiy301Tunf43ezZ6EAz7umjw==",
+     "shasum": "3811c4bdc98f281bc6a18deb0818f8ed1b6141e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD59D6Y6MnBW2CmSyGCmYgFlfu2x+HOE1Gof0FJfM7S4QIgAN27+rcqC3KRb2JdOu5Qy9Vi1wHAsUh2so9bxrcVIl0="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGI1UsCYA89kT+VJOJ9uGWa4zbfSZ8Bm1d+KhR1vdihqAiAtZrvDSyrYkSgShlUuJ/VEdswl0NmaL1SNsD4EjAPBFg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.40.2.tgz",
+     "unpackedSize": 1081662
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "2e2f4d4559429ddce1193a012e6356ff7c0a0f51",
+    "homepage": "https://github.com/kubilayege/Nudge#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp",
+     "type": "git",
+     "url": "git+https://github.com/kubilayege/Nudge.git"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.40.2"
+   },
+   "1.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.5.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.5.0_1787061885113_0.6157273770128926"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-hKdib0X+eWC6HdYT3mixZkKXCsvygFsgGSDYh1vcOqWW2QsHRm4wo7Jk+WFUOhUwpzkCv1/iiUhztb9G3YQkZg==",
+     "shasum": "5eb7a53eff04fced5e488c8110ded7c0a04a5c8a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD1JUXcL9hI+3gE5VuFo4s9u3j0+YD8LgZO7iHOpdUQPQIgGmMqNvKPnWeHw2IbZ8b6PGeBjUWDQz8q2e3OkZvy938="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.5.0.tgz",
+     "unpackedSize": 429492
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.5.0"
+   },
+   "1.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.6.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.6.0_1787089768357_0.9945552434428024"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 44,
+     "integrity": "sha512-DUNUpa2AXfAkeI1aM3FDIMGbhLrcLA1Sni6lPZuveMI/E94Rhpn7qfzZ+nNHUZowFd5uIJzx1VSZsaxZm39vlA==",
+     "shasum": "09a5f45495dd09f6b8afb92dd06cedf97cc5cb1d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5DkNvmitJEjlRGNySeNtzWcKpvoWuQUIg+pxfl9oTwwIhANJX755t3T9VR5zma0igCVoeddwSfv8f+1qo8d4SQNFe"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.6.0.tgz",
+     "unpackedSize": 463948
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.6.0"
+   },
+   "1.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.7.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.7.0_1787103856598_0.8043180055535404"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-tN2LznM6waRRzaT93ZIxeskf3vLXy1whRi+CdZdpdjgcFJKV+bZgzK+mB8UfhV2OrXgDZ4/IhIGoDNz2jxzj8w==",
+     "shasum": "ea8a1cf3683dfa4e8bec71b34162b0f03f35d324",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCm5K3Rk0F8G7290xP7mzL7b021hhYY+9KLSfScp8MpJwIgalJWGLE9YB9/UWfZ8GOsnJnVTxKfTqTjQWzp8Svci2s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.7.0.tgz",
+     "unpackedSize": 514726
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.7.0"
+   },
+   "1.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.8.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.8.0_1787135618304_0.5587572841744195"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-wZRdPtbNG1VZ0sXR/IBywMUkOMhuQhC128OJi5JwRpC0lqPQ7R6jnZKcUIhFDLRgKR15pE4rpqdNKKIf75ZnoQ==",
+     "shasum": "a67806024421b4f60b045635b34537af1678ff2c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICeeeuleS9IEpYhjrB1jqHe97LdSZepeebfTgSDpnM3pAiEA7M9Dh4zPsujc0E2KYQO5xPv+aK5eumXVIq2tZbOtsaI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.8.0.tgz",
+     "unpackedSize": 523369
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.8.0"
+   },
+   "1.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@euqns/nudge-mcp@1.9.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nudge-mcp_1.9.0_1787138371938_0.923197831788438"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e8dc15bb75e6]",
+     "name": "euqns"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "nudge-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.4",
+     "@openai/codex": "0.145.0",
+     "@openai/codex-sdk": "^0.145.0",
+     "convex": "^1.39.1",
+     "zod": "^3.23.8"
+    },
+    "description": "Model Context Protocol server for the Nudge board (the in-house Trello).",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.6.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-omJRyaF0LqtjilW8j6W1M6NLL0BxnhZx8aE3d8hrkYS8iKwADe1xcZmHm+5n2XKuJ0lUGgFjiFDbkt07VRzbkQ==",
+     "shasum": "2ef0d5b98ccb011fa771db784064b755fe99d234",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBwXpAHsBrTx2IJvLKV7JrbIOGgWoopG8DTPzWN0ZXqIAiB1lE2lg61pKPsFgNIopeHgCzeDmx3PxOfSLTvu6TXpew=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@euqns/nudge-mcp/-/nudge-mcp-1.9.0.tgz",
+     "unpackedSize": 536470
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "gitHead": "ad5480232becf71cbbab36b5a3874608d12b2cff",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e8dc15bb75e6]",
+      "name": "euqns"
+     }
+    ],
+    "name": "@euqns/nudge-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "bump": "node scripts/bump-version.mjs",
+     "dev": "tsx src/index.ts",
+     "gen:convex": "npm run build && node scripts/gen-convex-tooldefs.mjs",
+     "gen:convex:check": "npm run build && node scripts/gen-convex-tooldefs.mjs --check",
+     "mcp:bump": "node scripts/bump-version.mjs",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "tsx --test src/*.test.ts src/engines/*.test.ts"
+    },
+    "type": "module",
+    "version": "1.9.0"
+   }
+  }
+ },
+ "name": "@euqns/nudge-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@euqns%2Fnudge-mcp"
+}

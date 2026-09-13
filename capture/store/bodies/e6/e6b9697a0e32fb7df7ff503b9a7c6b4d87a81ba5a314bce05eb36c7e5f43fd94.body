@@ -1,0 +1,993 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:541b6f2a7248]",
+    "name": "magneticwatermelon"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.0.1",
+   "1.0.2",
+   "1.0.3",
+   "1.0.4",
+   "1.0.5",
+   "1.0.6",
+   "1.1.0",
+   "1.1.1",
+   "1.1.2",
+   "1.1.3",
+   "1.1.4",
+   "1.1.5",
+   "2.0.0",
+   "2.0.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@magneticwatermelon/mcp-toolkit",
+  "_rev": "15-71bfef5497f11b4f9088843153e4cfb6",
+  "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+  "dist-tags": {
+   "latest": "2.0.1"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:541b6f2a7248]",
+    "name": "magneticwatermelon"
+   }
+  ],
+  "name": "@magneticwatermelon/mcp-toolkit",
+  "readme": "# MCP Toolkit\n\nBuild and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.\n\n`mcp-toolkit` is a TypeScript + Bun toolkit that gives you everything you need to:\n\n* scaffold an MCP server project in seconds\n* declare type-safe Tools, Resources and Prompts with [Zod](https://github.com/colinhacks/zod)\n* expose your server over stdio or streaming HTTP (with optional CORS & auth)\n* bundle, validate and publish your project \u2013 all from one cohesive CLI\n\n---\n\n## Table of contents\n\n- [MCP Toolkit](#mcp-toolkit)\n  - [Table of contents](#table-of-contents)\n  - [Prerequisites](#prerequisites)\n  - [Installation](#installation)\n  - [Quick start](#quick-start)\n    - [1. Scaffold a new project](#1-scaffold-a-new-project)\n    - [2. Install \\& build](#2-install--build)\n    - [3. Run the server](#3-run-the-server)\n  - [CLI reference](#cli-reference)\n  - [Project structure](#project-structure)\n  - [Authoring Tools](#authoring-tools)\n  - [Prompts \\& Resources](#prompts--resources)\n  - [Server API](#server-api)\n  - [Transports \\& Auth](#transports--auth)\n    - [http-stream (default)](#http-stream-default)\n    - [stdio](#stdio)\n  - [Environment variables](#environment-variables)\n  - [Testing](#testing)\n  - [Contributing](#contributing)\n  - [License](#license)\n\n---\n\n## Prerequisites\n\n`mcp-toolkit` is developed and tested with **Bun \u2265 1.2**. Make sure you have it installed:\n\n```bash\nbun --version # \u2265 1.2.x\n```\n\n( Node \u2265 18 is only required for types but the runtime is **Bun**.)\n\n---\n\n## Installation\n\nInstall the CLI globally (recommended):\n\n```bash\nbun add -g mcp-toolkit   # installs \"mcp-toolkit\" binary\n```\n\nor use `bunx` for one-off invocations:\n\n```bash\nbunx mcp-toolkit <command> [...options]\n```\n\n---\n\n## Quick start\n\n### 1. Scaffold a new project\n\n```bash\nmcp-toolkit create my-mcp-server --port 3000 --cors\ncd my-mcp-server\n```\n\nFlags explained:\n\n* `--http`   \u2003Generate HTTP streaming transport (defaults to http-stream)\n* `--port`   \u2003Port to listen on (default **8080**)\n* `--cors`   \u2003Allow any origin (for browsers / local dev)\n\n### 2. Install & build\n\n```bash\nbun install       # installs deps\nbun run build     # compiles TS \u279c dist & bundles tools/prompts\n```\n\n### 3. Run the server\n\n```bash\nbun run src/index.ts     # dev (ts-node style)\n# \u2014 or \u2014\nbun run start            # prod (dist/index.js)\n```\n\nYou now have a fully-functional MCP server exposing an example `example_tool` \ud83c\udf89\n\n---\n\n## CLI reference\n\n`mcp-toolkit` ships with the following sub-commands:\n\n| Command                      | Description |\n| ---------------------------- | ----------- |\n| `create <name>`              | Scaffold a new MCP server project |\n| `add-tool <name>`            | Generate a Typed **Tool** in `src/tools/` |\n| `add-resource <name>`        | Generate a **Resource** handler |\n| `add-prompt <name>`          | Generate a **Prompt** definition |\n| `build`                      | Bundle & validate the project before publishing |\n| `--help`, `--version`        | Display help / version |\n\nEach generator asks the minimum number of questions and creates fully-typed stubs.\n\n---\n\n## Project structure\n\nA freshly created project looks like this:\n\n```text\nmy-mcp-server/\n\u251c\u2500 src/\n\u2502  \u251c\u2500 tools/           # Your Tool classes live here\n\u2502  \u251c\u2500 prompts/         # Prompt files\n\u2502  \u251c\u2500 resources/       # Resource handlers (files, db, etc.)\n\u2502  \u2514\u2500 index.ts         # Entry point \u2013 configures & starts MCPServer\n\u251c\u2500 dist/               # Populated by `bun run build`\n\u251c\u2500 package.json        # Generated with ready-to-use scripts\n\u2514\u2500 tsconfig.json       # Strict compiler settings\n```\n\nFeel free to modify the layout; loaders perform a recursive search.\n\n---\n\n## Authoring Tools\n\n```ts\n// src/tools/GreetTool.ts\nimport { MCPTool } from \"mcp-toolkit\";\nimport { z } from \"zod\";\n\nconst GreetSchema = z.object({\n  name: z.string().describe(\"Name to greet\"),\n  age: z.number().optional().describe(\"Age of the person\"),\n  formal: z.boolean().default(false).describe(\"Use formal greeting\"),\n});\n\nexport default class GreetTool extends MCPTool<any, typeof GreetSchema> {\n  name = \"greet\";\n  description = \"Return a friendly greeting\";\n  protected schema = GreetSchema;\n\n  async execute(input: z.infer<typeof GreetSchema>) {\n    const { name, age, formal } = input;\n    const greeting = formal ? \"Good day\" : \"Hello\";\n    const ageText = age ? ` (age ${age})` : \"\";\n    return `${greeting} ${name}${ageText}! \ud83d\udc4b`;\n  }\n}\n```\n\n### Type Support\n\nMCP Toolkit supports all common Zod types with automatic JSON Schema generation:\n\n* **Basic types**: `string`, `number`, `boolean`, `date`\n* **Advanced types**: `array`, `object`, `enum`, `literal`, `union`\n* **Modifiers**: `optional()`, `nullable()`, `default(value)`\n* **Constraints**: string length, number ranges, regex patterns\n* **Nested objects**: Full support for complex nested schemas\n\n**Key features**:\n* **Zod powered**: All fields require `.describe()` so generated JSON-Schema is LLM-friendly\n* **Type coercion**: Automatic conversion of string inputs to numbers, booleans, and dates  \n* **Strong typing**: Full TypeScript inference from schema to execution\n* **Validation**: Runtime validation with helpful error messages\n\nRegistering happens automatically \u2013 just export default your class.\n\n---\n\n## Prompts & Resources\n\n* **Prompt**: A reusable chat template that returns an array of `messages` (system, user, etc.).\n* **Resource**: Long-lived data streams such as log files or database rows that can be subscribed to.\n\nGenerators (`add-prompt`, `add-resource`) provide a skeleton; fill in the logic and you are good to go.\n\n---\n\n## Server API\n\n```ts\nimport { MCPServer } from \"mcp-toolkit\";\n\nconst server = new MCPServer({\n  name: \"my-mcp-server\",          // defaults to package.json name\n  version: \"1.0.0\",               // defaults to package.json version\n  basePath: process.cwd(),         // root used by loaders\n  transport: {\n    type: \"http-stream\",          // \"stdio\" | \"http-stream\"\n    options: {\n      port: 3000,\n      cors: { allowOrigin: \"*\" }\n    }\n  }\n});\n\nawait server.start();\n```\n\nSee the inline docs (`src/core/server.ts`) for every option and capability flag.\n\n---\n\n## Transports & Auth\n\n### http-stream (default)\n\nExposes a streaming endpoint compatible with the MCP HTTP spec:\n\n```\nPOST /mcp\nContent-Type: application/json\nAuthorization: Bearer <token>\n```\n\nAuth strategies are pluggable. Pass an `auth` block when initialising the transport or configure the built-in bearer token middleware via environment variables.\n\n### stdio\n\nBest for embedding the MCP server as a child process managed by the LLM runtime.\n\n---\n\n## Environment variables & Secrets Management\n\n`mcp-toolkit` provides ergonomic secrets management for your MCP servers:\n\n### Quick Start\n\n```bash\n# In your MCP project directory\nmcp-toolkit env init           # Initialize secrets configuration\nmcp-toolkit env add API_KEY    # Add a new secret interactively\nmcp-toolkit env generate       # Generate .env files\n```\n\n### Commands\n\n| Command | Description |\n| ------- | ----------- |\n| `mcp-toolkit env init` | Initialize secrets configuration |\n| `mcp-toolkit env add <name>` | Add a new secret with type validation |\n| `mcp-toolkit env remove <name>` | Remove a secret |\n| `mcp-toolkit env list` | List all configured secrets |\n| `mcp-toolkit env generate` | Generate .env files from configuration |\n\n### Secret Types\n\n- **`string`**: Generic string values\n- **`number`**: Numeric values with validation\n- **`boolean`**: Boolean values (true/false, 1/0, yes/no)\n- **`url`**: URLs with format validation\n- **`api_key`**: API keys with security checks\n\n### Framework Environment Variables\n\n| Name             | Purpose |\n| ---------------- | ------- |\n| `MCP_LOG_FILE`   | Path to a file where **safe** logs are written |\n| `MCP_SKIP_VALIDATION` | Skip JSON-Schema validation during build |\n\n### Using Secrets in Your Code\n\n```typescript\n// Basic usage\nconst apiKey = process.env.API_KEY;\n\n// With type-safe getter (coming soon)\nconst getEnv = createEnvGetter(secrets);\nconst port = getEnv('PORT', 8080); // number type with default\n```\n\n---\n\n## Testing\n\nBecause the runtime is **Bun**, you can use the built-in `bun test` command or any test runner that supports ESM. The utilities under `src/tests/` illustrate mocking transports and asserting Tool outputs.\n\n---\n\n## Contributing\n\n1. Fork & clone the repository.\n2. `bun install` then `bun run watch` to rebuild on change.\n3. Submit a pull request \u2013 discussions are welcomed in issues.\n\nPlease follow the conventional commit format; the CI will lint & test your patch.\n\n---\n\n## License\n\nMIT \u00a9 2024 \u2014 [Your Name](https://github.com/your-handle)\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "1.0.0": "2025-07-27T12:03:19.002Z",
+   "1.0.1": "2025-07-27T12:16:11.098Z",
+   "1.0.2": "2025-07-27T15:14:18.733Z",
+   "1.0.3": "2025-07-28T13:00:46.366Z",
+   "1.0.4": "2025-07-28T13:05:27.028Z",
+   "1.0.5": "2025-07-28T14:33:37.655Z",
+   "1.0.6": "2025-07-28T15:19:57.851Z",
+   "1.1.0": "2025-07-29T11:09:19.175Z",
+   "1.1.1": "2025-07-29T12:44:03.048Z",
+   "1.1.2": "2025-07-29T13:30:23.194Z",
+   "1.1.3": "2025-08-01T13:10:38.366Z",
+   "1.1.4": "2025-08-01T13:12:30.504Z",
+   "1.1.5": "2025-08-10T13:07:34.421Z",
+   "2.0.0": "2025-08-13T12:26:13.870Z",
+   "2.0.1": "2025-08-13T12:31:23.103Z",
+   "created": "2025-07-27T12:03:18.724Z",
+   "modified": "2025-08-13T12:31:23.296Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.0",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.0_1753617798795_0.40799725813334176"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-a/qP23xQatzIACPSBptcphO0RDuypcJomHWoyyEzCnTRfb3Bt5qFJha7L0OGjTeXx6hpy4H2fB1PV5fxIn7a/g==",
+     "shasum": "7b09b29c1c1ff2a7564e44fbcacdfb468c87135b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDfRXATS0CN2/561Lel2GcH2myYdFqOW5dRhUNL69WlbQIgELL2uQvwqffKuRDPqNMY+jgv+DwkZy97fmMyAkWE63w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.0.tgz",
+     "unpackedSize": 290248
+    },
+    "gitHead": "11795b7401cb91bc59775844fc2c2157d1e8d75e",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.1",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.1_1753618570826_0.24542016686130763"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-Q1UxJIr7g1eR3ZgTMK1IrQhpcczgrJ8F1rplRo/12/OR+uk8dNlYs+ZHK2eMoFUwdeOCPPLsieASe9Y55dUkxg==",
+     "shasum": "9b7515d9289c8764f1e3c52b382a8158c72109a2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDsFoYImOIGRBQyQ1AAAwkiUcVL9MiWe2UXSMYSBV7QYAiEAgpJCmaU7xUeBbc8ZKx4ACSnbK6dLHij5E63osCrWhFs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.1.tgz",
+     "unpackedSize": 290528
+    },
+    "gitHead": "c75f03b80ad4e326c0b0fa797ee3a7b4f35532e5",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.1"
+   },
+   "1.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.2",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.2_1753629258485_0.5864651017280542"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-DlsEeJ5+wfsYdNR4B/l8EpSiiTwjT4GPc+EVMKN7iFddt1hdKGvJmg+p9xHVN1J+1ac/AR6QnqQ4cmGYoBseoA==",
+     "shasum": "2fed804c54f4d2b03a492b0bbc267992b158c7e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDjHAi3ztZgaszwRWtLh47Tu8RIASqhC4pdkNx0+sGoogIhAPCq4Mfc6hM3xpDlWx3Uh7Kf4BaamNkAUfmqgcSI3pXH"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.2.tgz",
+     "unpackedSize": 290799
+    },
+    "gitHead": "cd898ef81b04fe5b18a25fd5c5ecd8cd1dcb5af8",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.2"
+   },
+   "1.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.3",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.3_1753707646106_0.6261549749948694"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-pWMfNA+e3B4duL32WZrpwGZ/Is8bpQg8GeyTJQL12R3BCKcJJiMOeidFjIT14OChcjl8RHbBpzIC/8I7/fmhZg==",
+     "shasum": "1294330981ccc30db1ff12a9ccd7ab0cc3d80672",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDSDFBEBzyyEoielKUG7barSYEQPggkp+FTIchrtZsGSAiEAjPRbZTQ+6jYPT04f+oYYkz/YWPD1UJ9DJ3Y8LVP447M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.3.tgz",
+     "unpackedSize": 238962
+    },
+    "gitHead": "ffedde3ba3c93e9260264755943f6aea63782c83",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.3"
+   },
+   "1.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.4",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.4_1753707926799_0.49602237938422644"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-nA1GjQkdy6gzfr35/PONZr67p4X8KGaDAbvyET4/zMqBrmUt2a6mpL3kutYacIi/5dmRnMb10/LR9JZachy5bg==",
+     "shasum": "6bab5b1cdcd8bed81262acc5d839d5f1f07f96c5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBKQZMLn2/vRWwtzQstxtyiZ4eCTD/YJ5+GFMA8sIUEuAiBUB/ggglLo5+HzDoHnDaGLb2fS+t96SC/kurvDhzPH/g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.4.tgz",
+     "unpackedSize": 238941
+    },
+    "gitHead": "7e2db89850b6c61c4db540593aed0f127977ccf5",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.4"
+   },
+   "1.0.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.5",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.5_1753713217465_0.3753292579248937"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-239+togziZDrI/ZRmPvyGLyVe1cO7+gzhSnc1UnU5CzMig0Lt3uF9TxQPA8H2HzfnXV0twiRPQ0cwKyAsclT6A==",
+     "shasum": "125f748fb3d7b51a21bd4122fc2e38162cd209cd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAW4kEYkX7BLY5IYxtWpQIoGV+ShxXFY1rwegT+BehSAAiEAxocxjYxrmfeyXOzlz4RxlHzUcelffyVVmg4jnocJ+A4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.5.tgz",
+     "unpackedSize": 241956
+    },
+    "gitHead": "f725f1d50de1c04c7696bb562dc79a13f691c8a3",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.5"
+   },
+   "1.0.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.0.6",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.0.6_1753715997628_0.04258922976761337"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-SZ23h8alMwlcL+2IvkvcnnmAeBU+K53m31nQaHU9KPUqSkFqy2wCBLrdbSfb8/iCrlVFzFlDb/l6QKwjQFMi8w==",
+     "shasum": "f0d1c54790eb48bf00fac41d60a8164e6bc1c512",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFcHoDb+YnkJXhPyVNy+lCo6TW5HaFJyV5n0Rn/QRcilAiBFdh30+lk8RrV/eCJUdUXMGMF4iB1HAm33dcY5m5szrg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.0.6.tgz",
+     "unpackedSize": 243039
+    },
+    "gitHead": "2172d0f2d87a73a773fc1ce34fd644a92581fd91",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.0.6"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.0",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.0_1753787359006_0.22849775921939486"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 49,
+     "integrity": "sha512-zjgDVAhzx/tSWYdLvSC4uB4WrcH8UDGmS3hxnmkQyo6bYhYJACxE57NjrX/bF56Upi9S5BYtPzawCMDxWZfkWQ==",
+     "shasum": "e32e432ab678ec0c11420b1a9b4faedcaee2e34d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAdzyrG/B7fTp4b4E4Lduv3ZMvJy7HydeM/YX/DTW+oEAiAZHFHAhNFDCBDSANix/vBv7latc0XWtLXE4OaVhIAm0w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.0.tgz",
+     "unpackedSize": 275317
+    },
+    "gitHead": "fd48cf7ff29ac2f8ab64d03df1748d2d2983f7ca",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.0"
+   },
+   "1.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.1",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.1_1753793042835_0.5691754154827178"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-5fQ7iZYCO48i2S3U3xd+4m5bINMAKp9bL2Y1AcwMQBypJELzlOqMNIbTJvgcGLN6x8YCdVs+W6krKWhL2XTECg==",
+     "shasum": "266e34bee66b3a353affcc3f37db91c3e47994b1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD6T3fbmxnpcdPfbVgM33EUdFkPVPyaLt6XZSVkc7spJAIhANTZ9MyIvdnhPkBm9CUuJMRNlMJGLYVoUPqzIRKWCLZg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.1.tgz",
+     "unpackedSize": 287883
+    },
+    "gitHead": "94cc0ef38a512779aba239e4a19f1ccd5b496f56",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.1"
+   },
+   "1.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.2",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.2_1753795823005_0.05818250752868037"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-hBMpTVuyx1FoWGtT00H2axTy3gEFnVEE2ry6Ec5+EnXgHG/8kIGUu9EBpFLhVALm3TF3Pkxv87+e29tr+ycTBg==",
+     "shasum": "c48bc32495a7c97abd846390eaab3f5f58937fa6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDUPaWusYI8a4qKbPkCXMCYplw+q+RBbVZrhPvLKTT2LgIhAIXw/TRSkOiwkK01KEkUtw1uOK3UNNxKvZBDS58qTPWN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.2.tgz",
+     "unpackedSize": 289237
+    },
+    "gitHead": "5d7040bb6abf87f5e7e52d9774697d512aff8a9f",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.2"
+   },
+   "1.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.3",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.3_1754053838162_0.47700196170899534"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-FqxvYEvJSx4W9JYi8ts2xTwy8EelmtXfGHbAjiZ5lVLUmICZs2ohcYZ+LZcTy+aQ5EB2LlUd3vEUkt2AA84stg==",
+     "shasum": "9e595fbac489d3d16a85ea587e59ad68e33b8c10",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDu2fm8FVB088eoLOgHCMn99ce5fdqpS86uLUugv5M2KQIhAJcj61MDCDzlnixSW2qtz16+WN8oWKXLUN/XKuhm9dJd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.3.tgz",
+     "unpackedSize": 289237
+    },
+    "gitHead": "63e1bb37264451742d3a8e4426e2b249e7395de2",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.3"
+   },
+   "1.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.4",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.4_1754053950230_0.6514065850095194"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-ERKQz4wzb3wev+dJ7JyzY2emjUvFcwFE3Vn1OQ2U7baYcFhHSYB2XK4IVr2r6r7Q/b1GqI/YXnpzo3CEuw8yAw==",
+     "shasum": "1079f0edc70eb5aeea2023018ed9f790e494b335",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIADsF9LTNLRxurSx+388TEg+WkPcIbezClzXzKusGylWAiEA28AkkXom49ylLHUk3JH9p5+lDTTEO0zu/BWIgN5PcNU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.4.tgz",
+     "unpackedSize": 218123
+    },
+    "gitHead": "f3f756d82d4122d3b653230e6be1079c9fca3773",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.4"
+   },
+   "1.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@1.1.5",
+    "_nodeVersion": "18.20.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_1.1.5_1754831254237_0.9212295441836091"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mcp-toolkit": "src/cli/index.ts"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/bun": "latest"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-vEyyBuA/qFuuN09OiQbmr+AOK7Ym8EWa8wrmcNey7+bZT+PQbFGI/MhhNRph9j7fqWThY1aBtAm27gz0FP+3tg==",
+     "shasum": "36da18fc7ae4acab91359af990be2d8bfb9b3b7a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC1A1pe/UaWbkLzETIho/nGIoKpnMOXn+M+ORXNB4Lz6AiEAtsdlp0z+MMLGi+4XD0xI1RcQYJAH7yw7k3UKlgtKxnU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-1.1.5.tgz",
+     "unpackedSize": 219084
+    },
+    "gitHead": "a5d270380bb038dc24cf3cc76f47ca8507169a88",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "module": "index.ts",
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "test": "bun test",
+     "test:coverage": "bun test --coverage",
+     "test:watch": "bun test --watch"
+    },
+    "type": "module",
+    "version": "1.1.5"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@2.0.0",
+    "_nodeVersion": "24.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_2.0.0_1755087973664_0.7104163893947726"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "11.5.1",
+    "bin": {
+     "mcp-toolkit": "dist/cli/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/node": "^24.0.0",
+     "@vitest/coverage-v8": "^3.0.0",
+     "typescript": "^5.0.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 384,
+     "integrity": "sha512-j3nh9L76c5G6zoKeY2ifmcG+zO5hbQOGeq3FhqllFtBt/KL1pevt62qM4MJoitZUmiNIb8TBuTcYVTqnJ7Q4EQ==",
+     "shasum": "e3517bf4e02f287aba7a2a922bd3872429f781ff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDW3zia632aR1JFUdhcpx2gvFeu9uJIuTxMbPyPeG50/gIhAOecutL6YebtGmE/CN68LzXqkMihace7qQNUE1hLBWwg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-2.0.0.tgz",
+     "unpackedSize": 3126916
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "97c6e57b6556fa80daa63a336615d6015f8f620d",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "build": "tsc && npm run build:post",
+     "build:post": "node scripts/post-build.js",
+     "prepublishOnly": "npm run build",
+     "test": "vitest",
+     "test:coverage": "vitest --coverage",
+     "test:watch": "vitest --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@magneticwatermelon/mcp-toolkit@2.0.1",
+    "_nodeVersion": "24.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-toolkit_2.0.1_1755088282938_0.8153549461469083"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:541b6f2a7248]",
+     "name": "magneticwatermelon"
+    },
+    "_npmVersion": "11.5.1",
+    "bin": {
+     "mcp-toolkit": "dist/cli/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.0",
+     "@types/prompts": "^2.4.9",
+     "prompts": "^2.4.2",
+     "zod": "^3.25.64"
+    },
+    "description": "Build and ship **[Model Context Protocol](https://github.com/modelcontextprotocol)** (MCP) servers with zero-config \u26a1\ufe0f.",
+    "devDependencies": {
+     "@types/node": "^24.0.0",
+     "@vitest/coverage-v8": "^3.0.0",
+     "typescript": "^5.0.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-xBmRiz47vjLeSmJcjg4uuy0G1m8guTVLyE99+ba9oBW8ItzhYnqbM9cw0xS23JOJ2jUVnP2rOD/s0SPQd+k1bQ==",
+     "shasum": "3eadd66b92b83aa188d872822bb57fa08d51cf59",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDv0Ry9vegl12D03/B5XT50DNxiqQbpCBeLZKcEweQ0TAiEA62gvsX8kou1KwX/DHBuF4nbvO2j7dgrPoHGgBlB3rAE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@magneticwatermelon/mcp-toolkit/-/mcp-toolkit-2.0.1.tgz",
+     "unpackedSize": 573623
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "97c6e57b6556fa80daa63a336615d6015f8f620d",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:541b6f2a7248]",
+      "name": "magneticwatermelon"
+     }
+    ],
+    "name": "@magneticwatermelon/mcp-toolkit",
+    "peerDependencies": {
+     "typescript": "^5"
+    },
+    "scripts": {
+     "build": "tsc && npm run build:post",
+     "build:post": "node scripts/post-build.js",
+     "prepublishOnly": "npm run build",
+     "test": "vitest",
+     "test:coverage": "vitest --coverage",
+     "test:watch": "vitest --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.0.1"
+   }
+  }
+ },
+ "name": "@magneticwatermelon/mcp-toolkit",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@magneticwatermelon%2Fmcp-toolkit"
+}

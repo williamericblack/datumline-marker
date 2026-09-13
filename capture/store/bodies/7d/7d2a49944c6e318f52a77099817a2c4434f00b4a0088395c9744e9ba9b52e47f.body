@@ -1,0 +1,1209 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.25.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:9953cfd0cb84]",
+    "name": "vituli"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.10.0",
+   "0.11.0",
+   "0.19.0",
+   "0.2.0",
+   "0.20.0",
+   "0.20.1",
+   "0.21.0",
+   "0.22.0",
+   "0.24.0",
+   "0.25.0",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@expander/mcp-server",
+  "_rev": "15-e3d610bb410e5385f2a8058dc2d25b6d",
+  "description": "Model Context Protocol server for the Exmachine External API",
+  "dist-tags": {
+   "latest": "0.25.0"
+  },
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "exmachine",
+   "expander",
+   "external-api"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:9953cfd0cb84]",
+    "name": "vituli"
+   }
+  ],
+  "name": "@expander/mcp-server",
+  "readme": "# @expander/mcp-server\n\nModel Context Protocol (MCP) server for the [Exmachine External API](https://api.exmachine.io). Lets you query Exmachine data from **Claude Desktop** using your API key.\n\n## Prerequisites\n\n1. An Exmachine account with access to the data you need.\n2. An API key from **Settings \u2192 API Keys** in the Exmachine dashboard.\n3. [Node.js 20+](https://nodejs.org/) (for `npx`).\n\n## Claude custom connector (remote)\n\nFor **claude.ai** / **Cowork**, use the hosted MCP server with OAuth.\n\n### Add connector in Claude\n\n1. **Customize \u2192 Connectors \u2192 Add custom connector**\n2. URL:\n\n```\nhttps://mcp.exmachine.io/mcp\n```\n\n3. In a chat: **+ \u2192 Connectors** \u2192 enable Exmachine\n4. Click **Connect** \u2192 paste your **Exmachine API key** (`exp_live_\u2026` from **Settings \u2192 API Keys**)\n5. Ask Claude: *\u201cList my marketplaces and brands.\u201d*\n\nOAuth endpoints (auto-discovered by Claude):\n\n| Endpoint | Purpose |\n|----------|---------|\n| `/.well-known/oauth-authorization-server` | OAuth metadata |\n| `/authorize` | Connect flow \u2014 API key consent page |\n| `/token` | Token exchange |\n| `/register` | Dynamic client registration (Claude) |\n\n### Claude Desktop setup\n\n1. Open **Claude Desktop \u2192 Settings \u2192 Developer \u2192 Edit Config**.\n2. Add the `expander` server under `mcpServers`:\n\n```json\n{\n  \"mcpServers\": {\n    \"expander\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@expander/mcp-server@latest\"],\n      \"env\": {\n        \"EXMACHINE_API_KEY\": \"exp_live_your_key_here\",\n        \"EXMACHINE_API_BASE\": \"https://api.exmachine.io/api/v1\"\n      }\n    }\n  }\n}\n```\n\n**Config file paths**\n\n| OS | Path |\n|----|------|\n| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |\n| Windows | `%APPDATA%\\Claude\\claude_desktop_config.json` |\n\nFor **local development** against your gateway:\n\n```json\n\"EXMACHINE_API_BASE\": \"http://localhost:8080/api/v1\"\n```\n\nQuit and reopen Claude Desktop after saving.\n\n## Environment variables\n\n| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `EXMACHINE_API_KEY` | stdio mode | \u2014 | Your `exp_live_\u2026` API key |\n| `EXMACHINE_API_BASE` | No | `https://api.exmachine.io/api/v1` | API root (includes `/api/v1`) |\n| `MCP_TOKEN_SECRET` | HTTP mode | \u2014 | Seals OAuth tokens and client ids. See below |\n| `MCP_PUBLIC_URL` | No | `https://mcp.exmachine.io` | Public origin used for OAuth metadata |\n\n### `MCP_TOKEN_SECRET`\n\nHTTP mode issues OAuth tokens and `client_id`s that carry their own state, sealed\nwith AES-256-GCM under this secret \u2014 nothing about a connected client is stored\nin memory, so deploys and cold starts are invisible to users.\n\nTwo consequences:\n\n- **It must be stable.** Changing it invalidates every issued token and client\n  registration; every user has to reconnect the connector.\n- **It must be secret.** It decrypts users' Exmachine API keys. In production it\n  comes from Secret Manager (`mcp-token-secret`), not from a plain env var.\n\nGenerate with `openssl rand -hex 32`. The server refuses to start without it \u2014\nfalling back to a random per-boot value would silently log everyone out on every\nrestart, which is the bug this design removes.\n\n## Tools\n\n### Feedback\n\n| Tool | Calls |\n|------|--------|\n| `create_ticket` | `POST /external/tickets` |\n| `list_my_tickets` | `GET /external/tickets` |\n\nThese two are the reason the server's instructions tell Claude to offer to file\na bug or feature request unprompted. The ticket is filed as the owner of the API\nkey, lands on the team's Monday board, and shows up under Settings \u2192 My tickets\nin the dashboard.\n\nUnlike every other tool here, these two paths are served by the **gateway**\nrather than proxied to the external-api microservice \u2014 creating a ticket means\ntalking to Monday, and that client lives in the gateway. Key validation is still\nexternal-api's (`POST /api-keys/resolve`), so there is one definition of a valid\nkey.\n\n### Catalog (discover ids first)\n\n| Tool | Description |\n|------|-------------|\n| `list_marketplaces` | Active marketplaces \u2192 use `_id` as `marketplace_id` |\n| `list_brands` | Brands for a marketplace \u2192 use `id` as `brand_id` |\n| `list_business_partners` | Suppliers, forwarders, or warehouses (`type` param) |\n\n### Data\n\n| Tool | Calls |\n|------|--------|\n| `update_shipment_status` | `PATCH /external/shipments/{ex_number}/status` |\n| `get_shipment_by_ex_number` | `GET /external/shipments/{ex_number}` |\n| `list_shipments` | `GET /external/shipments` |\n| `list_products` | `GET /external/products` |\n| `list_parent_groups` | `GET /external/parent-groups` |\n| `get_forecast` | `GET /external/forecast` |\n| `get_targets` | `GET /external/targets` |\n| `get_cash_flow_summary` | `GET /external/cash-flow/summary` |\n| `list_cash_flow` | `GET /external/cash-flow` |\n| `list_sellerboard` | `GET /external/sellerboard` |\n| `list_fba_orders` | `GET /external/amazon-reports/fba-orders` |\n| \u2026 | Other Amazon report tools |\n\n### Orders, KPI Insights & fulfillment rate cards\n\n| Tool | Calls |\n|------|--------|\n| `list_purchase_demands` | `GET /external/purchase-demands` |\n| `get_purchase_demand_by_pd_number` | `GET /external/purchase-demands/{pd_number}` |\n| `list_payments` | `GET /external/payments` |\n| `get_supplier_analytics` | `GET /external/supplier-analytics` |\n| `list_transactions` | `GET /external/transactions` |\n| `list_documents` | `GET /external/documents` |\n| `get_document_content` | `GET /external/documents/{document_id}/content` |\n| `get_payment_forecast` | `GET /external/payments/forecast` |\n| `get_landed_cost_report` | `GET /external/landed-cost-report` |\n| `list_purchase_orders` | `GET /external/purchase-orders` |\n| `get_purchase_order_by_po_number` | `GET /external/purchase-orders/{po_number}` |\n| `list_conversion_orders` | `GET /external/conversion-orders` |\n| `get_conversion_order_by_co_number` | `GET /external/conversion-orders/{co_number}` |\n| `get_kpi_insights_cards` | `GET /external/kpi-insights/cards` |\n| `get_kpi_insights_drill` | `GET /external/kpi-insights/drill/{kpi_id}` |\n| `get_landed_cost_grid` | `GET /external/kpi-insights/landed-cost-grid` |\n| `get_kpi_insights_shipments` | `GET /external/kpi-insights/shipments` |\n| `get_kpi_insights_stock_value` | `GET /external/kpi-insights/stock-value` |\n| `list_fba_fulfillment_costs` | `GET /external/fulfillment-costs/fba` |\n| `list_mcf_fulfillment_costs` | `GET /external/fulfillment-costs/mcf` |\n\nPD/PO/CO numbers are normalized client-side (`po-000901` \u2192 `PO000901`).\n\n`get_document_content` is the one tool whose result is not JSON-as-text: a\nPDF with a text layer, a spreadsheet or a text file comes back as text; a\nPNG/JPEG comes back as an image block; a scanned PDF comes back as one image\nblock per rendered page (three per call, `page` continues). Long text is\nwindowed \u2014 the result says when it is truncated and which `offset` to pass to\ncontinue. Word, TIFF and archive files are refused with a reason the user can\nact on.\n\nThe four chain surfaces \u2014 purchase demands, purchase orders, conversion orders\nand shipments \u2014 all accept `sku` plus a `date_field` + `from` + `to` window, so\n\"what is on the way for this SKU\" and \"what lands next month\" are one call each\ninstead of paging every order. `get_supplier_analytics` rolls spend, payments\nand outstanding balance up per supplier server-side, because summing order money\nclient-side after grouping by SKU counts an order once per line it contains.\n\nTwo tools take `marketplace_id` **without** `brand_id`, for different reasons:\nthe fulfillment rate cards are priced per marketplace, not per brand; and\n`list_payments` is scoped that way because a payment carries no brand of its\nown \u2014 the brand comes from the order it references, and is reported per row.\n\nMost data tools require `marketplace_id` and `brand_id`. Call catalog tools first.\n\n### Archived data\n\nEvery list surface takes `active`: `active` (live only), `archived` (archived\nonly) or `all`. Defaults differ and each tool states its own \u2014 the catalogs and\nshipments default to `active`, the procurement orders to `all` \u2014 because the\nparameter was added without changing what any existing key already receives.\n\nArchived rows matter most for history: a supplier that is no longer active is\nstill the supplier on last year's orders, so reading those orders back needs\n`active=all` on `list_business_partners`.\n\n## Example prompts (in Claude)\n\n- \u201cList marketplaces and brands for Amazon.ca, then show shipments in BOOKING status.\u201d\n- \u201cList forwarders and filter OCEAN shipments for brand Pelegon.\u201d\n- \u201cPull Sellerboard data for last month for marketplace X and brand Y.\u201d\n\n## Development\n\n```bash\ncd expander-mcp\nnpm install\nnpm run build\nEXMACHINE_API_KEY=exp_live_... EXMACHINE_API_BASE=http://localhost:8080/api/v1 npm start\n```\n\n### HTTP mode (Cloud Run / Claude remote connector)\n\n```bash\nnpm run build\nPORT=8080 \\\n  EXMACHINE_API_BASE=https://api.exmachine.io/api/v1 \\\n  MCP_TOKEN_SECRET=$(openssl rand -hex 32) \\\n  npm run start:http\ncurl http://localhost:8080/health\n```\n\nMCP endpoint: `POST /mcp` with header `Authorization: Bearer <EXMACHINE_API_KEY>`.\n\n## Deploy to Google Cloud Run\n\nPushes to **`main`** build the Docker image and deploy **`expander-mcp-production`** to Cloud Run (`europe-west1`), same pattern as `server_dashboard`.\n\n### One-time setup\n\n1. **GitHub secrets** on [expandertech/expander-mcp](https://github.com/expandertech/expander-mcp) (same as other repos):\n   - `GCR_PROJECT_ID`\n   - `GCR_SERVICE_ACCOUNT_KEY`\n   - `SLACK_BOT_TOKEN` (optional \u2014 deployment Slack notification)\n2. **Artifact Registry** repo `cloud-run-source-deploy` must exist in GCP (already used by dashboard/gateway).\n3. **Token secret in Secret Manager** \u2014 required, the container refuses to boot without it:\n   ```bash\n   openssl rand -hex 32 | gcloud secrets create mcp-token-secret --data-file=-\n   # let the Cloud Run runtime service account read it\n   gcloud secrets add-iam-policy-binding mcp-token-secret \\\n     --member=\"serviceAccount:$(gcloud projects describe \"$PROJECT_ID\" --format='value(projectNumber)')[redacted-email:56da8e4cd343]\" \\\n     --role=roles/secretmanager.secretAccessor\n   ```\n   Create it **once** and never rotate casually \u2014 a new value disconnects every user.\n4. **First deploy** creates the Cloud Run service. After deploy, note the `*.run.app` URL from the GCP console.\n\n### Custom domain (`mcp.exmachine.io`)\n\n1. Cloud Run \u2192 **expander-mcp-production** \u2192 **Manage custom domains** \u2192 add `mcp.exmachine.io`.\n2. In GoDaddy DNS, add CNAME `mcp` \u2192 value from GCP (often `ghs.googlehosted.com`).\n3. Claude connector URL: `https://mcp.exmachine.io/mcp`\n\n### Release flow\n\n1. Merge to `main`.\n2. GitHub Action `.github/workflows/deploy-production.yml` runs automatically.\n3. Verify: `curl https://<your-run-url>/health`\n\n## Publishing to npm\n\nPushes to **`main`** publish automatically when `package.json` **`version`** is new (already-published versions are skipped).\n\n### One-time setup\n\n1. **npm account** \u2014 sign up at [npmjs.com](https://www.npmjs.com/signup) (use a team account if you prefer).\n2. **Create org `@expander`** \u2014 npm \u2192 avatar \u2192 **Add new organization** \u2192 name **`expander`** \u2192 **Unlimited public packages** (free).\n3. **Automation token (required for CI)** \u2014 npm \u2192 **Access Tokens** \u2192 **Generate New Token**:\n   - Type must be **Automation** (not Publish, not Classic).\n   - Automation tokens skip 2FA / OTP \u2014 required for GitHub Actions.\n   - If CI fails with `EOTP` / \u201cone-time password\u201d, delete the old secret and create a new **Automation** token.\n4. **GitHub secret** \u2014 repo [expandertech/expander-mcp](https://github.com/expandertech/expander-mcp) \u2192 **Settings \u2192 Secrets and variables \u2192 Actions**:\n   - Update secret **`NPM_TOKEN`** with the Automation token (replace any Publish/Classic token).\n5. **Merge workflow** \u2014 commit `.github/workflows/publish-npm.yml` to `main` (included in this repo).\n\n### Release flow\n\n1. Bump `version` in `package.json` (e.g. `0.1.0` \u2192 `0.1.1`).\n2. Commit, merge to `main`.\n3. GitHub Action builds and runs `npm publish`. Users can then `npx @expander/mcp-server`.\n\nIf you merge a change under `src/` without bumping the version, the publish job\n**fails** on purpose. Cloud Run redeploys on every push while npm only publishes\non a bump, so skipping quietly leaves Claude Desktop users on an older tool list\nthan the remote connector \u2014 which is exactly what happened between 0.4.0 and\n0.5.0, where nine tools shipped to Cloud Run and never reached npm.\n\nThe version in `package.json` is the single source of truth: `createServer.ts`\nreads it, so the version reported in the MCP handshake is always the version that\nwas published.\n\n## Security\n\n- Never commit API keys. Use env vars in the Claude config only.\n- The MCP server runs locally and forwards your key to the Exmachine API on each tool call.\n- Rate limit: 60 requests/minute per key (same as REST).\n- Dashboard permissions apply \u2014 denied endpoints return `403 forbidden`.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-06-17T07:59:14.370Z",
+   "0.1.1": "2026-06-18T07:21:44.146Z",
+   "0.10.0": "2026-08-11T10:37:44.077Z",
+   "0.11.0": "2026-08-12T08:17:23.521Z",
+   "0.19.0": "2026-08-27T13:44:35.484Z",
+   "0.2.0": "2026-06-18T09:23:56.356Z",
+   "0.20.0": "2026-09-02T08:04:38.119Z",
+   "0.20.1": "2026-09-03T07:28:27.279Z",
+   "0.21.0": "2026-09-06T13:09:17.986Z",
+   "0.22.0": "2026-09-08T07:15:22.914Z",
+   "0.24.0": "2026-09-10T11:51:36.281Z",
+   "0.25.0": "2026-09-10T14:17:07.895Z",
+   "0.3.0": "2026-08-05T17:03:13.042Z",
+   "0.4.0": "2026-08-05T17:22:43.035Z",
+   "0.5.0": "2026-08-10T09:44:07.739Z",
+   "created": "2026-06-17T07:59:13.872Z",
+   "modified": "2026-09-10T14:17:08.112Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.1.0",
+    "_nodeVersion": "25.2.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1781683154104_0.7929603671328087"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "11.6.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-hlU7H0FS4hZg1tKLFhJEvNuPGMY0jHMl8a+M905f1p1CJEb1tZKZ3sp7kRmnW1HcE3yQWvR8X9+rydg8hSqX/w==",
+     "shasum": "401495a19c5cf24f0cdae94a38df6b096534ae20",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAUphcIzLJVLgYY+OV0/JDL8pdycG3H83GEIhiOilTscAiEA/QsxHfYIncHuW5W5AWoY2fcYvksxvw6YvOY1zJ6hGPI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 18982
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "dc345eb7bf64698cfb14397652baf73bb3fb3519",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.1.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1781767304004_0.21837398270754793"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-X2/BA/7sQaUJyFxIglSF4f4oApk+QlMu6BoSrcv8jo2Y2+0CNslhyQSjcZvj4kqtrr/2lk1ZcrKVocGIkdLxyg==",
+     "shasum": "57e23649824b6837f2103698a99321835d4f4ee0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFen8mo/MPtvXeZeMAj8ymgiShoaaCxXkM/87/UJSUvgAiEA8ruuqPYMYM1bBK/ZQ1JV1ptf1PzJP/IrmY7nPpa/tmU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 25073
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "09ef50974785a4547b7333cb06d2bac7a7f0d8ce",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.10.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1786444663933_0.16469037525165975"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-sFRwGQ1+Ot05/E/hP2fsfk8tbiyDw24nwAxily431Ptg/xqfkj1IPuYfdmRUpf0vrMeY3is4a2StjPLADQY6hg==",
+     "shasum": "3dfed8f977cfad7c81de2f1fa569721e97c6ac39",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDp7F+pVeWCT04iCzFCoBqXW5SEt1Qy8QdHu7Ohm+LA8QIhAKXlTbDxXbJhYu+kiardE6BrtsrQPrrz5pKs4czxWLGr"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 97464
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "7aef36b5b5571245e8b3efd35eb4534bcbe0b5fb",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.11.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1786522643353_0.9889543152194042"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-Uwir3/a6zTmVc6lHk88862GOGTr20HOu97mKXBIWIZo3oud8G5ADBYren1XrltOku5bu+7easxnFsEl1FwITSQ==",
+     "shasum": "505753dc142a21ae8bb74759a2411f9344cc19ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAeXolWj5ceyJgH9j0LwdZsVR0Uy67MnOKYG7Tk8QkW8AiBP9vkVZZXBpANALR3XbyVueVYpDdaTXwIquRIGbxFo3A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 103770
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "28ff6cf394a60648804977348137a874db140e8b",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.19.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.19.0_1787838275333_0.3046292249883802"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-Y4BWn7uislqher1p5IOSp31c+Sbe3fgp8FSq8yH35MgqGenONp4qiPPazFn4NBl8lwirqRKF+ZXSIg4Coce80g==",
+     "shasum": "8c3ba9f653eadffd4bc2fef00cbb4468aa26a26d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID4/Xy4g/q8zCZ8hAbyoT43OJDo5Pv9L0zrmK9Nve3XhAiEAhmGJ/rkVGPLCavI0emFlj7/hDfbgroDaokt/Fx+B2u4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.19.0.tgz",
+     "unpackedSize": 143584
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "1646fe570e4ded0e0c435d7124dedf597a8057a1",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.19.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.2.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1781774636178_0.31103246599195544"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-IKFTYlrDbR65HtYvzACCBSlTXpUH/4sk7AC0/CH2Lu3wlHtMgk84ndrkHAdqg0ARnkEfpSsbLVN1rRdU7oYQeQ==",
+     "shasum": "4d094f357f5c8fbde78a5d50f5b28c35aed000dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHb/3zETQQI5hgRODJ2DfRzH2/bo5qELC2dg0qIBozNMAiASd64LINXh/HALGwyKQ4o1X0f7vs5tt28oXInpXahWmA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 48313
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "3308116a196b822c3e0e4a2483702f8b3b1ab872",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.20.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.20.0_1788336278023_0.05147318993112204"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-YJEXUWXbBy+Z8ELwW4BkkJJNDCJQdJ5vozQ3ITa9HWc77VBilvIFp6u0U9T+QpOBaTHLwwe4LQpdMN4sYE/iRQ==",
+     "shasum": "69a596615fb8fe14a6e80bd1b21a521a1ae7fcdf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAKo+gbOFUt6MWP9xsFi6waXuGbfGd3HHPW8qkffDfslAiEA1tufbLjwLJa/CGcYpfMifFcVDp32EV0g+Vnto3NZSvk="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmtni7iJGebjkGPYf/e7BQ053bZ326+DJaaWPbLPOytAIgVBui9znCOVo88cB37cAelrkl29quPLab34TsRcjhx6A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.20.0.tgz",
+     "unpackedSize": 156383
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "5411e878e87be7c1ce573c43c7cdf955d72b192d",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.20.0"
+   },
+   "0.20.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.20.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.20.1_1788420507184_0.16464741289696705"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-xEKepr0L9IMdCwtK99eFU38aKWG54cpDaRqVSxNMxUfYPfxs5fVoRWo5anVoGE7wqpGqtZoL7/xYQqgxTRS3EQ==",
+     "shasum": "4f1f6b5aa259631879bba35d97ddf8a212c5f0f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCgOGu7kEKgutzEgkg3XD5J4ZM3qKl9FdwoYJB8GrGVtgIhAPrZ2uIXwqUb2vblx/qgChecM5J1nkPZJ8PPRhRH2Zcd"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbNB+pprPAB1z7GuKmkfcT0mto9M3D5v5xOiZGdCR/IwIgN9pyqXOxpN1pycO5tA0n8UlUcJoy0gX0ewkaicDE+LQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.20.1.tgz",
+     "unpackedSize": 158671
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "1be3def633fac4c98e67d46af1694e159c588e79",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.20.1"
+   },
+   "0.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.21.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.21.0_1788700157911_0.5828632161429019"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-bfE848WGbUNvwTg5jFf/PmZbAZqcptFoviX045+zfBjVaF7TsKR9HniqPYsB43YU0L8V6Ilb0cVKzisy13o6rA==",
+     "shasum": "54a93ce71e6f5ac2d8e634b24144c27dc0ef71c6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGi+/3J2lHBMrd4XYL6HKzcFGNzifY0YsT8aEM08LrLsAiB8IlOS3GcpGu+OPxVms3V6HHLCJ/OwDzQfWNsZj7Shhw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDDf5cADs6kqxcG9VdrL0Qp4IqoIvrhhXDi7f6MALmAlgIgLM4pOxrdjiuQrXpJHBvhEgShI+X7bZvtHGnFkpkkpmo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.21.0.tgz",
+     "unpackedSize": 159951
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "4fe94b04bbd3791966dda808c340dfe884446d77",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.21.0"
+   },
+   "0.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.22.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.22.0_1788851722820_0.503003753984262"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-G1QWWTOY3D33tgHkNa8dkUmFO4b12FK/HQjtk4kGH3oqhbbHoslORFXYw5mmHNt42Vsn1VpTdt7GNqwXcYithg==",
+     "shasum": "2d163a03c0b2aaba4abf044c995280e9280b1317",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIERkSdrVbEAX2wyl2Dy0OXZBWHZpIzd9pLjde70GcN/UAiEAg5THVqSKh6Ikqw4IerPqwtrSftDo9v1L11IJOxXpgfY="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBYh10pOHXkgw/oB1g0QqTHVj/0AJohBX5mjEyVRcTvAAiEAj58/ySJ1v2O2ws3NOFWXU6pIanlV54WM0UG7KCxHjvA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.22.0.tgz",
+     "unpackedSize": 169043
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "89534d86caec3fc7ddd9c2acd3b93d11b5048c99",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.0"
+   },
+   "0.24.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.24.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.24.0_1789041096191_0.07439963387529569"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-aHXxxNzZSmB+c4fPkuN+RJJ9hY5/NqwBS/74ERhsc0xTb+UYoT5vz1xPgs5/OZ6oC8Eb7F81MbUJDxCrLFw5GQ==",
+     "shasum": "8a7bc1735a95c8a810d149faf3605dd54bd401bb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC1MDz6PGqQink0f+GB+MHu4HU3H02fFTss2g9FZmbHPgIhANdbeXfA/jW21EPZtrF/jDCnakmhFBVlXLw5a/rx7735"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCfrZ5uemF9VCn4a1ssZkvlWaXFSViQUS5HCPXuUx6iwAIhAMUlOg2UQRCiK2xoKDn/4dkbHd8c72lELJwvNudWHyl4"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.24.0.tgz",
+     "unpackedSize": 174235
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "5ec11a416df2a13b2981eb8ba1f84ebf613f22e7",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.24.0"
+   },
+   "0.25.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.25.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.25.0_1789049827795_0.623559062783094"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-lYPQDRVJfxQvJuWImqvZDAVUnhfYQUBJq73hYHZ6UlG7m1kVS7fakvcbT9GukFSB+z+/7eyzMcsi72Ws3SWTkA==",
+     "shasum": "416489282d1eee5c3f81336d73f1708dda8aa422",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCdiRKbfYsIbLsetrL1X9RL52UvYDvyAHx9uyL9C56LMQIgG6CmHrwvRKion0lFt+O0nRuDdF4dIO74EN9fn/S60B8="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD4PJtIZmoR8WJOea49RgsssUhn0JXSkJeV4sluKa4ybAIhAIp+3u/L+zFnHT/xloWb+8njoXfNFx0dEd/2uXm3y5o+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.25.0.tgz",
+     "unpackedSize": 179001
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "877f35bd171a3dd31c9d0c04f0b2e9b92279548a",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.25.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.3.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1785949392885_0.1870072176943729"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-AYfIvYDiJUa0Mnh6GtSHqBQlwCoR9vBQwarZgdVrblOGEeMUQa3/nzXCisorSUaJCG6HvpYvwl97To1d2y8twA==",
+     "shasum": "e80cdfc2b840ba23a4af82a03d76aed1a158f73c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7p1aFdJ7xYG14aDEtWLS3OqCXj5kueAjjLTZnjvsslgIgFfuds9u+dOy5aSnyNAHyL7+q8oHm/rryTdPwFbR+1OQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 51523
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "dcc1f77ac9c995b6ed204892ca06b3c8553e63dc",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.4.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1785950562895_0.0029083114794223874"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-5N9IalA9t/+arhBH6y4K+iNROvnN/8Er1jveMGYIIeYm7MwT1W7oeOnN8BqbGvUjtQ6Dwx4zO1YCTsgYXqBAcg==",
+     "shasum": "b3a613061b87a5492706fe55f8ddd63b4a8303fc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC+jkVWRYhLk5ryzVE+kGQsakpUrZsGfpZKxjPXp7c7iQIgOodlaUOnS/3A4pEpTPGvC0NRHk3DzcBYIKOWAcxVfiQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 54429
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "e887a2fc25e911e8cabb7c00d2b9d8c23afe1d7e",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@expander/mcp-server@0.5.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1786355047598_0.04747657982262021"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:9953cfd0cb84]",
+     "name": "vituli"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "expander-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^3.25.0"
+    },
+    "description": "Model Context Protocol server for the Exmachine External API",
+    "devDependencies": {
+     "@types/express": "^5.0.0",
+     "@types/node": "^22.15.0",
+     "typescript": "^5.8.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-ojUYXcfcxtqg5gL8ggdjVV9PKKOJI5rn2v85KsqGTP9V/XAKLx2/mWq7umvqGLvsYv1UoQEG70P05Th3aMQe6w==",
+     "shasum": "5a19e4f461c7ff38652bcbe04de55039fa66366f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHrMR9TuFlh4RFzrXXiqpYEkpR3TRqGIALzzrJgoWPyvAiAM4Nv6K0DPilD5v/CNPwyKVtAxZ6x2zXkpGON2uB9e1Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@expander/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 77463
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "2b902a5f4122af820910f84139b73b80aed83cc8",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "exmachine",
+     "expander",
+     "external-api"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:9953cfd0cb84]",
+      "name": "vituli"
+     }
+    ],
+    "name": "@expander/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p .",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "start:http": "node dist/http.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   }
+  }
+ },
+ "name": "@expander/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@expander%2Fmcp-server"
+}

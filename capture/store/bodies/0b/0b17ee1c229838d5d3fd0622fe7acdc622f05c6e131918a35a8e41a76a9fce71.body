@@ -1,0 +1,5339 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "7.0.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d50677176d7f]",
+    "name": "forinda"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "2.3.0",
+   "2.3.1",
+   "2.3.2",
+   "2.3.3",
+   "3.0.0",
+   "3.0.2",
+   "3.0.3",
+   "3.0.4",
+   "3.0.5",
+   "3.0.6",
+   "3.0.7",
+   "3.0.8",
+   "3.1.0",
+   "3.1.1",
+   "3.1.2",
+   "3.1.3",
+   "3.2.0",
+   "4.0.0",
+   "4.1.0",
+   "4.2.0",
+   "5.0.0",
+   "5.0.1",
+   "5.0.2",
+   "5.1.0",
+   "5.2.0",
+   "5.2.1",
+   "5.2.2",
+   "5.2.3",
+   "6.0.0-alpha.0",
+   "6.0.1",
+   "6.0.2",
+   "7.0.0",
+   "7.0.0-alpha.0",
+   "7.0.1",
+   "7.0.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@forinda/kickjs-mcp",
+  "_rev": "35-45e4ea62f64b3a05ba28a70dea5f4331",
+  "author": {
+   "name": "Felix Orinda"
+  },
+  "bugs": {
+   "url": "https://github.com/forinda/kick-js/issues"
+  },
+  "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+  "dist-tags": {
+   "alpha": "7.0.0-alpha.0",
+   "latest": "7.0.2"
+  },
+  "homepage": "https://kickjs.app/",
+  "keywords": [
+   "kickjs",
+   "nodejs",
+   "typescript",
+   "decorator-driven",
+   "mcp",
+   "model-context-protocol",
+   "claude-tools",
+   "claude-code",
+   "anthropic",
+   "tool-server",
+   "tool-calling",
+   "stdio",
+   "cursor",
+   "zed"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d50677176d7f]",
+    "name": "forinda"
+   }
+  ],
+  "name": "@forinda/kickjs-mcp",
+  "readme": "# @forinda/kickjs-mcp\n\n[Model Context Protocol](https://modelcontextprotocol.io) server adapter \u2014 exposes `@Controller` endpoints as callable MCP tools for Claude Code, Claude Desktop, Cursor, Zed, and any other MCP-aware client. Zero duplicated schemas (the route's Zod `body` becomes the tool input shape automatically).\n\n## Why MCP?\n\nYou already have a REST API. MCP lets AI tools call your endpoints as native tools \u2014 no glue code, no client SDKs, no OpenAPI wrappers.\n\n**Your API becomes AI-native in one decorator:**\n\n```ts\n@Post('/', { body: createTaskSchema })\n@McpTool({ description: 'Create a task with title and priority' })\ncreate(ctx: RequestContext) { ... }\n```\n\nNow a developer in Claude Code or Cursor can say _\"create a task called Fix login bug with high priority\"_ \u2014 and the LLM calls your endpoint directly. No curl, no Postman, no Swagger UI. They stay in their editor.\n\n**What people use this for:**\n\n- **Internal tools** \u2014 ops team queries and mutates data through an AI assistant instead of building admin UIs\n- **Dev workflows** \u2014 _\"list all users who signed up this week\"_ against a running staging server\n- **CI/CD agents** \u2014 AI agents that create issues, update statuses, or trigger deploys via your API\n- **Database access** \u2014 expose your query layer as MCP tools so Claude can answer data questions\n- **Onboarding** \u2014 new team members explore the API by talking to it instead of reading docs\n\n**Auth just works.** If you already resolve the user and check roles with context decorators (`@LoadUser`, `@RequireRole`) on your HTTP routes, they work on MCP calls identically. No separate auth layer for AI access.\n\n**You control what's exposed.** `mode: 'explicit'` (the default) means nothing is visible to AI unless you put `@McpTool` on it. Admin endpoints, dangerous mutations, internal debug routes \u2014 none of them leak.\n\n## Install\n\n```bash\nkick add mcp\n```\n\n## Quick Start\n\n### 1. Wire the adapter into bootstrap\n\n```ts\nimport { bootstrap } from '@forinda/kickjs'\nimport { McpAdapter } from '@forinda/kickjs-mcp'\nimport { modules } from './modules'\n\nexport const app = await bootstrap({\n  modules,\n  adapters: [\n    McpAdapter({\n      name: 'task-api',\n      version: '1.0.0',\n      mode: 'explicit',\n      transport: 'http',\n    }),\n  ],\n})\n```\n\n### 2. Mark which methods to expose\n\n```ts\nimport { Controller, Get, Post, Delete, type RequestContext } from '@forinda/kickjs'\nimport { McpTool } from '@forinda/kickjs-mcp'\n\n@Controller()\nclass TaskController {\n  @Get('/')\n  @McpTool({ description: 'List all tasks. Read-only.' })\n  list(ctx: RequestContext) { ... }\n\n  @Post('/', { body: createTaskSchema })\n  @McpTool({ description: 'Create a task with title and priority' })\n  create(ctx: RequestContext) { ... }\n\n  @Delete('/:id')\n  @McpTool({ description: 'Delete a task by id. Destructive.' })\n  delete(ctx: RequestContext) { ... }\n\n  @Get('/internal-report')\n  report(ctx: RequestContext) { ... }  // NOT exposed \u2014 no @McpTool\n}\n```\n\n### 3. Connect your AI client\n\n`kick mcp init` writes a `.mcp.json` that Claude Code, Cursor and Zed read\nautomatically \u2014 they spawn the server over stdio and own its lifecycle:\n\n```bash\nkick mcp init\n```\n\nFor a server already running over HTTP, point the client at\n`/_mcp/messages` instead. Both transports, the Claude Desktop config path,\nand verifying with MCP Inspector are covered in\n[the guide](https://kickjs.app/guide/mcp).\n\n## Exposure Modes\n\n`mode` decides which routes become MCP tools:\n\n- **`explicit`** (default) \u2014 only methods decorated with `@McpTool` are exposed. New controllers don't suddenly become model-accessible.\n- **`auto`** \u2014 every route matching `include`/`exclude` is exposed automatically. Useful for internal apps where every endpoint is intentionally callable.\n\n```ts\nMcpAdapter({\n  name: 'internal-api',\n  mode: 'auto',\n  include: ['GET', 'POST'],\n  exclude: ['/admin/*', '/internal/debug/*'],\n})\n```\n\n## McpAdapter Options\n\n```ts\nMcpAdapter({\n  name: 'my-api', // MCP server name (shown in client UIs)\n  version: '1.0.0', // Server version (shown in client UIs)\n  description: 'My API server', // Human-readable description\n  mode: 'explicit', // 'explicit' (default) | 'auto'\n  transport: 'http', // 'http' (default) | 'stdio' | 'sse'\n  basePath: '/_mcp', // HTTP mount path (default: '/_mcp')\n  include: ['GET', 'POST'], // Auto mode: which HTTP methods to expose\n  exclude: ['/admin/*'], // Auto mode: path prefixes to skip\n  auth: {\n    // Transport-level auth (HTTP/SSE only)\n    type: 'bearer',\n    validate: (token) => isValid(token),\n  },\n})\n```\n\n## @McpTool Options\n\n```ts\n@McpTool({\n  description: 'Create a task',          // Required. Shown to the LLM.\n  name: 'create_task',                   // Override tool name (default: Controller.method)\n  inputSchema: z.object({ ... }),        // Override input schema (default: route's body schema)\n  outputSchema: z.object({ ... }),       // Output schema for documentation\n  hidden: true,                          // Exclude from auto mode\n  examples: [{                           // Usage examples shown in client UIs\n    description: 'Create a high-priority task',\n    args: { title: 'Ship v3', priority: 'high' },\n    result: { id: '1', title: 'Ship v3' },\n  }],\n})\n```\n\n## Security\n\n```text\nIN PLACE:\n  [x] Explicit mode \u2014 only @McpTool-decorated routes exposed\n  [x] Full HTTP pipeline \u2014 middleware, auth, RBAC, rate limits apply\n  [x] Auth header forwarding \u2014 Authorization flows from MCP to internal dispatch\n  [x] Zod input validation \u2014 SDK validates against route's body schema\n  [x] getTools() \u2014 inspect the tool registry at runtime or in tests\n\nNOT YET IN PLACE:\n  [ ] Tool annotations (readOnlyHint, destructiveHint, idempotentHint)\n  [ ] Elicitation (server-driven user prompts mid-call)\n  [ ] Process sandbox (tools run in same Node process)\n  [ ] Server-side approval / human-in-the-loop\n```\n\nThe mental model: treat MCP exposure exactly like exposing the same route to a public HTTP client. Your existing auth + RBAC + rate-limit story carries the weight.\n\nIn the default `explicit` mode, `@McpTool` is the gate \u2014 if you would not expose a route to an unauthenticated client, do not decorate it. **`mode: 'auto'` removes that gate**: every route matching `include` / `exclude` becomes a tool whether or not it carries the decorator, so the filters and the route's own authorization are the only things standing between a model and the endpoint. Use `@McpTool({ hidden: true })` to opt a route out, and do not rely on the absence of a decorator to keep anything private.\n\n## Documentation\n\n[kickjs.app/guide/mcp](https://kickjs.app/guide/mcp) \u2014 full guide with transports, auto mode, dispatch internals, context decorator auth, Inspector setup, and security notes.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp",
+   "type": "git",
+   "url": "git+https://github.com/forinda/kick-js.git"
+  },
+  "time": {
+   "2.3.0": "2026-04-11T03:07:46.550Z",
+   "2.3.1": "2026-04-11T03:21:29.575Z",
+   "2.3.2": "2026-04-11T03:36:14.316Z",
+   "2.3.3": "2026-04-11T13:58:47.550Z",
+   "3.0.0": "2026-04-14T04:56:26.043Z",
+   "3.0.2": "2026-04-14T06:14:48.653Z",
+   "3.0.3": "2026-04-14T06:44:14.759Z",
+   "3.0.4": "2026-04-14T08:39:54.028Z",
+   "3.0.5": "2026-04-14T10:02:36.719Z",
+   "3.0.6": "2026-04-14T21:09:28.542Z",
+   "3.0.7": "2026-04-16T14:17:37.741Z",
+   "3.0.8": "2026-04-16T14:38:26.725Z",
+   "3.1.0": "2026-04-19T17:44:06.139Z",
+   "3.1.1": "2026-04-21T05:09:01.579Z",
+   "3.1.2": "2026-04-21T14:21:32.616Z",
+   "3.1.3": "2026-04-21T17:45:51.781Z",
+   "3.2.0": "2026-04-22T13:58:27.469Z",
+   "4.0.0": "2026-04-23T21:30:08.189Z",
+   "4.1.0": "2026-04-24T09:28:05.057Z",
+   "4.2.0": "2026-04-24T18:41:49.985Z",
+   "5.0.0": "2026-04-24T20:53:56.119Z",
+   "5.0.1": "2026-04-26T05:24:04.948Z",
+   "5.0.2": "2026-04-26T09:47:40.041Z",
+   "5.1.0": "2026-04-28T10:01:15.888Z",
+   "5.2.0": "2026-04-30T17:40:58.898Z",
+   "5.2.1": "2026-05-04T07:26:26.484Z",
+   "5.2.2": "2026-05-21T07:48:01.691Z",
+   "5.2.3": "2026-05-23T22:01:32.446Z",
+   "6.0.0-alpha.0": "2026-05-29T17:48:43.702Z",
+   "6.0.1": "2026-05-30T01:49:52.333Z",
+   "6.0.2": "2026-05-30T02:58:09.492Z",
+   "7.0.0": "2026-06-14T11:03:33.940Z",
+   "7.0.0-alpha.0": "2026-06-14T08:42:42.119Z",
+   "7.0.1": "2026-07-05T08:27:33.867Z",
+   "7.0.2": "2026-09-01T04:59:20.068Z",
+   "created": "2026-04-11T03:07:46.300Z",
+   "modified": "2026-09-01T04:59:20.350Z"
+  },
+  "versions": {
+   "2.3.0": {
+    "_from": "file:forinda-kickjs-mcp-2.3.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@2.3.0",
+    "_integrity": "sha512-KsBtEyvQVieF71XsZ7+A6WjlZIQRpgfthDhMRXk0MA6QHkA+AJMgXKN3/bDKpsu0ekVQJzO7Anddj9wV0IziTg==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_2.3.0_1775876866419_0.6580872497108043"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/ee02d5d699902ee484cdde48d1bb80b7/forinda-kickjs-mcp-2.3.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs": "2.3.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-KsBtEyvQVieF71XsZ7+A6WjlZIQRpgfthDhMRXk0MA6QHkA+AJMgXKN3/bDKpsu0ekVQJzO7Anddj9wV0IziTg==",
+     "shasum": "1d833b85e2bbe9dc4718d6ebd0a26576ccd44c07",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCQ+xRDDeMSRuLsJrsuu4W9WnoHuO1KuiHhzHKJvJyj+gIgEEa44Hxe9+GayWpRrrE/ThXmd+qYkksZIALc4xJIvZU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-2.3.0.tgz",
+     "unpackedSize": 80060
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "@forinda/kickjs",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "2.3.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "2.3.1": {
+    "_from": "file:forinda-kickjs-mcp-2.3.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@2.3.1",
+    "_integrity": "sha512-coSkKsw98Y1Oeg00PHkI+GDIBe97OeiFOgIgoeB/h34kRLDT5nhcxicydfhyUK17SXSQip42RYHGkqrjrWnOnw==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_2.3.1_1775877689403_0.911290153210228"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/44c520393b9f742ce1ea3bec1a27125d/forinda-kickjs-mcp-2.3.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs": "2.3.1",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-coSkKsw98Y1Oeg00PHkI+GDIBe97OeiFOgIgoeB/h34kRLDT5nhcxicydfhyUK17SXSQip42RYHGkqrjrWnOnw==",
+     "shasum": "0aceab8def4a73f153cf26b526174dda3f3b9f45",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD9O9XBtHAW89NfB0AB0wZHxxS2zqQepCNcEIGu2/aEpQIhAL+EeK9WnZdb9FIrjZro3+Q1JrzKBiNwRD8YZbTWb7vI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-2.3.1.tgz",
+     "unpackedSize": 81954
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "2.3.1",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "2.3.2": {
+    "_from": "file:forinda-kickjs-mcp-2.3.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@2.3.2",
+    "_integrity": "sha512-ESQU9WNgTzubVGjjFz7/drRfGquw1hZ5K1Xt95OZOirdMrx5nV+CwaG5d8joxIv1OuAs9wKAQNp73+DKNdRP4A==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_2.3.2_1775878574178_0.951404833906798"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/6c6b18d9a1be0b4ee19af272c4d573b5/forinda-kickjs-mcp-2.3.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs": "2.3.2",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-ESQU9WNgTzubVGjjFz7/drRfGquw1hZ5K1Xt95OZOirdMrx5nV+CwaG5d8joxIv1OuAs9wKAQNp73+DKNdRP4A==",
+     "shasum": "67db283c600d8943f9906613e2d08541f396f4fa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCIukPjm6hNXKMa7z1P075f1QXEXJU8VBrE9FYZOpHJ3gIgMrbhvsFJUGT5/SNcpw+2keLyIyUxjBSkXXJxpPggWLw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-2.3.2.tgz",
+     "unpackedSize": 81954
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "2.3.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "2.3.3": {
+    "_from": "file:forinda-kickjs-mcp-2.3.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@2.3.3",
+    "_integrity": "sha512-vayWnOMZ2M7C0E8gJ3tcQzSIqjzsob/O+nk9XNkxQ94HzLh7ZL4Whdy/QFSnD9iZabShCXSs6ZbwT6lgo4RgKg==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_2.3.3_1775915927413_0.8705073149029205"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/50d30fcca546675ab4cc404689de696a/forinda-kickjs-mcp-2.3.3.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs": "2.3.3",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-vayWnOMZ2M7C0E8gJ3tcQzSIqjzsob/O+nk9XNkxQ94HzLh7ZL4Whdy/QFSnD9iZabShCXSs6ZbwT6lgo4RgKg==",
+     "shasum": "55d1f71c71858b7e413c1435f200c436f8259d10",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGZKyZmZ4kbQ6kTh9yZYQE9wLW7uU1iKHu0wBccLUrnGAiEAj+rmZc1CyAd+2NSJ7sz9xxVvf1YL1V9As0duaxOq3VQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-2.3.3.tgz",
+     "unpackedSize": 81954
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "2.3.3",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.0": {
+    "_from": "file:forinda-kickjs-mcp-3.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.0",
+    "_integrity": "sha512-M7KvT21Ju0NIj6SCIxgp7wm0M/vUrLWWQPGmQyaoR7dQBPLnbAUgKmHU3K77hbw48r/7RoQ7e2JoklayBV+7Hw==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.0_1776142585902_0.88169588922074"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/954a8dd40f08af72abf6789917f81082/forinda-kickjs-mcp-3.0.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs": "3.0.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-M7KvT21Ju0NIj6SCIxgp7wm0M/vUrLWWQPGmQyaoR7dQBPLnbAUgKmHU3K77hbw48r/7RoQ7e2JoklayBV+7Hw==",
+     "shasum": "25049afb34f99dedfc899b47401b91b0c136bd2e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDeS+5MoFu5B5u4xRatdF42Bi4ecBCxAcRFwLUp1KbHzgIhAICfncHsAYy+fpT81qNBkroKUj9Pmja818leOa33Snxe"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.0.tgz",
+     "unpackedSize": 85860
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.2": {
+    "_from": "file:forinda-kickjs-mcp-3.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.2",
+    "_integrity": "sha512-dDtolabGENpXwdzMmzgtekGy+46m0nAT7HObbBvt4/B7SnJs0xKf1QMAWbhqG9G/jLk6JAcvgB8cnjM2rxJP8Q==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.2_1776147288532_0.731997834821962"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/5a39b6d2109a37086b46cc914aa2cf3e/forinda-kickjs-mcp-3.0.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.2",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-dDtolabGENpXwdzMmzgtekGy+46m0nAT7HObbBvt4/B7SnJs0xKf1QMAWbhqG9G/jLk6JAcvgB8cnjM2rxJP8Q==",
+     "shasum": "4c78826a7d9a157a8548791dfab50bddd5665a9c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBnKy8HQcWomW1igOeE9psufxlzNh0c9Z/7JLhWGMF1EAiAj5r57tipwiql7CQpJkAjGHGBa9mu2A2f5YproY71iaQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.2.tgz",
+     "unpackedSize": 85894
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.3": {
+    "_from": "file:forinda-kickjs-mcp-3.0.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.3",
+    "_integrity": "sha512-GcOG0OUGZj79nxDd9H5uUyncK469Phw0DKCFehBadlvAz8FudPT/SthqIPZoeNsZ6p5erOXnX+n+4j887pyliQ==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.3_1776149054619_0.40828729974284883"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/4f61dde9e28cf1578ae787dcbac77177/forinda-kickjs-mcp-3.0.3.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.3",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-GcOG0OUGZj79nxDd9H5uUyncK469Phw0DKCFehBadlvAz8FudPT/SthqIPZoeNsZ6p5erOXnX+n+4j887pyliQ==",
+     "shasum": "f9aa9d232e57dd1b6fb1c224e9d52292d2a39880",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDmN2shytTgFhjtaxKlWzWD4CwaMiqSv+ibLUrclgt2dAIgKBs5/UugtGIyl568qdP+joOJ9FeAkvH5t1+P7STLUIM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.3.tgz",
+     "unpackedSize": 85894
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.3",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.4": {
+    "_from": "file:forinda-kickjs-mcp-3.0.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.4",
+    "_integrity": "sha512-hniVy6nUrZLZTKHQNSEMcN+SOviBek9BUh34rqbqsaEcMK08qqUlqKKxXnpcLwzDA/DhmxUEeqGwtjZAYQA2XQ==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.4_1776155993832_0.5579500365518917"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/8d015f1b3f10875ab808b82d65a883b5/forinda-kickjs-mcp-3.0.4.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.4",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-hniVy6nUrZLZTKHQNSEMcN+SOviBek9BUh34rqbqsaEcMK08qqUlqKKxXnpcLwzDA/DhmxUEeqGwtjZAYQA2XQ==",
+     "shasum": "f989832e3d74eef83c7d25f8afbcdebee44cc3a2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCYGnyuJuE1058iwgQGwIio2cawlYMUTHRsKYQDGBCk3gIhANDez4eyzNw4LADlW96v4JPxFU9HQn3Wj+DBftEBfne7"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.4.tgz",
+     "unpackedSize": 85894
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.4",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.5": {
+    "_from": "file:forinda-kickjs-mcp-3.0.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.5",
+    "_integrity": "sha512-No5Y67bdKiyXUqNwQLQxNBPLmzRi5e129fU3zuG07VWAH+fJHzAdHVix+y+Rr/NKAYjk/H+Ey54hlUw35BVgKg==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.5_1776160956506_0.23553772925005045"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/9f0e2292722137a9a9d2a4d19f9b553c/forinda-kickjs-mcp-3.0.5.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.5",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-No5Y67bdKiyXUqNwQLQxNBPLmzRi5e129fU3zuG07VWAH+fJHzAdHVix+y+Rr/NKAYjk/H+Ey54hlUw35BVgKg==",
+     "shasum": "ff8b9712277c7785010b7480ca91396fbb320dc2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC8cQMZcWomJK2WQhEZhe85cQEEnYCT72mp0yDr5Tn1tQIgLMG/4ywA8fmdLKOX3RLB7Te4zFOlOMY/RzlXnDfa7Cs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.5.tgz",
+     "unpackedSize": 85894
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.5",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.6": {
+    "_from": "file:forinda-kickjs-mcp-3.0.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.6",
+    "_integrity": "sha512-WtY/CsbKmug09qD1hUAW+lOf5QUbfavBYKGmuQB04WH7H8gZqOtl8qLKlCBMleONN8vRG9T5Y0+3mJxHNwUS8w==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.6_1776200968363_0.8048789110146382"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/4d72ac04c1d9c110cc0f6d020823c7c0/forinda-kickjs-mcp-3.0.6.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.6",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-WtY/CsbKmug09qD1hUAW+lOf5QUbfavBYKGmuQB04WH7H8gZqOtl8qLKlCBMleONN8vRG9T5Y0+3mJxHNwUS8w==",
+     "shasum": "9bf340a89260e4a89ff2da3431f52567ce12d9d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCC/lj8DuUfmS+tHz04kQ8u4LHJaM+FkRgzTSUJOQgTAQIgYu6yWhXnHENVIW6y5AQja9ysILDkLhqBVdDMzsOO1vM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.6.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.6",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.7": {
+    "_from": "file:forinda-kickjs-mcp-3.0.7.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.7",
+    "_integrity": "sha512-ccUOv+gKeOYpan9BQCkDfaKeMHuPcXNT6mD5BvFEAu+nP+bKAhqn7fNQQ+5zUTQNS61gXDgue5PYRxvkOaEosQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.7_1776349057595_0.5211308384365174"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/c168404d5f340583dbb97cebb2d977cf/forinda-kickjs-mcp-3.0.7.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.7",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-ccUOv+gKeOYpan9BQCkDfaKeMHuPcXNT6mD5BvFEAu+nP+bKAhqn7fNQQ+5zUTQNS61gXDgue5PYRxvkOaEosQ==",
+     "shasum": "3cf9bfc2a3c6c43e0b1f19797a052efb24700a0a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGBWhwt+TTUOHtxNsFNnS9XjGMyK8l2bxgho9yLS9FsHAiByOgX7JdAMYp8SGOe2EYr8OkMa51tCBRwP0b7n1KPdiA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.7.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.7",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.0.8": {
+    "_from": "file:forinda-kickjs-mcp-3.0.8.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.0.8",
+    "_integrity": "sha512-CgpCfiMvUnEUZmFS1vv5E+hA/uyb1to6u3ebS7XxC4cuxvgW6wtRuW0y/PRqDxwNYR40Sul23XbT5qRf/m4HoQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.0.8_1776350306579_0.26575414130538255"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/2e9dc4260239c0d6e2edfef375e78902/forinda-kickjs-mcp-3.0.8.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.0.8",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-CgpCfiMvUnEUZmFS1vv5E+hA/uyb1to6u3ebS7XxC4cuxvgW6wtRuW0y/PRqDxwNYR40Sul23XbT5qRf/m4HoQ==",
+     "shasum": "077b5b7114a1f1437c69e11cd4d2f7e78be31e69",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEyoAswKbMoII4qYomfpZYV57udnASJwVF7qcuK9na6yAiAS7TdruHh/LRHfcHhHtIx3bNfhy3GSs0GGPs62JpPZlw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.0.8.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.0.8",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.1.0": {
+    "_from": "file:forinda-kickjs-mcp-3.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.1.0",
+    "_integrity": "sha512-I94JYEpNdBkzm/O71LHmfLYKnHmhCNEKAaeLhRo6slxhRLSoOQCCguAH9nsHvy27RFFnuCt2+jWcVuTH6i6ajg==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.1.0_1776620645934_0.9452335525912556"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/2f9baca2956418b41f95f8396249a09a/forinda-kickjs-mcp-3.1.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.1.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-I94JYEpNdBkzm/O71LHmfLYKnHmhCNEKAaeLhRo6slxhRLSoOQCCguAH9nsHvy27RFFnuCt2+jWcVuTH6i6ajg==",
+     "shasum": "6db88f5484a01f96d64236670e6cd0bf46e38611",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCiVCggyUrgAevZw/WIAukQtrbnIWb0NE1JRuyOllXdagIgAyeVqwq9Ddp4s0D0ssDlPg01Zx1vW/Ux3gtp2XqyZiM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.1.0.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.1.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.1.1": {
+    "_from": "file:forinda-kickjs-mcp-3.1.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.1.1",
+    "_integrity": "sha512-8h0tjT0yZPNu1usWeHZhY6jsJLLy+w3XaXRb/RLmmZYxLq4hKB/TLbtkxPlqFR5N17XBjzkCcUycV5hncsaM0Q==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.1.1_1776748141377_0.9245356022264974"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/e94cef074b4fd67663a0f0d361f2c1c2/forinda-kickjs-mcp-3.1.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.1.1",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-8h0tjT0yZPNu1usWeHZhY6jsJLLy+w3XaXRb/RLmmZYxLq4hKB/TLbtkxPlqFR5N17XBjzkCcUycV5hncsaM0Q==",
+     "shasum": "082a59c58bee66dd8bacb307dc771c0cd837beff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDN8+nF65ewHoO0wbOi5ZogKbSoAzxCZ5/XcmY6XBsNngIgQO8zKU8QghYxxjLkUpEGC4V1boy4y8VRUV3p/zEsbVw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.1.1.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.1.1",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.1.2": {
+    "_from": "file:forinda-kickjs-mcp-3.1.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.1.2",
+    "_integrity": "sha512-ppo4E1xXVqBqdqTL+Dc61k/dF7dBvF79iWGFqayMtN6IavJGCaAtvmLRXu5Xl7KC1EAAEP2+iPWhGogTAku6cA==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.1.2_1776781292451_0.41399197528805565"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/1a76700cc6205012a3ad6660251d9dd6/forinda-kickjs-mcp-3.1.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.1.2",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-ppo4E1xXVqBqdqTL+Dc61k/dF7dBvF79iWGFqayMtN6IavJGCaAtvmLRXu5Xl7KC1EAAEP2+iPWhGogTAku6cA==",
+     "shasum": "f3c519a3d119279b52123c9ed446386e756757dd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE9v7NzI1okKa6K9rWDnBpExrJYjMJXN+ChzQcAezzqBAiBNuu6lYkvch49S/Wc8AOu0riLYe5l9tEZIJGOJHqkT+g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.1.2.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.1.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.1.3": {
+    "_from": "file:forinda-kickjs-mcp-3.1.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.1.3",
+    "_integrity": "sha512-c+lKglv69D8HJN8tM1q0jj2fG4v5r0eR9kQu+B7i9DCz8SMEgWsJOmahjocGSzvkvzRTURZ1PXQVEzE532nI7A==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.1.3_1776793551609_0.44465835938020315"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/3a6f499a36eb464d65d106aef577cc2a/forinda-kickjs-mcp-3.1.3.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.1.3",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-c+lKglv69D8HJN8tM1q0jj2fG4v5r0eR9kQu+B7i9DCz8SMEgWsJOmahjocGSzvkvzRTURZ1PXQVEzE532nI7A==",
+     "shasum": "ea9cb8e0b59e8d499a69b98489b28d36eb48e955",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICJHXPU6s9eJpk/kkKRlccZKmm+6lYDay+ElbfoQBc9EAiAcr3uSDqOlf/Ko0DCAj91TO9xNEX+sLNRS/M22AR9qTw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.1.3.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.1.3",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "3.2.0": {
+    "_from": "file:forinda-kickjs-mcp-3.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@3.2.0",
+    "_integrity": "sha512-mYuaEH8Wbyg36lGHD/ypSR5slqO2uHreNFc92tkca2hdnWQqMNb6YeTWZH5BEpL3SyUmYg3qHJ7k7aDmegDLMQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_3.2.0_1776866307344_0.01100808998844105"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/7fcda3311b80c789ed9f313a28dde7f2/forinda-kickjs-mcp-3.2.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "3.2.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.21",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.0.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^5.9.2",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.2",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-mYuaEH8Wbyg36lGHD/ypSR5slqO2uHreNFc92tkca2hdnWQqMNb6YeTWZH5BEpL3SyUmYg3qHJ7k7aDmegDLMQ==",
+     "shasum": "fd8f0eb3a7cece7e065b33039db2687e6952d418",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCJq/018qY4rMWXSPL0CIB2Gk6W/988BGvES6o36+ue4QIgfy/kvMZEWLjfvHQiFVHmCK0qAKIl8HhR7IAmswr0WT8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-3.2.0.tgz",
+     "unpackedSize": 85866
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-config",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "3.2.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "4.0.0": {
+    "_from": "file:forinda-kickjs-mcp-4.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@4.0.0",
+    "_integrity": "sha512-+mX7scXh2m3POStDdsQNft+t/N2qU06E0klrKeaMvhe+F+8CPZTHKOCvqENhcl5L0gbquHKjpw575bWMbYQ5kw==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_4.0.0_1776979807985_0.42735323791557334"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/90270eb9b552296720b277ad4486d265/forinda-kickjs-mcp-4.0.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "4.0.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-+mX7scXh2m3POStDdsQNft+t/N2qU06E0klrKeaMvhe+F+8CPZTHKOCvqENhcl5L0gbquHKjpw575bWMbYQ5kw==",
+     "shasum": "60fdc5c372d4333036c7ca9d85babaac784e8fd8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC2/Frg12eIBqWl8eGC3rdmwHRu2+omEMzsA59hPfmqMQIgRQC/dcFJUnD3xjkSHUTKoxK2Igdgw4D/CEwW+LEuVCM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-4.0.0.tgz",
+     "unpackedSize": 63208
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "4.0.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "4.1.0": {
+    "_from": "file:forinda-kickjs-mcp-4.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@4.1.0",
+    "_integrity": "sha512-ETAbSAJJ5KC8lwXhvH5vqgf2zHoiFPtVLBU4T55Nc3aZGnShtM0ocLk3y9S3T+zXfgqCLNf/Zt3vrU/CeEKmZA==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_4.1.0_1777022884873_0.016214620600889962"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/4cc6146590c66fce3e096e9db7fa20e6/forinda-kickjs-mcp-4.1.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "4.1.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-ETAbSAJJ5KC8lwXhvH5vqgf2zHoiFPtVLBU4T55Nc3aZGnShtM0ocLk3y9S3T+zXfgqCLNf/Zt3vrU/CeEKmZA==",
+     "shasum": "75287872d701b7afc1fe9c62ae2a7089c7353121",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICR4SywG1yGReDQoAMFrWxeMC89Cl6O3YWjxW3o9XFICAiEAnjNDMjfzyKpyi7uH1jyiPgDfk9zSMwVFNdtOQ470JAM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-4.1.0.tgz",
+     "unpackedSize": 63336
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "4.1.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "4.2.0": {
+    "_from": "file:forinda-kickjs-mcp-4.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@4.2.0",
+    "_integrity": "sha512-Vm59wzq8R9q0B9Sxv6P/GHSuMKgK2E3Tix3rhw9rD3ImuELdGwYc/p3i9y4MYdjKgANjMquF1pHvJQJb21Ge6g==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_4.2.0_1777056109797_0.7259499172253789"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/41b18e32fa4f3133d3172f70175b47c8/forinda-kickjs-mcp-4.2.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "4.2.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-Vm59wzq8R9q0B9Sxv6P/GHSuMKgK2E3Tix3rhw9rD3ImuELdGwYc/p3i9y4MYdjKgANjMquF1pHvJQJb21Ge6g==",
+     "shasum": "fb24e06647704b3293711031a3b2ca8a5a48bacd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAQMD5vnKspXYWe8Zk9D5auM6oVQBqr0jPGLsIEpojUKAiBlRZMnsyGFpQ6cIjR6fGleQxKZ3V6PRnHnJJhgXSax4g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-4.2.0.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "4.2.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.0.0": {
+    "_from": "file:forinda-kickjs-mcp-5.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.0.0",
+    "_integrity": "sha512-iLZz4WZ1/KNn6l+xvyZWYEkfEEd0aB3lL5lNHF5tsnTD6LUP7pfFzRyUOXn/FomcM8zDE07rnwRmSw1a2OwUEg==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.0.0_1777064035985_0.8112893309295925"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/35be55f02533ac67f5cb1530a8407fef/forinda-kickjs-mcp-5.0.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.0.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-iLZz4WZ1/KNn6l+xvyZWYEkfEEd0aB3lL5lNHF5tsnTD6LUP7pfFzRyUOXn/FomcM8zDE07rnwRmSw1a2OwUEg==",
+     "shasum": "86114d5e3444c88d019186ed8ca398f4670aa85c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD1bA4hwbcU8+TmEAx+PBlfFZvQZqt/0OiTdkz9Rs16jgIhANXSCEAPbN++j5ylIR6itbtogwCnb9fsZaYzxc89cG4T"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.0.0.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.0.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.0.1": {
+    "_from": "file:forinda-kickjs-mcp-5.0.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.0.1",
+    "_integrity": "sha512-DqA98z2BXdC2mA6xUKQ/tM5qB9PCYEEx0nZyMuyXG04iKuwy7XJJt6JgfZ9C6vjraqzU9CXVCHTyKy0YG3Y9dQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.0.1_1777181044817_0.007019423845797013"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/05418d48e5c37e2ba3db03db3604138e/forinda-kickjs-mcp-5.0.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.0.1",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-DqA98z2BXdC2mA6xUKQ/tM5qB9PCYEEx0nZyMuyXG04iKuwy7XJJt6JgfZ9C6vjraqzU9CXVCHTyKy0YG3Y9dQ==",
+     "shasum": "4992e2de44c49f285b65f98b2982fc23bdb1f972",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBIiWNrOvHoB2NjUbD33CMMXjYGt49r65cBmDa75c1tgAiBKz1ZVDQjvLk+NuDQWVyOFJYJnoxi0auZdyT9NBHp+3w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.0.1.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.0.1",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.0.2": {
+    "_from": "file:forinda-kickjs-mcp-5.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.0.2",
+    "_integrity": "sha512-2Lu4By6du+LT2bhLVErah5GnQGlvi2NSIUYKbP3lBSet8SfdFmS8iJB+jwEnogOKAIyHn+duM0KYAj7WLEJ3ew==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.0.2_1777196859899_0.6422962428966685"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/f0a4434a9d1a8850e8e7cfac777b2ea7/forinda-kickjs-mcp-5.0.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.0.2",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-2Lu4By6du+LT2bhLVErah5GnQGlvi2NSIUYKbP3lBSet8SfdFmS8iJB+jwEnogOKAIyHn+duM0KYAj7WLEJ3ew==",
+     "shasum": "cd3d9d220d5794fb094962b9c3a7b915a6f6fd45",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA43TDXQHw/PHcGUA+OjPCioClbkB+a87GdSqNpysR66AiEAx6P0PpPWDxXIfDeeGuMgRoWbBm5BB2dDn6PCGBcoyWE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.0.2.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.0.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.1.0": {
+    "_from": "file:forinda-kickjs-mcp-5.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.1.0",
+    "_integrity": "sha512-a3C878q/jttb7nHUmo7iJvYPhojSXTJl8QOkWzGNPFWBKwWX2gpbZTYoKkbSxQZbPbKFQ4jk6+qRwhdDB+irrw==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.1.0_1777370475753_0.42097339508820153"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/6605ba46239fabd31540b1391b469cf8/forinda-kickjs-mcp-5.1.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.1.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-a3C878q/jttb7nHUmo7iJvYPhojSXTJl8QOkWzGNPFWBKwWX2gpbZTYoKkbSxQZbPbKFQ4jk6+qRwhdDB+irrw==",
+     "shasum": "2eba1c37cb36113478abd6fb2a0bd1e1f5f22366",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDtwhIZsJ+DLhNy9ULdIRTcOLLYf1Jss9f551/neBQrUwIgHyZwyA9GgNo8FXAz804JCrzKbNXvUEfy6Zu1FKjIT4I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.1.0.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.1.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.2.0": {
+    "_from": "file:forinda-kickjs-mcp-5.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.2.0",
+    "_integrity": "sha512-Ui4+UvQySGeSw5QIFHrMAFiMNpjmVaukmzlz1jY1+4QvyfSjDXK6OFQqC5psIgWNZrbZHy9aYR4yawUI7vFWwQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.2.0_1777570858750_0.9045911846675967"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d50677176d7f]",
+     "name": "forinda"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/c23dd7b6279a6522bcafd8d01a16a4b5/forinda-kickjs-mcp-5.2.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.2.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-Ui4+UvQySGeSw5QIFHrMAFiMNpjmVaukmzlz1jY1+4QvyfSjDXK6OFQqC5psIgWNZrbZHy9aYR4yawUI7vFWwQ==",
+     "shasum": "1c62973681d39fd83688c08405124a69cf56769b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC0e6Ne92Jmm+UqLyXzKFgy+z1YnbgkLwsWdXeAcXFYpAIhALgLZITlP00c+YRW/dCJAdQ3EGCui8/tAPBSZ+T8ryx0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.2.0.tgz",
+     "unpackedSize": 63328
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.2.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.2.1": {
+    "_from": "file:forinda-kickjs-mcp-5.2.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.2.1",
+    "_integrity": "sha512-bh/fmLowo7s5NhjBaV8cqMkWpJgtHqUAZBKQkMlKzxC5JlObyvWt7s3Tb9yCLvFCkQppaJKcgVDodhDIlOoC8g==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.2.1_1777879586333_0.04651487668371157"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/e5f122d59e4df84cd260ee932882ffc4/forinda-kickjs-mcp-5.2.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.4.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@swc/core": "^1.15.30",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.6.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.5",
+     "zod": "^4.3.6"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@5.2.1"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-bh/fmLowo7s5NhjBaV8cqMkWpJgtHqUAZBKQkMlKzxC5JlObyvWt7s3Tb9yCLvFCkQppaJKcgVDodhDIlOoC8g==",
+     "shasum": "e9c1da02c83bdf86955cf7c571b6dfb4e9f4c0bb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDLrEU8fmIJjWAltcVXVyJTmMgbQIST+gSmZM3x822xcgIhALVByE04lEuYOBcwHDQL+YpTIlDXLePKh2DglB4OMVdE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.2.1.tgz",
+     "unpackedSize": 54165
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "express",
+     "decorators",
+     "dependency-injection",
+     "backend",
+     "api",
+     "framework",
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "claude",
+     "anthropic",
+     "tool-calling",
+     "agent",
+     "llm",
+     "claude-code",
+     "cursor",
+     "zed",
+     "stdio",
+     "openapi",
+     "@forinda/kickjs",
+     "@forinda/kickjs-mcp",
+     "@forinda/kickjs-ai",
+     "@forinda/kickjs-cli",
+     "@forinda/kickjs-swagger",
+     "@forinda/kickjs-auth",
+     "@forinda/kickjs-testing"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.3.6"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.2.1",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.2.2": {
+    "_from": "file:forinda-kickjs-mcp-5.2.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.2.2",
+    "_integrity": "sha512-dRFsO9nP8EofAFbythc3B4SlaYC/Wy/U76X0SJ93d8GLnweI3N3gQhpYkLioBwYvbnmNcLW03Du4S7tpsLPbzQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.2.2_1779349681537_0.6681512845190127"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/b7e5b66c779d6c1d049ef7b64e53e74d/forinda-kickjs-mcp-5.2.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.12.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.33",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.8.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.6",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@5.2.2"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-dRFsO9nP8EofAFbythc3B4SlaYC/Wy/U76X0SJ93d8GLnweI3N3gQhpYkLioBwYvbnmNcLW03Du4S7tpsLPbzQ==",
+     "shasum": "e02a3dab8c207e365b28894c0a41e38997c580a4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFC5h5KC/q3iB/kcFqQozx9l7WBMk3yyjD7mqT2USSGBAiEA7VXRzaEV8OYZQcA/lmzOa2KCR5JgRJQrXXJ+XAQZH9w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.2.2.tgz",
+     "unpackedSize": 54151
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.2.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "5.2.3": {
+    "_from": "file:forinda-kickjs-mcp-5.2.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@5.2.3",
+    "_integrity": "sha512-6isHH+eUhgMHKYWPojMoHu7MYInT4BvXACsMqszmQla1jezXPDiMrm/6SxnUqWMHmVu3+l01FYMvJlyW7BeflA==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_5.2.3_1779573692320_0.01627382321562454"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/c71c2bf3beb991d4ec4eb334da45e126/forinda-kickjs-mcp-5.2.3.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.13.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.33",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.8.0",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.6",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@5.2.3"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-6isHH+eUhgMHKYWPojMoHu7MYInT4BvXACsMqszmQla1jezXPDiMrm/6SxnUqWMHmVu3+l01FYMvJlyW7BeflA==",
+     "shasum": "a12b8218bdb8b51bbbbccf50dac142b0a577cee7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID7r5JIfabRKepKb0YwRkwBH+xVBeBjQSZyKHr+bz/cLAiEA9gCCvABwicCh6Hd8E4HTqNjl1OazZemtSQZWqvGJ1xY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-5.2.3.tgz",
+     "unpackedSize": 79011
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=2.3.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "5.2.3",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "6.0.0-alpha.0": {
+    "_from": "file:forinda-kickjs-mcp-6.0.0-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@6.0.0-alpha.0",
+    "_integrity": "sha512-2Q1MCOZSw0Y+kS/ilLngu+DXJia4MI1RQa4QZV2QAEEwRNKiP6wNE23MOU9/HY4yvt10sCG7x9zliWFeNfwMdw==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_6.0.0-alpha.0_1780076923559_0.7740837177573676"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/125250e42974e2b30d7696a9fe18cf03/forinda-kickjs-mcp-6.0.0-alpha.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.0-alpha.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.14.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.1",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.7",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@6.0.0-alpha.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-2Q1MCOZSw0Y+kS/ilLngu+DXJia4MI1RQa4QZV2QAEEwRNKiP6wNE23MOU9/HY4yvt10sCG7x9zliWFeNfwMdw==",
+     "shasum": "8fa2355db1d693a562a2f0f75975574faf18a8dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxss8V6abIBUog8akE84Jnsd2vCpMfqzdED6447aUqNQIhAP8FVvzKUsvbUCncBk2XB8XDMqjqsL/tbO7RSFc0/oms"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-6.0.0-alpha.0.tgz",
+     "unpackedSize": 77692
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.14.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "6.0.0-alpha.0",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build",
+       "../schema:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "6.0.1": {
+    "_from": "file:forinda-kickjs-mcp-6.0.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@6.0.1",
+    "_integrity": "sha512-p9G0MQa5JqrL/CGadcauBmdMSX9hMHBYQBwG2M/7Nm2tFHWvU9Xtu/b/Stpmgv5pRxDo2kOHeeC9PUGXp4QbRQ==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_6.0.1_1780105792171_0.11611647604192776"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/b563962e5fad27b2173c3ed5e1a5e4b1/forinda-kickjs-mcp-6.0.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.1",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.14.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.1",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.7",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@6.0.1"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-p9G0MQa5JqrL/CGadcauBmdMSX9hMHBYQBwG2M/7Nm2tFHWvU9Xtu/b/Stpmgv5pRxDo2kOHeeC9PUGXp4QbRQ==",
+     "shasum": "601dfbd344f602ed1674f3fdb24d785e733184e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH2EqPazBBF/jAiiJFSr8QgTFIwYz3tRSUreaKh1NFsCAiEA6M94DARnPGsQP0NzQyrpMzKTKBpd9G2oxtMjI+RfT1U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-6.0.1.tgz",
+     "unpackedSize": 77660
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.14.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "6.0.1",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build",
+       "../schema:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "6.0.2": {
+    "_from": "file:forinda-kickjs-mcp-6.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@6.0.2",
+    "_integrity": "sha512-1cy0lFkTu/IDmfycNBoQ0ZeNBCOQGC9iFDl3rMhLfQaAYLIxVMogpy6QRDL8Fimi5IGzJz5OQLnuZ5/BwWskxA==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_6.0.2_1780109889334_0.13139605720258074"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/e3837bb976452bab84e9c984490aefad/forinda-kickjs-mcp-6.0.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.2",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.14.2",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.1",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.7",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@6.0.2"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-1cy0lFkTu/IDmfycNBoQ0ZeNBCOQGC9iFDl3rMhLfQaAYLIxVMogpy6QRDL8Fimi5IGzJz5OQLnuZ5/BwWskxA==",
+     "shasum": "913bf9752ce8e505bd71a388fde19622963f43a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH7IImqL7CG3yqfkP60heYddaxoM8ROgYdT2XftKbIXSAiEA/RHEi3vpN9e9Ds+4cnaO8rvKKRwAfDfUfcvbcxjQQ6Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-6.0.2.tgz",
+     "unpackedSize": 77660
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.14.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "wireit",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "6.0.2",
+    "wireit": {
+     "build": {
+      "command": "tsdown",
+      "dependencies": [
+       "../kickjs:build",
+       "../schema:build"
+      ],
+      "files": [
+       "src/**/*.ts",
+       "tsdown.config.ts",
+       "tsconfig.json",
+       "package.json"
+      ],
+      "output": [
+       "dist/**"
+      ]
+     }
+    }
+   },
+   "7.0.0": {
+    "_from": "file:forinda-kickjs-mcp-7.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@7.0.0",
+    "_integrity": "sha512-V+QlRJICqYXlDvpkTL38BJpLREoMIN4saWOWIl92od8Pj8U+6OIhgYo8846XMOh8veKCtf6QExHYZBnWRtiG3Q==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_7.0.0_1781435013771_0.9745243192114466"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/5f68707adda7488fa71a88f546cb40b1/forinda-kickjs-mcp-7.0.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.2",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.18.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.2",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.8",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@7.0.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-V+QlRJICqYXlDvpkTL38BJpLREoMIN4saWOWIl92od8Pj8U+6OIhgYo8846XMOh8veKCtf6QExHYZBnWRtiG3Q==",
+     "shasum": "31781a1500281112e6b72111f962418c7c51837b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFYTWPyXfVt0/6BFmzIyY7Ik2nRNr5QHNBqNtszlHb7+AiBRfvKGzEnkNzQ1t6lxWzP8eAbme+BD/BPXb1MWtu81CQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-7.0.0.tgz",
+     "unpackedSize": 78265
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.18.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "7.0.0"
+   },
+   "7.0.0-alpha.0": {
+    "_from": "file:forinda-kickjs-mcp-7.0.0-alpha.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@7.0.0-alpha.0",
+    "_integrity": "sha512-dElhY3cTBN2z5JslYLHYh8XOMMe7tpLEmtaGvqW3eIlctVsxtV8tkjzl9vIpeMl78UoUaqDRnEQazAz+V/7WCw==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_7.0.0-alpha.0_1781426561980_0.6871156888039509"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/d05dd6389569108d7273ffe0bc9cf14a/forinda-kickjs-mcp-7.0.0-alpha.0.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.2",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "5.18.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.2",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.8",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@7.0.0-alpha.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-dElhY3cTBN2z5JslYLHYh8XOMMe7tpLEmtaGvqW3eIlctVsxtV8tkjzl9vIpeMl78UoUaqDRnEQazAz+V/7WCw==",
+     "shasum": "784f17435a85e7b44bee77ceb740800cfd594ba9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIALpFkffz+zY9UFAMAhACSpsZZwzX+lFJcoKdvq3g13mAiEA9ejmN3jdVQvqJ+vTsXRKjESjfdVK8jz6ffqEXca9Wnk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-7.0.0-alpha.0.tgz",
+     "unpackedSize": 78297
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://forinda.github.io/kick-js/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.18.0-alpha.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "7.0.0-alpha.0"
+   },
+   "7.0.1": {
+    "_from": "file:forinda-kickjs-mcp-7.0.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@7.0.1",
+    "_integrity": "sha512-evH+uaGSczjg8YfeQOln+fftn/2Adq1baDwMve2yvUJ2TTL++rzmjgjp1Yzun0XBpNvu9Ks2HQjjCtpoeaVR8w==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_7.0.1_1783240053693_0.14577616045957886"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/tmp/c786ed0579c9ac0c03419f1ce2ca5429/forinda-kickjs-mcp-7.0.1.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.3",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "6.1.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@swc/core": "^1.15.40",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.2",
+     "@types/supertest": "^7.2.0",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^6.0.3",
+     "unplugin-swc": "^1.5.9",
+     "vitest": "^4.1.8",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@7.0.1"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-evH+uaGSczjg8YfeQOln+fftn/2Adq1baDwMve2yvUJ2TTL++rzmjgjp1Yzun0XBpNvu9Ks2HQjjCtpoeaVR8w==",
+     "shasum": "9d7b47bb3362e5d84c594639c77bc8ffe2f8ee48",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFKMEKJ7bZi9BX9jppiAs1f1URDjZEKMhMR+yJOZ9T+FAiB95m33afEKVEoaFBv/oOrBngc95VeijITo0HZ63Gvlwg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-7.0.1.tgz",
+     "unpackedSize": 78204
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://kickjs.app/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.18.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.4.3"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "7.0.1"
+   },
+   "7.0.2": {
+    "_from": "file:forinda-kickjs-mcp-7.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@forinda/kickjs-mcp@7.0.2",
+    "_integrity": "sha512-AvSeXHg/WmlyoEeaFkIug/ZWKRegWWM70MDdn1nIDop0mI7HujJWlNkH3Clu4rFAyFZwM80PcuS/9ZX4kP1StA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/kickjs-mcp_7.0.2_1788238759937_0.7354098065094457"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4a30ad21-eaae-4b85-bacd-8aecc0cf1814"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/tmp/b66740c579f7e86544795dafc497008c/forinda-kickjs-mcp-7.0.2.tgz",
+    "author": {
+     "name": "Felix Orinda"
+    },
+    "bugs": {
+     "url": "https://github.com/forinda/kick-js/issues"
+    },
+    "dependencies": {
+     "@forinda/kickjs-schema": "0.1.4",
+     "reflect-metadata": "^0.2.2"
+    },
+    "description": "Model Context Protocol server adapter for KickJS \u2014 expose @Controller endpoints as MCP tools",
+    "devDependencies": {
+     "@forinda/kickjs": "8.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@swc/core": "^1.16.1",
+     "@types/express": "^5.0.6",
+     "@types/node": "^26.4.0",
+     "@types/supertest": "^7.2.1",
+     "express": "^5.1.0",
+     "supertest": "^7.2.2",
+     "typescript": "^7.0.2",
+     "unplugin-swc": "^1.5.11",
+     "vitest": "^4.1.11",
+     "zod": "^4.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@forinda%2fkickjs-mcp@7.0.2"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-AvSeXHg/WmlyoEeaFkIug/ZWKRegWWM70MDdn1nIDop0mI7HujJWlNkH3Clu4rFAyFZwM80PcuS/9ZX4kP1StA==",
+     "shasum": "3107ddc48e52774e72572d6990859202650afcdc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCEMNcXCDkRbkEz7bsvrD1dVMoQAaZRwKHItzY/XtTbTAIgWy4vJ0z1e9lLive5VA0lzPV6ontnu/zVRWTTdC71rZs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@forinda/kickjs-mcp/-/kickjs-mcp-7.0.2.tgz",
+     "unpackedSize": 59013
+    },
+    "engines": {
+     "node": ">=20.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+     }
+    },
+    "homepage": "https://kickjs.app/",
+    "keywords": [
+     "kickjs",
+     "nodejs",
+     "typescript",
+     "decorator-driven",
+     "mcp",
+     "model-context-protocol",
+     "claude-tools",
+     "claude-code",
+     "anthropic",
+     "tool-server",
+     "tool-calling",
+     "stdio",
+     "cursor",
+     "zed"
+    ],
+    "license": "MIT",
+    "main": "dist/index.mjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d50677176d7f]",
+      "name": "forinda"
+     }
+    ],
+    "name": "@forinda/kickjs-mcp",
+    "peerDependencies": {
+     "@forinda/kickjs": ">=5.18.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "zod": "^4.5.1"
+    },
+    "peerDependenciesMeta": {
+     "@modelcontextprotocol/sdk": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/forinda/kick-js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "clean": "rm -rf dist .wireit",
+     "dev": "tsdown --watch",
+     "test": "vitest run --passWithNoTests",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.mts",
+    "version": "7.0.2"
+   }
+  }
+ },
+ "name": "@forinda/kickjs-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@forinda%2Fkickjs-mcp"
+}

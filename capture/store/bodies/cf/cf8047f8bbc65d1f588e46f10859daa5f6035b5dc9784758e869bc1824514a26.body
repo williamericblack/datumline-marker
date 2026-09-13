@@ -1,0 +1,1335 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.11.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6bd3c65a3955]",
+    "name": "orbitaltec"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.10.0",
+   "0.11.0",
+   "0.11.1",
+   "0.2.0",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.4.0",
+   "0.5.0",
+   "0.5.1",
+   "0.6.0",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0",
+   "0.9.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@comando.one/mcp-server",
+  "_rev": "17-f64bb1a559e8806920a2c221e26a8c1c",
+  "author": {
+   "email": "[redacted-email:9fe949ce70dc]",
+   "name": "Orbital Tecnologia e Desenvolvimento LTDA",
+   "url": "https://orbitaldev.com.br"
+  },
+  "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+  "dist-tags": {
+   "latest": "0.11.1"
+  },
+  "homepage": "https://comando.one",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "comando",
+   "erp",
+   "claude"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6bd3c65a3955]",
+    "name": "orbitaltec"
+   }
+  ],
+  "name": "@comando.one/mcp-server",
+  "readme": "# @comando.one/mcp-server\n\nServidor **MCP (Model Context Protocol)** para a API p\u00fablica do **Comando1**. Conecte o Claude (Desktop, Code ou qualquer cliente MCP) ao seu ERP e **opere tudo por linguagem natural**: clientes, propostas, contratos, faturas, cobran\u00e7as Pix/boleto, NFS-e, contas a pagar, financeiro e webhooks.\n\n## Instala\u00e7\u00e3o r\u00e1pida (Claude Desktop)\n\nAdicione ao seu `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"comando\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@comando.one/mcp-server\"],\n      \"env\": {\n        \"COMANDO_API_KEY\": \"cmd_live_...\",\n        \"COMANDO_COMPANY_ID\": \"\"\n      }\n    }\n  }\n}\n```\n\nGere sua chave em **Configura\u00e7\u00f5es \u2192 API Keys** no app. Reinicie o Claude Desktop e pronto.\n\n## Alternativa: MCP remoto (sem instalar nada)\n\nAl\u00e9m deste pacote stdio, existe um **endpoint MCP remoto (streaming)** em `https://api.comando.one/mcp` (transporte MCP Streamable HTTP). Para clientes com conector remoto:\n\n```json\n{\n  \"mcpServers\": {\n    \"comando-remoto\": {\n      \"type\": \"http\",\n      \"url\": \"https://api.comando.one/mcp\",\n      \"headers\": { \"Authorization\": \"Bearer cmd_live_...\" }\n    }\n  }\n}\n```\n\nAmbos exp\u00f5em o **mesmo conjunto de ferramentas** (131 curadas + `lookups` + `comando_request` = cobertura total da API).\n\n## Vari\u00e1veis de ambiente\n\n| Vari\u00e1vel | Obrigat\u00f3ria | Padr\u00e3o | Descri\u00e7\u00e3o |\n|---|---|---|---|\n| `COMANDO_API_KEY` | sim | \u2014 | Chave `cmd_live_...` |\n| `COMANDO_BASE_URL` | n\u00e3o | `https://api.comando.one/v1` | Base da API |\n| `COMANDO_COMPANY_ID` | n\u00e3o | empresa padr\u00e3o da chave | Empresa default (`X-Company-Id`) |\n\n## Como funciona\n\n- **136 tools curadas** (gerados a partir do OpenAPI can\u00f4nico, zero drift) cobrindo as opera\u00e7\u00f5es de maior valor \u2014 `customers_list`, `invoices_create`/`invoices_delete`, `charges_create`, `nfse_emit`, `payouts_create`, `contracts_pause`/`contracts_resume`, `service_categories_create`, `reports_aging_actions`/`reports_cashflow_forecast`, `audit_timeline`, `documents_analyze` (l\u00ea boleto/guia/NF anexada e extrai valor, vencimento e emitente), `cost_centers_create`, `invoices_settle_charge` (d\u00e1 baixa numa parcela \u2014 registra o recebimento), etc.\n- **`comando_request`** \u2014 escape hatch gen\u00e9rico (`method`, `path`, `query`, `body`) que cobre 100% dos endpoints restantes.\n- **`lookups`** \u2014 cat\u00e1logos read-only (centros de custo, condi\u00e7\u00f5es/m\u00e9todos de pagamento, naturezas, contas banc\u00e1rias).\n- **`whoami`** \u2014 identidade, empresas acess\u00edveis e scopes da chave.\n- **Nomes em portugu\u00eas** \u2014 cada tool viaja com `title` (e `annotations.title`) vindo do\n  `summary` da OpenAPI, ent\u00e3o o cliente mostra \"Listar clientes\" em vez de \"Customers list\".\n  O servidor tamb\u00e9m se identifica com `title` (\"Comando1\"), `description`, `websiteUrl` e\n  `icons` (SEP-973). Clientes que ainda n\u00e3o leem esses campos caem no nome t\u00e9cnico sem quebrar.\n\n### Seguran\u00e7a\n\n- **Scope-gating**: ao iniciar, o servidor chama `/me` e **s\u00f3 exp\u00f5e as tools cujos scopes a chave possui**.\n- **A\u00e7\u00f5es destrutivas** (`*_delete`, `*_cancel`, `charges_refund`, `payouts_create`) exigem `confirm: true` para executar e aceitam `dry_run: true` para pr\u00e9-visualizar a requisi\u00e7\u00e3o sem envi\u00e1-la.\n- **Idempot\u00eancia** autom\u00e1tica em POSTs (evita cobran\u00e7a/pagamento duplicado); aceita `idempotency_key` expl\u00edcito.\n- **Multi-empresa**: qualquer tool aceita `company_id` para sobrescrever a empresa por chamada.\n\n## Desenvolvimento\n\n```bash\nbun install\nnpm run dev        # roda via tsx (stdio)\nnpm test           # unit (sem rede) + smoke (live, se COMANDO_API_KEY estiver setado)\nnpm run build      # bundle self-contained em dist/\n```\n\n### Inspecionar com o MCP Inspector\n\n```bash\nnpm run build\nCOMANDO_API_KEY=cmd_live_... npx @modelcontextprotocol/inspector node dist/index.js\n```\n\n## Licen\u00e7a\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-06-08T16:49:38.216Z",
+   "0.1.1": "2026-06-08T18:54:29.378Z",
+   "0.10.0": "2026-09-01T22:45:47.464Z",
+   "0.11.0": "2026-09-01T23:13:53.967Z",
+   "0.11.1": "2026-09-11T00:17:21.263Z",
+   "0.2.0": "2026-08-03T15:36:31.896Z",
+   "0.3.0": "2026-08-14T19:40:03.434Z",
+   "0.3.1": "2026-08-21T11:05:47.042Z",
+   "0.3.2": "2026-08-21T17:06:18.990Z",
+   "0.4.0": "2026-08-24T02:04:43.737Z",
+   "0.5.0": "2026-08-26T13:35:28.398Z",
+   "0.5.1": "2026-08-28T11:58:08.002Z",
+   "0.6.0": "2026-08-31T12:16:25.131Z",
+   "0.7.0": "2026-08-31T12:58:34.120Z",
+   "0.8.0": "2026-09-01T02:26:23.766Z",
+   "0.9.0": "2026-09-01T20:40:55.708Z",
+   "0.9.1": "2026-09-01T21:04:50.891Z",
+   "created": "2026-06-08T16:49:37.967Z",
+   "modified": "2026-09-11T00:17:21.437Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.1.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1780937378089_0.9173570463555003"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-9Xwu+6epOritPa6E/4RQoKoxvF8c3vDCrVjdiUmYlDExrNsHPtjKQWyPTSkwseW7wn1p7d9z3jaiQSWijaPFVQ==",
+     "shasum": "0d33b21566835c0f0d55337ce332268cdb36b7f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIErna1xyDNTQsggGoHg7GJ3oGmldBts1Vu3oV0UcCTpdAiAXVmI0ETbFyQGukGs5IUbcBNywzTnqyuIsD6myYYMH1Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 136863
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "7dca789366926651478a9fed34e568959be1137b",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.1.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1780944869203_0.933727916840875"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-dUXdt9VNh9GFJHFazSt44nT2n/nnMvSygwo+cUcmy1O0u61UP59KUCV/qiBYmf2PBzMn+iSbkIggTER5ObeLHw==",
+     "shasum": "27b806453b99baf81b1a1193011733bc21f15733",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCU40kwiA5BzFhQit/0JdKdN/3oMoKhvNlNngE9GRtwHQIhANIksGS9udtEjbpw6YQpkzyrRDKazsgjVwCYL9yQlCP/"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 137411
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "7dca789366926651478a9fed34e568959be1137b",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.10.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1788302747322_0.3305543463264682"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-EsfEGouef9Bkztf+/yIshR6OAH+VG7ZrvK2touEFQnf5lYj8hvnKAcXdbPwTbV0GDUsKn9i6u61jB/gIK80lMw==",
+     "shasum": "26cf91d587d8a3d5e808a4338e013669c7e95b89",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDzOcAgDdOhGyce7WnoFD6t/Pcjh4Xk0B5qSah9sQ12mQIhALRdX4pW7FaSHVbft95DK3xLSSJIZfxeYekjonQOhTaA"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 276167
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.11.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1788304433819_0.3854019575016332"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-PuYhHvvVjVmSaSQkqrntgZO4i/AC44s/PHTcX7QQ+9gNd96MP6UE6pHz1HdzqMMSeOjvQTpH9lDaJBC21TG1KQ==",
+     "shasum": "e99c1320d07a950b4ba489a54b281723b63812c1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC3lwVzl5Px7JJXDMiJ2ttGzOJ22YNjdAc1hSvYauUpYQIhAMQ+u65kIUoUHVnH/p/ibdAZLgloaNwnXdoLX0GUNw8d"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 279175
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.11.0"
+   },
+   "0.11.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.11.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.1_1789085841062_0.5197153119915741"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "email": "[redacted-email:9fe949ce70dc]",
+     "name": "Orbital Tecnologia e Desenvolvimento LTDA",
+     "url": "https://orbitaldev.com.br"
+    },
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-hYi3GltM268G3E92iVRDqY6tZEF97A3/63ugXoZksBy8+F0cMt0kr721WZaLU6vXsAxcQV1WQT+QzzEO/xEVLw==",
+     "shasum": "fe6bdc23fbaf36e1b888b8cf349854f5ab2c3e7f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC3WifQWcBt9qCAmIVRCm4JdBWIM11wuvl15/vw6SNVyAIhAJ1hkntYYQW1r/43BV8Eq8MvXASmYL7MlnqTKzzRzFHA"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.11.1.tgz",
+     "unpackedSize": 284198
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "df6dd38ec673ff760a910ff25fab32418b755608",
+    "homepage": "https://comando.one",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.11.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.2.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1785771391758_0.283878443119288"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-EBjCoRlTF2uG7kwnm0Q0iAmGR+zVQopAKs82Y+J/9Q3d9G3xY7O4eRWbskOKxj2K4VDw7tvhpTiec/5CmnnDhA==",
+     "shasum": "caed0888666cddecd73237c42d22001ad0fc0b30",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHqJ+V6rc90PBhHRoiMq7W21NIwjzqIIEmpENPaHY45JAiB9ajJcq6NzPIWJGYpCOxPaQdEis3hu1gklem8J0hkI4A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 183397
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "e54bda13a42f81b9988260324f3145d43e9095c9",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.3.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1786736403287_0.6011357815300735"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-dsRQ2/4rgOwTU3fsSGkEMBf92hTHHetDo2u/lC7hzW8YSm0yFgCbiKt2Y8vNiaShvBQC39Fg3j159hz6Qbh/hw==",
+     "shasum": "4347427aa5849c8daa716ff401740d69414b2663",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCG0LsUIpTaSlLVZOE2IzbTU7GqjlqtTETO4dNgsQ0+NwIhALAIw1IylZeVFUPA3KbhO9ka1+lz4ZCcOr77BmR1qJJv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 188012
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "b32d267342674f04ac4c970f5089f6ad623d2939",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.3.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.1_1787310346900_0.30672742117914353"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-7jHX2ZxKc+byuUXY82cdS2s8frepVBGZVmyBZMi1H0OBOBQTWIbii/K+9mnWN4GfuRlfRXKAkIpvkxlLwo+3Tg==",
+     "shasum": "1c19f783bb5c340a7db9a8b918afb1248141f9c5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC5tg7VjQgzQBbF6dSNqSnuTIBKamPs6ljVqhXq6Ru6rgIhAMgI5CswILz23FplQR4MdDKzTY6VhzAz6TXZ0j7pjGy7"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.3.1.tgz",
+     "unpackedSize": 188405
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "45ebfc659bf8a9508d3f4e4708b12a0e097c76f9",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.3.2",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.2_1787331978855_0.7070471094750006"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-n/VQr3GoiwwTdy7FljTW9ZUCPXC0zcOybazN/uAa3ChhzUq2zPGoiuZ4hdhUbCAbw79925uQo9IVlSjbPDHg6A==",
+     "shasum": "7f98664c6775617ba6cdb5081c0892f6139836da",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF+9Nc1K7M/JcSuDF9Wxjv7ylwE9DtMHfPhg/Cp0IVVeAiAgjlLpkAQyvjm6zXzimb210Q8Z9Bi36aT5fRygBGvkoQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.3.2.tgz",
+     "unpackedSize": 191291
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "6f06ee3827c5917e8339ba3b2cb62e583a6353fe",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.2"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.4.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1787537083599_0.08662587270160871"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-seJzcdQiv+olcJP9u89z0XckCV11c5bwnqrWFUqmRWSjLtUfP2kci327e32NdCPhjgKeeehoiOT1mOu6Ttokag==",
+     "shasum": "901466b23d3513f1c7c59ff04221a963a672a001",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD1AKA21s2rsqa3W6pOwczUO4/Rbhkg/VR2BPWu7k6yOgIgAmMEfQKrRCSmdbZSiXzUvBA4JVkYrACodlJ1pC6IkjY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 193693
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "f3cf82c3dbc5f9f7ecd7ce31c8c61e4ad1cc3bed",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.5.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1787751328248_0.7313808263329027"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-VFs7T/Om6xQZR6oVR0pP5RKvVPgd/OqH8OlMJy/9w/bpLFyZxpnHkDeDfw4f6jCzJfLUUdn0eQkMKmzNNU71PQ==",
+     "shasum": "a085abf43ca72e3ead30f9bc4b217d5589e0c43f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD4XdcuC6UtYPf8cR5QbVCjkjEbICiaDYMIYeau3K3cWwIgETIMSVq16sCQsV8M/ymT5BxLtZC+8QvTt0/3qtY6GMM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 220892
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "5b8209281c71b7dcfb513bdfc2dfc3125fb328fa",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.5.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.1_1787918287859_0.2462539051978625"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-mlkH1g/CEI5hPTmMeboBn4gMGvNs35zUcAVOsDW88HVtCl3sMmVsmEpVrMI4UN60uGEYgD+v1fGB7DmRltW+Ig==",
+     "shasum": "7453214690c2ab2ec9558d3412121fb775b92568",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFnoe8zSJYGlZM6YHwptli9JNS4MgjkjNJkDYhQanC5IAiB2I4F1wNW6m8zprsdXCLXxJQQcQ6S2LYFJupdGpbakkw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.5.1.tgz",
+     "unpackedSize": 222716
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "55dc9ecf8d09485195c065581e6a90ec21259f38",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.1"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.6.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1788178584989_0.360508033338401"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-GmtNCMwmRl5teQeIaFr1VCKpwzmB3pSmbgkjQDlzRFhVrWojjJ/TDgw2kx0mcMhWQscCPSCsxEkKO4rBeYsouw==",
+     "shasum": "fe154969170b8d5d44adb5f3a478632893a4db6e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAW8ugm2l+asxPH6nbij6oZ5OwP7oIwrV4oxWru4WcywAiEAnL5nPgiOlLLSjShCN2MDY1vGLMw6PB0ZepEnfO8s8ss="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 231244
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "d515f1db6faa4cb0b5466f272cc14c89736c4580",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.7.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1788181113991_0.15426734251626484"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando.One \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-aAFlKKeM8lX7OAw7YKOPJcRKiE77cPblg750CzAXcIx+eH+cH+w7yRkR4OQ0zMa9pyqqkx7BGs/7rXUjqLuJPA==",
+     "shasum": "693bc21df8c7088179fc1db9a1a7008039120234",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC/0/bZWg8MUqIzRglnYXIyzXkH+KT2B/1JWcA1hSUHUQIgW51ppski/J38QLNOLzuBSSbt5De6sGGxQJM5sVGQOA8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 235333
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a53e2fec628922d257a0f0b6c822957ddab254c3",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.8.0",
+    "_nodeVersion": "26.7.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1788229583618_0.05754032663596975"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-qLTQ2mXEk9QpmdQAljR3pAVRzZBnQcQDdWVjJn3mNUfQaN5zJMT3PuTg8WQHEzXl0EZdwjISMkSvIav2TR6cfg==",
+     "shasum": "17356d057feafeee6fc39cc0e4ae65c67230bcde",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICPah/f6Q2b5+Ljv+Wk2Ja0WhxhPY67Q8EOrd7E+vKNYAiEAl4bhEp+4d/rr96lhfSpdUq/lK8v2hepakvuXK3YfehA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 235312
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "70eb1351d7b9e81b0c3e94c1d9f619072b080f05",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.9.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1788295255346_0.10904398786655989"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-zUfE5gIM0+6dePdcqHK3Mlb87E31JEI55lUjKhbMx4dg+ReZM272nSBZ1nTdKRi0fJmFCssl6nI/vEZl+tiUoQ==",
+     "shasum": "8723562ff3040d59501bd3e233e58cb8b4d2fc26",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDt35+ynTQBnC57z4XCgkQOVcYuX/3PR2MGCcKWIB1CsAiEA8davpHSu2X8qhDOhJnnh9f10C/vBZx7+yApVa5cQ8+U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 265244
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@comando.one/mcp-server@0.9.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.1_1788296690755_0.22104144830882766"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6bd3c65a3955]",
+     "name": "orbitaltec"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "comando-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.17.2"
+    },
+    "description": "Servidor MCP (Model Context Protocol) para a API p\u00fablica do Comando1 \u2014 opere seu ERP por linguagem natural.",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "tsup": "^8.3.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-1uPn2Dfr7B5QXdLBjSLxpORlivvVxpDnGW+IKuh84W9THHG07Q1k9AuDDZuzwQR91k4MIgxGcurKjTNoXxInVQ==",
+     "shasum": "b80ddbebcdbb4fedbd3b60922ba43363b5b71023",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBtkpekcxQmtRXJlePk1t9B3ysKjyArYrXY6MFIHD2yOAiEAknnzZnc8j1jUyJjvtd2h+hCfOKjYExvFzKKrR2jZRnc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@comando.one/mcp-server/-/mcp-server-0.9.1.tgz",
+     "unpackedSize": 266928
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "f2fb2db4f7d26361fcb5bc8edd63034846e87f10",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "comando",
+     "erp",
+     "claude"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6bd3c65a3955]",
+      "name": "orbitaltec"
+     }
+    ],
+    "name": "@comando.one/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsup",
+     "dev": "tsx src/index.ts",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --import tsx --test test/*.test.ts",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.9.1"
+   }
+  }
+ },
+ "name": "@comando.one/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@comando.one%2Fmcp-server"
+}

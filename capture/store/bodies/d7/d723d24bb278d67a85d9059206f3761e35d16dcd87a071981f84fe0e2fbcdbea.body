@@ -1,0 +1,161 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:c7c3930c23a0]",
+    "name": "omar-dulaimi"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@drzl/generator-mcp",
+  "_rev": "1-19ede3bad2021e3c239c7ce108a3c783",
+  "description": "Generate Model Context Protocol tools from a Drizzle schema, one module per table, so a language model is told each column's real bounds before it writes a row rather than after the database refuses one.",
+  "dist-tags": {
+   "latest": "0.1.0"
+  },
+  "keywords": [
+   "drizzle",
+   "drizzle-orm",
+   "mcp",
+   "modelcontextprotocol",
+   "codegen",
+   "llm",
+   "standard-schema"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:c7c3930c23a0]",
+    "name": "omar-dulaimi"
+   }
+  ],
+  "name": "@drzl/generator-mcp",
+  "readme": "# @drzl/generator-mcp\n\nGenerate a [Model Context Protocol](https://modelcontextprotocol.io) server from a Drizzle schema:\none tool module per table, five tools per table, and the table's `CHECK` constraints reaching the\nmodel as bounds on the arguments it is allowed to write.\n\n## The reason this exists\n\nAn MCP tool hands a model a schema and the model writes arguments against it. Every other way of\nbuilding one of these from a Drizzle schema derives that schema from the column _types_, so the\nmodel learns that `age` is an integer and nothing else. It guesses a value, the write reaches the\ndatabase, and the database refuses it.\n\nDRZL parses the table's `CHECK` constraints, so the same tool advertises:\n\n```json\n{ \"type\": \"integer\", \"minimum\": 18, \"maximum\": 120 }\n```\n\nand the model never writes the invalid row. A `CHECK` that compares two columns cannot be a\nkeyword in any schema language, so those are named in the tool's description instead, which is the\nonly place a model can learn they exist.\n\n## Install\n\n```bash\nnpm install -D @drzl/generator-mcp\nnpm install @modelcontextprotocol/server\n```\n\nAdd it to `drzl.config.ts`:\n\n```ts\nexport default {\n  schema: './src/db/schema.ts',\n  generators: [\n    { kind: 'zod', path: './src/validators/zod' },\n    {\n      kind: 'mcp',\n      path: './src/mcp',\n      validation: { useShared: true, importPath: 'src/validators/zod' },\n    },\n  ],\n};\n```\n\n`useShared` is what carries the constraints. Without it the tool schemas are emitted inline from\nthe column types alone, which still runs and still validates, but the bounds that make this\ngenerator worth having come from the validation generator's output.\n\n## What it emits\n\nPer table, into `path`:\n\n| Tool             | Arguments                | Annotations                             |\n| ---------------- | ------------------------ | --------------------------------------- |\n| `users_list`     | `limit`, `offset`        | `readOnlyHint`, `idempotentHint`        |\n| `users_get`      | the primary key          | `readOnlyHint`, `idempotentHint`        |\n| `users_create`   | the insert schema        | `destructiveHint: false`                |\n| `users_update`   | `{ where, data }`        | `idempotentHint`                        |\n| `users_delete`   | the primary key          | `destructiveHint`, `idempotentHint`     |\n\nA table with no primary key keeps `list` and `create` and loses the three that address a row. A\nmaterialized view keeps `list` and `get`, because the database refuses every write to one.\n\nPlus `index.ts`, which exports `createServer()` and `registerAllTools(server)`, and `stdio.ts`, a\nrunnable entry point an MCP client's `command` can point at:\n\n```json\n{\n  \"mcpServers\": {\n    \"shop\": { \"command\": \"node\", \"args\": [\"./dist/mcp/stdio.js\"] }\n  }\n}\n```\n\nThe handlers are stubs. `list` and `get` return empty; `create`, `update` and `delete` throw\n`Not implemented`. Filling them in is the part only you can write, and the row type each one is\nannotated with is a compile error until the shape is right.\n\n## Which SDK\n\nTwo generations exist and they are different packages with different rules. Measured on\n2026-08-11 by running both:\n\n| | `@modelcontextprotocol/sdk` (v1) | `@modelcontextprotocol/server` (v2) |\n| --- | --- | --- |\n| zod | works | works |\n| arktype | throws at registration | works |\n| valibot | throws at registration | works, through `toStandardJsonSchema` |\n\nv1 types `inputSchema` as a zod schema or raw shape, so anything else fails with\n`inputSchema must be a Zod schema or raw shape, received an unrecognized object` when the server\nstarts. v2 takes any Standard Schema that also carries `~standard.jsonSchema`.\n\n`sdk: 'v2'` is the default for that reason. `sdk: 'v1'` is available for a project already on it,\nand the generator refuses `v1` with a non-zod library rather than emitting a server that dies on\nstartup.\n\nUnder valibot the emitted tools wrap each schema in `toStandardJsonSchema` from\n`@valibot/to-json-schema`, because valibot's `~standard` carries no `jsonSchema` property. Without\nthe wrapper the tool registers cleanly and advertises no arguments at all, which is a failure\nnothing reports.\n\n## Options\n\n| Option          | Default   | What it does                                             |\n| --------------- | --------- | -------------------------------------------------------- |\n| `path`          | `outDir`  | Where the modules are written                             |\n| `sdk`           | `'v2'`    | Which SDK generation the emitted code imports             |\n| `serverName`    | `'drzl'`  | The name reported at initialize                           |\n| `serverVersion` | `'0.1.0'` | The version reported at initialize                        |\n| `stdio`         | `true`    | Also emit the runnable stdio entry point                  |\n| `naming.toolPrefix` | none  | Placed in front of every tool name: `db.users_list`       |\n| `naming.routerSuffix` | none | Appended to each module name and registrar               |\n| `naming.procedureCase` | none | Casing for file names, identifiers and tool-name stems   |\n\n## Licence\n\nApache-2.0. Generated output is yours under your own project's licence.\n",
+  "readmeFilename": "",
+  "repository": {
+   "directory": "packages/generator-mcp",
+   "type": "git",
+   "url": "https://github.com/use-drzl/drzl"
+  },
+  "time": {
+   "0.1.0": "2026-08-11T12:06:48.772Z",
+   "created": "2026-08-11T12:06:48.382Z",
+   "modified": "2026-08-11T12:06:49.132Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@drzl/generator-mcp@0.1.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/generator-mcp_0.1.0_1786450008627_0.40339775183195736"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:c7c3930c23a0]",
+     "name": "omar-dulaimi"
+    },
+    "dependencies": {
+     "@drzl/analyzer": "^1.21.5",
+     "@drzl/validation-core": "^3.22.6"
+    },
+    "description": "Generate Model Context Protocol tools from a Drizzle schema, one module per table, so a language model is told each column's real bounds before it writes a row rather than after the database refuses one.",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@valibot/to-json-schema": "^1.4.0",
+     "arktype": "^2.1.29",
+     "tsup": "^8.5.1",
+     "typescript": "^5.9.3",
+     "valibot": "^1.1.0",
+     "zod": "^4.4.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-5vZxjjvwcugrjpo3CCi3VhBZW7OtrBiCehhfQqSA9I75Q822m7DrC08P5JYf13jiKUW/eWn31x5T7Rznl9iczA==",
+     "shasum": "823fb4f116217cbea8352c5f7d804f7d9f81524f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDFpk1yeKxyGhKwGaKTNI8eNbAF/cV2kPV4mWmQYrGwRwIgEjTK0esXe1O/rBbIbNQJ0R7tHoWQsyQ/yyy87mxyzg0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@drzl/generator-mcp/-/generator-mcp-0.1.0.tgz",
+     "unpackedSize": 71779
+    },
+    "engines": {
+     "node": ">=18.17.0"
+    },
+    "exports": {
+     ".": {
+      "import": {
+       "default": "./dist/index.js",
+       "types": "./dist/index.d.ts"
+      },
+      "require": {
+       "default": "./dist/index.cjs",
+       "types": "./dist/index.d.cts"
+      }
+     }
+    },
+    "funding": {
+     "type": "github",
+     "url": "https://github.com/sponsors/omar-dulaimi"
+    },
+    "keywords": [
+     "drizzle",
+     "drizzle-orm",
+     "mcp",
+     "modelcontextprotocol",
+     "codegen",
+     "llm",
+     "standard-schema"
+    ],
+    "license": "Apache-2.0",
+    "main": "./dist/index.cjs",
+    "maintainers": [
+     {
+      "email": "[redacted-email:c7c3930c23a0]",
+      "name": "omar-dulaimi"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@drzl/generator-mcp",
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true,
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "directory": "packages/generator-mcp",
+     "type": "git",
+     "url": "https://github.com/use-drzl/drzl"
+    },
+    "scripts": {
+     "build": "tsup src/index.ts --dts --format esm,cjs --external prettier --clean",
+     "lint": "eslint . --ext .ts",
+     "test": "vitest run --testTimeout=20000"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   }
+  }
+ },
+ "name": "@drzl/generator-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@drzl%2Fgenerator-mcp"
+}

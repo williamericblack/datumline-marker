@@ -1,0 +1,381 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d712aada673c]",
+    "name": "mks2508"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mks2508/axon-mcp",
+  "_rev": "5-090d7ed02e0d717971c97065b8d554ac",
+  "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+  "dist-tags": {
+   "latest": "0.3.0"
+  },
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:d712aada673c]",
+    "name": "mks2508"
+   }
+  ],
+  "name": "@mks2508/axon-mcp",
+  "readme": "# @mks2508/axon-mcp\n\nMCP server para el modelo de roadmap **axon v2**. Tercer consumer del core (mismo modelo\nque la CLI), sin BFF ni SDK de cliente. Expone **read + write** del roadmap a clientes MCP\n(Claude Code, opencode) sobre JSON-RPC stdio y HTTP streamable (Stateless).\n\n- **Spec**: MCP 2026-07-28 (dual-era: 2025 + 2026 negotiation).\n- **Runtime**: Bun-first (`engines.bun >=1.1`). El tarball shippea TS directo (mismo patr\u00f3n\n  que `@mks2508/axon`). Sin build step.\n- **Stack**: `@modelcontextprotocol/server@^2` + `zod@^4` (v4 `z.object({...})` schema, no\n  raw shape). SDK v1 solo en devDeps para tests.\n\n## Install & wire-up\n\n### Claude Code\n\n```bash\n# Stdio (local, sin auth \u2014 el cliente y el server viven en el mismo trust zone).\nclaude mcp add axon-mcp -- bunx @mks2508/axon-mcp\n# O si lo instalaste como dev dep en tu repo:\nclaude mcp add axon-mcp -- bun ./node_modules/@mks2508/axon-mcp/src/index.ts\n```\n\n### opencode\n\nopencode no tiene formato de plugin nativo \u2014 el bin trae su propio adapter:\n\n```bash\n# ./opencode.json (cwd)\nbunx @mks2508/axon-mcp init --opencode\n\n# ~/.config/opencode/opencode.json (global)\nbunx @mks2508/axon-mcp init --opencode --global\n\n# con modelo autoridad expl\u00edcito (se resuelve a absoluto)\nbunx @mks2508/axon-mcp init --opencode --model /abs/path/to/your/roadmap.model.yml\n```\n\n**Primera conexi\u00f3n puede tardar**: `bunx -y` resuelve+descarga el tarball la primera vez\ny eso puede exceder el timeout de conexi\u00f3n MCP del cliente (`opencode mcp list` report\u00f3\n`Connection closed` en cold y `connected` con el paquete cacheado). Un retry lo arregla.\n\nMerge NO destructivo e idempotente: si `opencode.json` ya existe, solo se toca la key\n`mcp.axon` \u2014 el resto del fichero (otras keys, otros `mcp.*`) se preserva. Re-run sin\n`--model` reescribe `mcp.axon` con la shape can\u00f3nica (si antes ten\u00eda `environment`\npor un `--model` previo, se pierde \u2014 es determinista, no accidental). JSON inv\u00e1lido en\ndisco \u2192 error, fichero intacto.\n\nShape que escribe (schema `mcp` de opencode, verificado contra source):\n\n```jsonc\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"axon\": {\n      \"type\": \"local\",\n      \"command\": [\"bunx\", \"-y\", \"@mks2508/axon-mcp@latest\"],\n      \"enabled\": true\n      // \"environment\": { \"AXON_MODEL\": \"<abs path>\" } \u2014 solo si se pas\u00f3 --model\n    }\n  }\n}\n```\n\n**Skills/CLAUDE.md**: opencode lee nativamente `~/.claude/skills/<name>/SKILL.md` y\n`~/.claude/CLAUDE.md` (compat directa, no hace falta nada adicional aqu\u00ed) \u2014 depende de\nque esas copias existan en disco; si alg\u00fan tombstone de dotfiles las borra, esta compat\nse rompe (data point, no resuelto por esta unidad).\n\n### HTTP mode (deploy interno)\n\n```bash\nAXON_MCP_TOKEN=$(openssl rand -hex 32) \\\nAXON_MODEL=/abs/path/to/your/roadmap.model.yml \\\nbunx @mks2508/axon-mcp serve --port 7361\n```\n\nAuth: `Authorization: Bearer $AXON_MCP_TOKEN` (401 si falta o no coincide). ADR-0029\nbearer+tailnet v1; OAuth RS cuando haya deploy p\u00fablico.\n\nHealth sin auth: `GET /healthz` \u2192 `{\"ok\": true, \"server\": \"axon-mcp\"}`.\n\n## Tools (6)\n\n| Tool          | Tipo   | Mutates | Descripci\u00f3n |\n|---------------|--------|---------|-------------|\n| `query`       | read   | no      | `status` (dashboard) \u00b7 `show <id>` \u00b7 `now` (actionable) \u00b7 `graph` (DAG SVG) \u00b7 `roadmap`. |\n| `set_status`  | write  | s\u00ed      | Cambia status de un nodo (`done` estampa `completedDate`). |\n| `set_gate`    | write  | s\u00ed      | Mutar verdict (pass/provisional/partial/open) + evidencia de un item **existente**; con `create: true` (+ `class` opcional) crea uno nuevo en vez de una 7\u00aa tool \u2014 sin `create`, un itemId con typo sigue fallando (nunca upsert). |\n| `add_node`    | write  | s\u00ed      | A\u00f1ade nodo top-level o milestone (parent). |\n| `rm_node`     | write  | s\u00ed      | Borra nodo. Bloquea si tiene dependents (force=true los rompe). |\n| `set_node`    | write  | s\u00ed      | Patch de title/zone/dependsOn/refs/docs. |\n\n`format: 'human' | 'json'` \u2014 `human` devuelve `content[].text` (1-3 l\u00edneas); `json`\ndevuelve `structuredContent` con campo `summary` (workaround bug #55677 \u2014 Claude Code\ndescarta `text` cuando ambos canales est\u00e1n presentes, as\u00ed que duplicamos la prosa en\n`structuredContent.summary`).\n\n## Prompts (2)\n\nAparecen en Claude Code como `/mcp__axon__<nombre>`:\n\n- **`estado`** \u2014 Llama `query status` + `query now` y devuelve resumen ejecutivo.\n- **`cerrar-milestone <nodeId>`** \u2014 Gu\u00eda paso a paso: set_gate \u2192 confirmar \u2192 set_status\n  done \u2192 verificar.\n\n## Apps (MCP Apps / SEP-1865, widgets `ui://` interactivos)\n\n**Baseline (`format: human`, secci\u00f3n \"Tools\" arriba) queda 100% intacto en TODOS los\nclients** \u2014 MCP Apps es una capa adicional, opt-in por el host, no un reemplazo.\n\n`query` declara `_meta.ui.resourceUri: \"ui://axon/app\"` \u2014 un \u00fanico resource router\n(vanilla JS + SVG, sin react, sin frameworks) que monta la vista dedicada seg\u00fan\n`structuredContent.command`:\n\n| command | vista |\n|---|---|\n| `status` | status-card (counts, gates, violations) |\n| `graph`  | dag-viewer (pan/zoom, click nodo \u2192 detalle + dropdown status \u2192 write) |\n| `roadmap` | roadmap-table (tabla de nodos top-level) |\n| `show` / `now` | fallback de texto (sin widget dedicado, lock A1) |\n\n**Por qu\u00e9 un solo resource y no uno por vista**: SEP-1865 declara `_meta.ui.resourceUri`\nde forma EST\u00c1TICA en la definici\u00f3n de la tool (`tools/list`) \u2014 un `CallToolResult` no\npuede seleccionar un resource distinto por llamada (spec, secci\u00f3n \"Predeclared Resources\nvs. Inline Embedding\": \"Require UI resources to be registered and referenced in tool\nmetadata\"; alternativa de \"embedded resources\" \u2014 resource per-call \u2014 evaluada y\ndescartada). Como `query` es una sola tool MCP (lock L1, consolidada), solo puede\ndeclarar UN `resourceUri` \u2014 de ah\u00ed el router.\n\n**Escribir desde el DAG** (lock A2): click nodo \u2192 dropdown status \u2192 `Apply` dispara\n`tools/call set_status` desde el iframe, y tras el ok re-lanza `query graph` para\nrefrescar la vista. Cada call incluye `model: structuredContent.modelPath` \u2014 en Desktop\nel cwd del server MCP no es el repo, as\u00ed que la resoluci\u00f3n por `.claude/axon.config.json`\nNO dispara; sin este threading los writes fallar\u00edan justo en el client al que apunta la\nfeature. Errores del `tools/call` se muestran en un banner en la UI (no se silencian); el\npermission prompt del host antes de ejecutar el write es flujo normal, no un error.\n\n### Clients que la renderizan\n\nMatriz oficial (`modelcontextprotocol.io/extensions/client-matrix`): **Claude Desktop y\nclaude.ai (web) S\u00cd la soportan**; tambi\u00e9n VS Code Copilot, ChatGPT, Cursor, Goose,\nPostman, MCPJam. **Claude Code NO la soporta** (ausente de la matriz + sin menci\u00f3n en su\nchangelog) \u2014 en Claude Code, `query` sigue funcionando exactamente igual que antes\n(`content[].text` compacto), el host simplemente ignora `_meta.ui` porque no negoci\u00f3 la\nextension `io.modelcontextprotocol/ui` en el `initialize`.\n\n### Probarla en Claude Desktop (config manual)\n\nClaude Desktop no lee `.claude/axon.config.json` \u2014 pasa `AXON_MODEL` expl\u00edcito:\n\n```jsonc\n// ~/Library/Application Support/Claude/claude_desktop_config.json\n{\n  \"mcpServers\": {\n    \"axon-mcp\": {\n      \"command\": \"bunx\",\n      \"args\": [\"-y\", \"@mks2508/axon-mcp\"],\n      \"env\": { \"AXON_MODEL\": \"/abs/path/to/your/roadmap.model.yml\" }\n    }\n  }\n}\n```\n\nReinicia Claude Desktop, invoca `query status` (o `graph`/`roadmap`) desde el chat \u2014 el\nwidget se renderiza inline. `format: 'json'` NO es necesario para que el widget aparezca\n(el widget lee `structuredContent`, que el server ya adjunta siempre).\n\n### Build del widget (`bun run build:apps`)\n\nEl HTML del widget es un artefacto build-time **checked-in**\n(`src/apps/app.generated.html`, convenci\u00f3n `*.generated.*` del repo) \u2014 el runtime del\nserver NO ejecuta ning\u00fan build step, solo lee el fichero. Regenerar tras tocar\n`src/apps/router.ts` o `src/apps/views/*.ts`:\n\n```bash\nbun run build:apps       # bundlea con `bun build` (target browser, minify) e inyecta\n                          # el bundle inline en src/apps/template.html\nbun run typecheck:apps   # tsc --noEmit con lib DOM (separado del tsconfig del server:\n                          # el server corre en Bun/Node, sin document/window)\n```\n\n`@modelcontextprotocol/ext-apps` (App Bridge, npm `^1.7.5`) es devDependency SOLO \u2014 se\nbundlea, no se shipea como dependency runtime. Guard autom\u00e1tico en el build: si el bundle\ncontiene la cadena \"react\" en cualquier forma, el script aborta (lock: nunca shipear\nreact en el HTML final).\n\n## Resoluci\u00f3n del modelo (en cada tool call)\n\n1. `model` parameter (si el cliente lo pasa).\n2. `AXON_MODEL` env var.\n3. Campo `roadmapModel` de `.claude/axon.config.json` en cwd.\n4. Error con hint accionable (`AXON_MCP_NO_MODEL_RESOLVED`).\n\n## Sin BFF, sin estado en memoria\n\nStateless per-request (HTTP) y sin sesiones persistentes (stdio). Cada tool call resuelve\nmodelo, carga DAG, ejecuta handler de core, devuelve resultado. Sin caches, sin locks\ncompartidos \u2014 el modelo es el state, los write handlers de core son at\u00f3micos.\n\n## Development\n\n```bash\n# Tests (bun:test, 53 tests, 5 files)\nbun test\n\n# Typecheck\nbunx tsc --noEmit -p tsconfig.json\n\n# Smoke local (stdio)\nbun ./src/index.ts\n# En otro terminal:\necho '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"smoke\",\"version\":\"0\"}}}' | bun ./src/index.ts\n```\n\n## ADR-0029\n\n`axon-mcp-distribution`: bearer+tailnet v1 con HTTP server local. Stateless streamable,\nauth via env token. Mismo modelo de distribuci\u00f3n que el resto del monorepo.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-08-18T01:04:37.899Z",
+   "0.2.0": "2026-08-18T11:26:42.820Z",
+   "0.2.1": "2026-08-18T12:28:13.631Z",
+   "0.2.2": "2026-08-18T19:29:19.862Z",
+   "0.3.0": "2026-09-05T00:00:49.185Z",
+   "created": "2026-08-18T01:04:37.594Z",
+   "modified": "2026-09-05T00:00:49.324Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_from": "file:mks2508-axon-mcp-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mks2508/axon-mcp@0.1.0",
+    "_integrity": "sha512-3FAC/kbbFocIy5V6rbCyezxOj/ty3oBOmjsyyZARb34Cu9BNhhykNsVhpHVRlpny7LrpcmIMMmiHz3wSgnJabw==",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/axon-mcp_0.1.0_1787015077720_0.9853994046982668"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d712aada673c]",
+     "name": "mks2508"
+    },
+    "_npmVersion": "10.9.2",
+    "_resolved": "/Volumes/KODAK1TB/REPOS y PROYECTOS/axon/packages/mcp/mks2508-axon-mcp-0.1.0.tgz",
+    "bin": {
+     "axon-mcp": "src/index.ts"
+    },
+    "dependencies": {
+     "@mks2508/axon-core": "0.6.0",
+     "@mks2508/no-throw": "^0.3.7",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.0.0"
+    },
+    "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30",
+     "ajv": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-3FAC/kbbFocIy5V6rbCyezxOj/ty3oBOmjsyyZARb34Cu9BNhhykNsVhpHVRlpny7LrpcmIMMmiHz3wSgnJabw==",
+     "shasum": "865abcc4c6d6931e02c8a28d8ab9abb71b4da1b1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAIZVpuTleOCOvyzKeYq1DVEuFQUmFq5wddhSY/J73X9AiBT71S13GIg5HNKyySJnmY6LBsCa4cVbnUDtxXG6iAxvg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mks2508/axon-mcp/-/axon-mcp-0.1.0.tgz",
+     "unpackedSize": 53693
+    },
+    "engines": {
+     "bun": ">=1.1",
+     "node": ">=20"
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d712aada673c]",
+      "name": "mks2508"
+     }
+    ],
+    "name": "@mks2508/axon-mcp",
+    "scripts": {
+     "test": "bun test",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_from": "file:mks2508-axon-mcp-0.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mks2508/axon-mcp@0.2.0",
+    "_integrity": "sha512-/a80edSO4e/WC+TtImCPWHHF2Gxv1hMUqpsqNX1/cplc1TWEVEy8UexzordUjMypukRipJ4YEA6NCiyySGsSCg==",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/axon-mcp_0.2.0_1787052402653_0.9731981247742261"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d712aada673c]",
+     "name": "mks2508"
+    },
+    "_npmVersion": "10.9.2",
+    "_resolved": "/Volumes/KODAK1TB/REPOS y PROYECTOS/axon/packages/mcp/mks2508-axon-mcp-0.2.0.tgz",
+    "bin": {
+     "axon-mcp": "src/index.ts"
+    },
+    "dependencies": {
+     "@mks2508/axon-core": "0.6.0",
+     "@mks2508/no-throw": "^0.3.7",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.0.0"
+    },
+    "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.5",
+     "@modelcontextprotocol/sdk": "^1.30",
+     "ajv": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-/a80edSO4e/WC+TtImCPWHHF2Gxv1hMUqpsqNX1/cplc1TWEVEy8UexzordUjMypukRipJ4YEA6NCiyySGsSCg==",
+     "shasum": "a52aec7aab86cac41702d4053ceec0f0fbd03cdf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEnk7tVoOXRHFi+BxN595azxtGKYGMhU850cFGc8WjslAiEAjtKdvER25RErOd/rqODQwXuhyB6kiyOZGuUdnAYqiI4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mks2508/axon-mcp/-/axon-mcp-0.2.0.tgz",
+     "unpackedSize": 496601
+    },
+    "engines": {
+     "bun": ">=1.1",
+     "node": ">=20"
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d712aada673c]",
+      "name": "mks2508"
+     }
+    ],
+    "name": "@mks2508/axon-mcp",
+    "scripts": {
+     "build:apps": "bun scripts/build-apps.ts",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit -p tsconfig.json",
+     "typecheck:apps": "tsc --noEmit -p src/apps/tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_from": "file:mks2508-axon-mcp-0.2.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mks2508/axon-mcp@0.2.1",
+    "_integrity": "sha512-v+5fJa1+lFzAtGAhQ1d9YGHxLpXlyWH7cM25PU+lq2gy/PLMQTzN2DozzmMUMn03AZIubMVUckISrxdfunIKcA==",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/axon-mcp_0.2.1_1787056093478_0.5630498005379923"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d712aada673c]",
+     "name": "mks2508"
+    },
+    "_npmVersion": "10.9.2",
+    "_resolved": "/Volumes/KODAK1TB/REPOS y PROYECTOS/axon/packages/mcp/mks2508-axon-mcp-0.2.1.tgz",
+    "bin": {
+     "axon-mcp": "src/index.ts"
+    },
+    "dependencies": {
+     "@mks2508/axon-core": "0.6.0",
+     "@mks2508/no-throw": "^0.3.7",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.0.0"
+    },
+    "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.5",
+     "@modelcontextprotocol/sdk": "^1.30",
+     "ajv": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-v+5fJa1+lFzAtGAhQ1d9YGHxLpXlyWH7cM25PU+lq2gy/PLMQTzN2DozzmMUMn03AZIubMVUckISrxdfunIKcA==",
+     "shasum": "9d5c388bcddce0f768a26c833d8883f0e3bd0097",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDZfHsKxXK4U454Yp2kpGKszT8WBRbcDh67dzDnFad4dAiBl7zEfOfnsrdq3p4mrE4xQ7E1IIu678Cyr4DtmbIHsOQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mks2508/axon-mcp/-/axon-mcp-0.2.1.tgz",
+     "unpackedSize": 458940
+    },
+    "engines": {
+     "bun": ">=1.1",
+     "node": ">=20"
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d712aada673c]",
+      "name": "mks2508"
+     }
+    ],
+    "name": "@mks2508/axon-mcp",
+    "scripts": {
+     "build:apps": "bun scripts/build-apps.ts",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit -p tsconfig.json",
+     "typecheck:apps": "tsc --noEmit -p src/apps/tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_from": "file:/tmp/pack/mks2508-axon-mcp-0.2.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@mks2508/axon-mcp@0.2.2",
+    "_integrity": "sha512-U3738Xim2Bn5+HA5HXMS/GuYdeRezBDL1la4bqZv8J89OULgjje/ktf6ge6CCyr+PYLZ4QAvuLrFCEaQYLnyAA==",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/axon-mcp_0.2.2_1787081359720_0.36883289618149817"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d712aada673c]",
+     "name": "mks2508"
+    },
+    "_npmVersion": "10.9.2",
+    "_resolved": "/tmp/pack/mks2508-axon-mcp-0.2.2.tgz",
+    "bin": {
+     "axon-mcp": "src/index.ts"
+    },
+    "dependencies": {
+     "@mks2508/axon-core": "0.6.1",
+     "@mks2508/no-throw": "^0.3.7",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.0.0"
+    },
+    "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.5",
+     "@modelcontextprotocol/sdk": "^1.30",
+     "ajv": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-U3738Xim2Bn5+HA5HXMS/GuYdeRezBDL1la4bqZv8J89OULgjje/ktf6ge6CCyr+PYLZ4QAvuLrFCEaQYLnyAA==",
+     "shasum": "1648779591fbada9aa587eb4f01a5a6dde024399",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC56iHMqOC0JkkgzLGqtN2G2eZxJcs6JqlgPd7UG6F7rwIhAOAdaaJsKtYDNUu7A/BMmO/qkFZ801mXDzVbsmNMarEG"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mks2508/axon-mcp/-/axon-mcp-0.2.2.tgz",
+     "unpackedSize": 459047
+    },
+    "engines": {
+     "bun": ">=1.1",
+     "node": ">=20"
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d712aada673c]",
+      "name": "mks2508"
+     }
+    ],
+    "name": "@mks2508/axon-mcp",
+    "scripts": {
+     "build:apps": "bun scripts/build-apps.ts",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit -p tsconfig.json",
+     "typecheck:apps": "tsc --noEmit -p src/apps/tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mks2508/axon-mcp@0.3.0",
+    "_integrity": "sha512-3xfImIqXpsag0y2zkMn8cWG8AZ58j76EDNnf85RQaXePRhXhfoPEFwKAVU8wRMwfNSWvgu30hLuAJgR4emI9lQ==",
+    "_nodeVersion": "26.3.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/axon-mcp_0.3.0_1788566449042_0.14261687174497562"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d712aada673c]",
+     "name": "mks2508"
+    },
+    "_npmVersion": "10.8.3",
+    "bin": {
+     "axon-mcp": "src/index.ts"
+    },
+    "dependencies": {
+     "@mks2508/axon-core": "0.7.0",
+     "@mks2508/axon-oracle": "0.1.0",
+     "@mks2508/no-throw": "^0.3.7",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.0.0"
+    },
+    "description": "MCP server axon: expone read+write del roadmap v2 a clientes MCP (Claude Code, opencode). TERCER consumer del core (mismo modelo que CLI), sin BFF. Spec MCP 2026-07-28 + SDK v2 dual-era + stdio (local) + HTTP streamable (deploy).",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.5",
+     "@modelcontextprotocol/sdk": "^1.30",
+     "ajv": "^8.20.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 24,
+     "integrity": "sha512-3xfImIqXpsag0y2zkMn8cWG8AZ58j76EDNnf85RQaXePRhXhfoPEFwKAVU8wRMwfNSWvgu30hLuAJgR4emI9lQ==",
+     "shasum": "f4827a19c6472ca46b002fc69d4d84a5afb3c958",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICS3SxqNHrMzryhwxIsdz9M1qRh4+nXaK7tqqW1qxyPRAiBzV2Hd27kBumq691rNmNyLmpN6vEx0m87KDijyAwPlxQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mks2508/axon-mcp/-/axon-mcp-0.3.0.tgz",
+     "unpackedSize": 522119
+    },
+    "engines": {
+     "bun": ">=1.1",
+     "node": ">=20"
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:d712aada673c]",
+      "name": "mks2508"
+     }
+    ],
+    "name": "@mks2508/axon-mcp",
+    "scripts": {
+     "build:apps": "bun scripts/build-apps.ts",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit -p tsconfig.json",
+     "typecheck:apps": "tsc --noEmit -p src/apps/tsconfig.json"
+    },
+    "shasum": "f4827a19c6472ca46b002fc69d4d84a5afb3c958",
+    "type": "module",
+    "version": "0.3.0"
+   }
+  }
+ },
+ "name": "@mks2508/axon-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mks2508%2Faxon-mcp"
+}

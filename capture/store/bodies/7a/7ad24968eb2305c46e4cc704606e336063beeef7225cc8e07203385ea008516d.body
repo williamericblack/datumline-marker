@@ -1,0 +1,4493 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.50",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2f05d7257e9c]",
+    "name": "it-baron"
+   },
+   {
+    "email": "[redacted-email:4be2a2aa2dc0]",
+    "name": "duckerbrother"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.10",
+   "0.1.11",
+   "0.1.12",
+   "0.1.13",
+   "0.1.14",
+   "0.1.15",
+   "0.1.16",
+   "0.1.17",
+   "0.1.18",
+   "0.1.19",
+   "0.1.2",
+   "0.1.20",
+   "0.1.21",
+   "0.1.22",
+   "0.1.23",
+   "0.1.24",
+   "0.1.25",
+   "0.1.26",
+   "0.1.27",
+   "0.1.28",
+   "0.1.29",
+   "0.1.3",
+   "0.1.30",
+   "0.1.31",
+   "0.1.32",
+   "0.1.33",
+   "0.1.34",
+   "0.1.38",
+   "0.1.39",
+   "0.1.40",
+   "0.1.41",
+   "0.1.42",
+   "0.1.43",
+   "0.1.44",
+   "0.1.45",
+   "0.1.46",
+   "0.1.47",
+   "0.1.48",
+   "0.1.49",
+   "0.1.5",
+   "0.1.50",
+   "0.1.7",
+   "0.1.8",
+   "0.1.9"
+  ]
+ },
+ "manifest": {
+  "_id": "@diskd-ai/email-client-mcp",
+  "_rev": "46-6a19dfa3e35f726b9388a3b01bcda5ae",
+  "bugs": {
+   "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+  },
+  "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+  "dist-tags": {
+   "latest": "0.1.50"
+  },
+  "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+  "license": "LGPL-3.0-or-later",
+  "maintainers": [
+   {
+    "email": "[redacted-email:2f05d7257e9c]",
+    "name": "it-baron"
+   },
+   {
+    "email": "[redacted-email:4be2a2aa2dc0]",
+    "name": "duckerbrother"
+   }
+  ],
+  "name": "@diskd-ai/email-client-mcp",
+  "readme": "# Email Client MCP\n\nMulti-account email MCP server with reliable IMAP-to-mailboxes sync into a Drive-backed `messagesStore` (`@diskd-ai/sdk`). Read tools hit IMAP live; the watcher mirrors every configured account into the workspace store on an interval (>= 60s).\n\nAddress: `end:comm/email-client-mcp`.\n\n## Install\n\n```bash\nnpx -y @diskd-ai/email-client-mcp stdio\n```\n\nThe server speaks Model Context Protocol over stdio. JSON-RPC on stdout; logs to stderr.\n\n## Tools\n\nAll read tools fetch from IMAP live (BODY.PEEK, never silently flips `\\Seen`):\n\n- `list_accounts` -- enumerate configured accounts (config-only; no IMAP).\n- `list_mailbox_folder` -- folders for an account, with optional unread counts and special-use flags.\n- `find_mailbox_folder` -- resolve real folders containing a given Message-Id (use before `move_email` for Gmail virtuals).\n- `list_emails` -- paginated metadata listing with filters (unread, flagged, from/to/subject, since).\n- `get_email` -- single message by UID. Formats: `raw`, `text` (HTML stripped), `stripped` (also drops quoted replies + signatures). `markRead=true` opt-in.\n- `get_emails` -- bulk variant of `get_email` (max 20).\n- `move_email` -- IMAP MOVE between folders. Refuses virtual mailboxes (e.g. `[Gmail]/All Mail`).\n- `set_email_attributes` -- set read/unread and flagged/unflagged state for IMAP messages, then patch the Drive mirror.\n- `bulk_action` -- `mark_read | mark_unread | flag | unflag | move | delete` over up to 100 UIDs.\n- `get_watcher_status` -- in-memory snapshot of the sync watcher.\n\n## Watcher reliability\n\nThe watcher synchronizes IMAP into the workspace `messagesStore` on every tick. Invariants:\n\n1. `lastSyncedUid` advances **only** after a successful idempotent `upsertBatch`.\n2. `externalId = \"${UIDVALIDITY}:${UID}\"` so a UIDVALIDITY rollover never collides with the previous generation.\n3. UIDVALIDITY mismatch on a folder triggers a clean drop + resync.\n4. Per-account in-flight lock: an overlapping tick is skipped, never queued.\n5. Folder metadata is the durable checkpoint -- restart resumes from there, never from in-memory state.\n6. Folders deleted in IMAP are pruned from Drive at the end of a tick.\n7. Sliding-window flag reconciliation bounds drift to `flag_reconcile_window` UIDs per tick.\n8. One rotating maintenance folder per tick prunes Drive messages that moved or disappeared in IMAP.\n\nTick interval is clamped to >= 60s.\n\n## Configuration\n\nDefault path: `~/.config/email-client-mcp/config.toml` (override via `EMAIL_CLIENT_MCP_CONFIG`). When deployed by mcp-hub the file is mounted by the `diskd-ai/email-client-mcp` vault assembler.\n\n```toml\n[sdk]\napi_key = \"...\"\nbase_url = \"https://apis.example/\"\n# workspace_id falls back to MCP_HUB_WORKSPACE_ID env when omitted.\n\n[watcher]\nenabled = true\ninterval_ms = 60000\nflag_reconcile_window = 500\n# folders = [\"INBOX\", \"Sent\"]   # optional allowlist; empty = all\n\n[[accounts]]\nname = \"work\"\nemail = \"[redacted-email:53e6cdc30765]\"\nfull_name = \"You\"\npassword = \"...\"\n\n[accounts.imap]\nhost = \"imap.example.com\"\nport = 993\ntls = true\nverify_ssl = false\n```\n\nFor Gmail OAuth accounts, replace the `password` field with an `[accounts.oauth2]` block:\n\n```toml\n[[accounts]]\nname = \"gmail-work\"\nemail = \"[redacted-email:456c688d0b08]\"\nfull_name = \"You\"\n\n[accounts.oauth2]\nprovider = \"google\"\nclient_id = \"...\"\nclient_secret = \"...\"\nrefresh_token = \"...\"\n\n[accounts.imap]\nhost = \"imap.gmail.com\"\nport = 993\ntls = true\nverify_ssl = false\n```\n\n## Development\n\n```bash\nbun install\nbun run typecheck\nbun run lint\nbun run test          # vitest unit tests\nbun run build         # tsc -> dist/\nbun run start         # node dist/server.js stdio (needs config TOML)\nbun run dev           # tsx src/server.ts stdio (live reload)\n\n# stdio smoke test (initialize + tools/list + tool calls):\nnode scripts/smoke.mjs\n```\n\n## Releasing\n\nAuto-publish via `.github/workflows/release.yml`:\n\n- **Tag-driven** (preferred): `npm version patch && git push --follow-tags` from main; the `v*.*.*` tag triggers the workflow which typechecks, lints, tests, builds, and `npm publish`es.\n- **One-click**: in the GitHub Actions UI run the *Release* workflow with `bump = patch | minor | major`. The job bumps `package.json`, commits, tags, pushes, and publishes -- all in one job.\n\nBoth paths run `bun install --frozen-lockfile`, `bun run typecheck`, `bun run lint`, `bun run test`, and `bun run build` before publishing, with provenance attestation enabled.\n\nRequired repo secret:\n\n| Secret | Purpose |\n| --- | --- |\n| `NPM_TOKEN` | npmjs.com granular token, scope `@diskd-ai/*`, **Bypass 2FA** enabled. |\n\n## License\n\nLGPL-3.0-or-later. See `LICENSE`.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-04-29T08:30:02.740Z",
+   "0.1.1": "2026-04-29T08:54:24.019Z",
+   "0.1.10": "2026-05-01T15:21:50.561Z",
+   "0.1.11": "2026-05-01T15:27:09.980Z",
+   "0.1.12": "2026-05-01T15:32:21.290Z",
+   "0.1.13": "2026-05-01T16:16:13.008Z",
+   "0.1.14": "2026-05-01T17:15:59.296Z",
+   "0.1.15": "2026-05-01T17:38:31.146Z",
+   "0.1.16": "2026-05-01T17:46:33.978Z",
+   "0.1.17": "2026-05-01T18:15:51.312Z",
+   "0.1.18": "2026-05-02T10:23:04.365Z",
+   "0.1.19": "2026-05-02T15:30:49.833Z",
+   "0.1.2": "2026-04-29T09:02:19.938Z",
+   "0.1.20": "2026-05-03T09:52:44.392Z",
+   "0.1.21": "2026-05-03T18:56:58.176Z",
+   "0.1.22": "2026-05-04T11:43:48.474Z",
+   "0.1.23": "2026-05-04T12:40:15.187Z",
+   "0.1.24": "2026-05-04T19:49:04.996Z",
+   "0.1.25": "2026-05-05T08:24:06.945Z",
+   "0.1.26": "2026-05-05T10:35:42.581Z",
+   "0.1.27": "2026-05-06T14:43:50.955Z",
+   "0.1.28": "2026-05-06T15:27:11.738Z",
+   "0.1.29": "2026-05-07T08:50:29.252Z",
+   "0.1.3": "2026-04-29T10:43:14.456Z",
+   "0.1.30": "2026-05-13T16:07:53.426Z",
+   "0.1.31": "2026-05-16T19:14:17.556Z",
+   "0.1.32": "2026-05-16T19:28:03.127Z",
+   "0.1.33": "2026-05-17T19:45:49.523Z",
+   "0.1.34": "2026-05-17T19:48:16.378Z",
+   "0.1.38": "2026-08-09T11:19:56.837Z",
+   "0.1.39": "2026-08-29T12:27:26.457Z",
+   "0.1.40": "2026-08-29T13:15:49.356Z",
+   "0.1.41": "2026-08-29T15:29:09.563Z",
+   "0.1.42": "2026-08-29T15:35:38.138Z",
+   "0.1.43": "2026-08-29T15:44:07.251Z",
+   "0.1.44": "2026-08-29T15:53:17.370Z",
+   "0.1.45": "2026-08-29T16:20:05.229Z",
+   "0.1.46": "2026-08-29T17:06:07.673Z",
+   "0.1.47": "2026-08-29T17:48:32.409Z",
+   "0.1.48": "2026-08-29T17:57:42.850Z",
+   "0.1.49": "2026-08-30T18:44:57.838Z",
+   "0.1.5": "2026-04-29T17:32:33.009Z",
+   "0.1.50": "2026-08-30T21:58:17.122Z",
+   "0.1.7": "2026-04-30T20:10:32.106Z",
+   "0.1.8": "2026-04-30T20:48:06.964Z",
+   "0.1.9": "2026-05-01T15:00:34.709Z",
+   "created": "2026-04-29T08:30:02.458Z",
+   "modified": "2026-08-30T21:58:17.419Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.0",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.0_1777451402563_0.9510156343485958"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "dependencies": {
+     "@diskd/sdk": "5.1.2",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 81,
+     "integrity": "sha512-rahqYgMeQQAeTf4WKHFKMkyfOn5ToOar8Vl3IrJ8I9DaDmy33p4QX/MboOyP8dplRbXMopG6I9evfnfofDI94g==",
+     "shasum": "4ae88312bb57c7724663f1a3a0a42f366de66190",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBi55R0Ad3IBfc0OCtCnVjjr/6d/7wbrJbTFB3REfClhAiEA6ihIw1MNXX09wrlEnwrRpjgNj0+55lRQYqeLpernkjI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.0.tgz",
+     "unpackedSize": 216404
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "5a00ed8a71c39c4bb32c2bec43f88239090e3f15",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.1",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.1_1777452863882_0.38334528088135733"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.2",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 81,
+     "integrity": "sha512-ckOiIDGn59R1nW/xJOHXoKRZf5OmTkrY8oaIpqPyzIT7oSgEzUcO3R4KaJCNN2xHKTXVMZV1WD8ZFsWtkstIhw==",
+     "shasum": "45ec88c08e355b3d8ce606362a805d56ae9e040e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICIhNxLzD47awkeyXv3fMNee/bAhmG71VIa4wniFd4VgAiEAoFAJPTqauvjOzCz3Q16uGZ5onUT6Pb5L/4GXgpfOPjM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.1.tgz",
+     "unpackedSize": 217202
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d36e9506600f2861ebac6c3a2c884d65cc9e793f",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.10",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.10_1777648910406_0.15004056726556958"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.10"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-E1v/TvnlQPGve0RUFfEdbGzcSZq5eO42Ikd39jv6hNFGdR/7o31rUavgreL9FQBC81oNQ+28+PEvvh88MGFr0Q==",
+     "shasum": "edd8b3eb15f2e1b7bd07cd44111eb61c424677bf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDk0EPnl3iUuakOXQCSSrJg5+0MWqQoi3XoV+nJi3cpjwIhANCM0xEUl+DoYfiZhZ/xElwRC6CKZIhtWm6rFkkOxcwS"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.10.tgz",
+     "unpackedSize": 256398
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "9e2f5bcae643a53dac1f521a5456297405d460c3",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.10"
+   },
+   "0.1.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.11",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.11_1777649229813_0.10135063256288213"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.11"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-vM1lLDdjMriwzosXcjrSQ8qggu8pGWc8+E73sx2exDFoah709yJ1b2CiBtFgI0KoQqxiIrUogYj3xzQZonW3OA==",
+     "shasum": "5edf5ace9bea85dd6fd3d7783d626946f22b2b4b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIERATywmnMpRN+/rplyO2A2AbrmCioy0CH27UL7sBHwuAiARyc7KyPJa5IbAKzb7Ddd6hTtWP3K87wztZO53dxrZ7g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.11.tgz",
+     "unpackedSize": 258443
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "30fd0e3c1da09c58aaa482eea9f79c91f2bbbe30",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.11"
+   },
+   "0.1.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.12",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.12_1777649541151_0.01260021405975631"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.12"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-lwOf/4Rf9Bcmn2xAqOX98eyzUOsOpTI6zvoz96FhO1f88j/WzWkRrU3cOQp7DUdRjqhMl/NqvkQe9Mv2OggvSw==",
+     "shasum": "2e192e5ea28c9c2c4a28fe742e2f90840e7bc519",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBjtZIaDiHu1LbZ0en6fW1+GPAU7PPHeZob5l0lP/VpyAiAMMVhuunqMKMIad4xkTHebt4dBDwognpcEAsYpuqlQZA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.12.tgz",
+     "unpackedSize": 259519
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "212ac8d8fa9ab0740a9c959570a0912bd2f5c706",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.12"
+   },
+   "0.1.13": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.13",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.13_1777652172844_0.9652350797529801"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.13"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-zJr/F/+MQD1+tHaXVlmM6ZWWDnD8GbNUSGeDb3IJRgyiI5qPkgT1A1+vdF3mfw0e0eATSNZYkvAuIdGmWrhaYA==",
+     "shasum": "622a00eede5f0633c309e624b64c4f85048b7c9d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCkWt4U/JNLPGUJbUHtbloSkhBhxYHZLVmOiR1F4FCFuwIgALFVythiKgKFHyTv12EFnCFBSYWj7a5vP5vj0LDQ3n4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.13.tgz",
+     "unpackedSize": 259184
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "0dd77a29547f08c4cfbff1d315686fde18b99e04",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.13"
+   },
+   "0.1.14": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.14",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.14_1777655759151_0.028662703294580316"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.14"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-lWeBb9Y2G3jAEiz/nMHh9x3v9A1NCeJd/yOjNEBr5tLU0CiCbCtVxB85uC+vb9ht3fDdmYJOrie/mp7TSlPj6w==",
+     "shasum": "a5308ed898227a4548c099097b66c7b2b1f0df35",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCdQQrhIxIPBTmTLryA/zY77no0ZGjsTdHRyE11ZCVRkAIgbM7C+z6BRG/yYop2bhqOMN8Z+U40BemhzZUkgbe4x+Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.14.tgz",
+     "unpackedSize": 260838
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d8545c967eb788482040c2f0e4f078c9276c138e",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.14"
+   },
+   "0.1.15": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.15",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.15_1777657110995_0.8646003457207834"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.15"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-eOZhJj4aFjLhu85tC+5HUnjGh+YPG/0ZY/grQKeQuqggO8AYno3JrSnhC/W3odZpzZmCdmDcoWyV87UGIPxzQw==",
+     "shasum": "5ac6823e2b7f8ef4d55b2a2e05ace42df89cee6e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCb2+85EJLNJLUM6Vk8lbCxh1+kZLpDcsu9DcXPHRJTHwIgIqmoWJDyatocJ5d+K1oucemG3utis14QPpB4wFj2Mhs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.15.tgz",
+     "unpackedSize": 261682
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "34c4f9c49e152d4a713e8b5b397966d1cb8bccd1",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.15"
+   },
+   "0.1.16": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.16",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.16_1777657593839_0.5722158193741624"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.16"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-LWWiYw6mU0n4FcjFswFojXLcWcANFjYmKaha8oRZPZDfH0jVMscgRTryfy/NxyOuVwaVUTuQMrPw54U8A4ImdA==",
+     "shasum": "cb6d1277d6e521d21ac48eb4110561f56595c592",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAgRtYe+PbW9uZCcGaJ7m95CxSqQaXpcZ1uX7/PLKPYWAiAk1sPa4P2bJOy9NkgD6GUzJtJqa6FlLgqIBciQpr8Wtg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.16.tgz",
+     "unpackedSize": 262020
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "fe26700fe89798ed2686a427af7deea7d1470311",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.16"
+   },
+   "0.1.17": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.17",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.17_1777659351134_0.39504759213135543"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.17"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-yKcQN0n1jm0oA011re2rlAOsdH8/KivBh5rVV4d+YhlU5IGhl3oq16VRO75QgD52Rn5lVIrYyDS5COIIQIrnnA==",
+     "shasum": "08921961f2975543d96f97e9d0a71bcdc6ef3270",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCcdcbUZdFHVpxOH5W6QQ11SDhwijrq0CwsX0o6yN68BAIhAMF1knz23BxPQs08IPQ2/Cr/LkbKgDLoMN4ybBer2EIS"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.17.tgz",
+     "unpackedSize": 270135
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "248bb2970302c6509db47b34c13649a30b9e1a03",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.17"
+   },
+   "0.1.18": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.18",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.18_1777717384199_0.27702447330428304"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.18"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-EmRdrN8aR0XhRLkN7wyFFzkUFP4OY+NX9NwEfbMEjJDv6pjkr7QkziGy5sEWQR1orVfnK/lANfoQET8GyZD53w==",
+     "shasum": "720963005e28e1e1bbf7135081974eaba640914e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA2JnCWOeIPnI1SYqRHvWmILBdTOSZpZCRCkIYJb4gHtAiAfAqZ5L1nFdI5bp8MwvpKUeQNh5enYBMGgitEfI+9VEQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.18.tgz",
+     "unpackedSize": 272125
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "4ec2f78613cf97ac766f415a1a4f349351d1ebca",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.18"
+   },
+   "0.1.19": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.19",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.19_1777735849683_0.5082831343557672"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 87,
+     "integrity": "sha512-whV31+oF6KuRs+Q6VV1rpgwwxjOzZJdo8MZ7EuQKTNyK8GMHmdrRnLPpbW0hgdK/0ndUFhj4mR1A3yLTfLcUJQ==",
+     "shasum": "993db4a02906219d5202d0ffd4140ad70538b22c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCNmdhCJKKhpFpBOvd0ddKe7K/JW07uJ43bbtIwSZPJ7AIhANiM17p5F8emZ8OxdBzmkH+cgxoQ5pWiwyslHfzclOS6"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.19.tgz",
+     "unpackedSize": 272125
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "ef97e86dd8a5556a7d290ae10d9d8c91edf79a41",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.19"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.2",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.2_1777453339800_0.09418927327407123"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 81,
+     "integrity": "sha512-/4vqL/3X/sJ0O+j0dwG2wqyovYUkPqKZHVAkobuJxKCXsdThlq3SfG1NCX4CjsxI8cIKz/hVI9RGb8wRLOeDWA==",
+     "shasum": "435aace5947a0c6bc892439dc5e1415ae8ad8fe8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBzIihJVOb5YNpC+wFQoEonTlIrdX0EAIQHLJPmKZIfyAiEAxXveyzOq1yv9HG5b20ETACiTqP7f+8417l8UFDexTTU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.2.tgz",
+     "unpackedSize": 217202
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "51957a3e1ee9852433596651852f4a638c4bb23d",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.20": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.20",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.20_1777801964250_0.040100002980560046"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.20"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-atQ+Yp1jhthyuH/WgcVI6InRuX0vwHYFW5DINbhZWiY5SUgCv6iCAmVg8cAQXd8/TQqNtxZ96hGxGv4hJ8EbxA==",
+     "shasum": "7207e7dc5223d717277216a40b0b79950c5405a1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF1gUqsre6MFHRyB4JZcwXVLALmxCHnPk5MUv8yJKaUtAiBah+mfjFcYbH4orh3kW6NJxKcJ2po22eRNDyJvXzWq/Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.20.tgz",
+     "unpackedSize": 274099
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "1da8024e699381d5125ea0fb9c58fcb20ceabd87",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.20"
+   },
+   "0.1.21": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.21",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.21_1777834618015_0.9198587624837291"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.21"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-1nIiIgpvZRnP+niIfsVhiE0gzcDVv52siWD8YLybfTnwk7Mufeyb50yux8aLbukeogAxfmxTb/6oxtXjcDQ3rA==",
+     "shasum": "6e98475921fb89a60ee9cec3f173fab13ffb9f2e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAyxXBPm9Hi4AVybx/CxJmyRFBoJD8RZt6YDNWcgpuF5AiEA10P8g2QRs9+VoeAjXqReT+hPbVRaqt3StZjqORsqrwA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.21.tgz",
+     "unpackedSize": 274561
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "41f2310590a6481927baedc1498e55cc1decd62a",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.21"
+   },
+   "0.1.22": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.22",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.22_1777895028324_0.14508373046034184"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.22"
+     },
+     "fileCount": 99,
+     "integrity": "sha512-gv1t6WmfXgXmuqR25ucboqt2tzzlQashfk1jK2qEAF/SBkYE0HqK6ifsQSqo5cid1aif50nkQM5jxmvmGGZ/uw==",
+     "shasum": "531ad19ac667f32757b6dbaa28b0f6fee070e249",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDmIXV2YtvB5SWDQkIad4Snb/UdtsJT6/Ml3++l5JbCHQIhAKP7a6KUGijNYK1Y3M9n6+l9NjydymoIfxB6Afiqtu+3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.22.tgz",
+     "unpackedSize": 321840
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "eef751bee72f948cc867b2dd978b4e85cc1445ed",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.22"
+   },
+   "0.1.23": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.23",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.23_1777898415047_0.8149923237927847"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.23"
+     },
+     "fileCount": 99,
+     "integrity": "sha512-uweDump+LJkwOwfgtvoKG4YQdBNqRSjXkkVCRQyOkjt7bPg0ag0hoRGJ+d5D3ungOEtdHD3f1tzJzgkYC6EDeA==",
+     "shasum": "d6ef34f9d33f031d7fb13faf5a024421a261e33c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBkvEfHPxD6FLHdFMHRK7/0OVDFPJL7KgvOx2XugrSZiAiEA1vSRuixIR/U4LQniYZzzZSNX8p4i5HkYT7QkQSY51iA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.23.tgz",
+     "unpackedSize": 336887
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "0119ec60ef25b99fef7b257b3f8820ec1e3a80a3",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.23"
+   },
+   "0.1.24": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.24",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.24_1777924144778_0.3144601269518108"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 99,
+     "integrity": "sha512-DkEgFo+GAEW2Cj89Wtbn8C92ms86bQaoeWL55jX89hzXiiAoongyiHCbEa6OHiLLxpWu0ilo7DZL8K0Y0fJ9Ig==",
+     "shasum": "efeef10da874ce113c81bccf9fe8a482fa5f7496",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDLtku8mKI/hDHQXhKjue9dz4dCesQFyDHaCrgSTVT2FQIhAPZOCvv6HwjyGEVz04h+yIBx2hGUz6d/BnSFRYXiulpL"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.24.tgz",
+     "unpackedSize": 340233
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "0119ec60ef25b99fef7b257b3f8820ec1e3a80a3",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.24"
+   },
+   "0.1.25": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.25",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.25_1777969446755_0.06236788190000797"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 99,
+     "integrity": "sha512-7CFylCTEdJGOa3Qp3Ts3jNLTG0XSC6BCDe3Ahy/R6d2ER/lMlyZxycNgeIZj5+teweZ27lcdFk1GtCu5vmgj7Q==",
+     "shasum": "73a3e0585c527fc3d7f6920aa28bc815fb49733b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAjxoSH6j6FJmiZIxHfpKwccnLMSU/1Wq52bMnR461z2AiA6UFYsovLdU6GbEnksKXsQLBbZWZHRpLEISmgM97tH8g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.25.tgz",
+     "unpackedSize": 341636
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "cf8cccaa328a8321d704d383370fa7d122b00f13",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.25"
+   },
+   "0.1.26": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.26",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.26_1777977342434_0.1585067701155216"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 99,
+     "integrity": "sha512-lXNAg9aRqoEU3uEFdQecF3D6Zrb205w2FCyYJLzq3UjiylmJNDlhXCnwrqYAzau8wGPA4HW+1Yqa19C4qGjVDA==",
+     "shasum": "6753237fe8885e8dc2a254f4414b0c7d10eb5a1f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCWTXXOg1bVAk9Z8+YZGVDhplVDpyeoyEHnBxaQeWGsQgIhAIwCJem9eujys8tAxpcORoFwku4w+VRxjKharsEM2/eF"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.26.tgz",
+     "unpackedSize": 342353
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "b5a88b29070af8100f92b57f629f28d56af1f136",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.26"
+   },
+   "0.1.27": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.27",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.27_1778078630788_0.6714017713104257"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 99,
+     "integrity": "sha512-YBmB5s0TC9XZnK98BLOnNnBvUDPSzh36U9ISG3m7wkxHSiZ0JRNEG6f1T9/djg64lDLhejcrJXZJhZfrXXTMRg==",
+     "shasum": "2461189305a96da2fe56c1454a3a26c4cdc40e43",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDhRjBEYxK9K+/7g5f7sAwUGKBQzJWIIXOVJeevMBUWCAiBLkMZS9jC3yFJw9edEGeM9RheR+IWCgt5SRUttheLXhA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.27.tgz",
+     "unpackedSize": 346154
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "b59e1285285f71273d59d9b9b3ec1756be67e8f0",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.27"
+   },
+   "0.1.28": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.28",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.28_1778081231325_0.6566084880657357"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.8.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 99,
+     "integrity": "sha512-tv7sfkNbsqxILp11G/4vzIhvujYiLaV4DhK1vFsSbuOwZVJnHyzKvzMMIP2jtzC4GmoebdGToMcTeiqYRezfrA==",
+     "shasum": "584f37080e6b3e79995aaeee8074cd9c6feb9856",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCv7sSf9ms3I5FE49CrQ6QYKtzvOTUnQUoPUkDZRAKOxQIgXo6zM1FZM9f3mRdp6t9EqZ2UEtTMXop/4hkfcSTng6s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.28.tgz",
+     "unpackedSize": 347009
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "5c762c5c200046650d43be977d54359a7c49a546",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.28"
+   },
+   "0.1.29": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.29",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.29_1778143829078_0.043280991434918814"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.29"
+     },
+     "fileCount": 99,
+     "integrity": "sha512-TNQ+hYsB7aZgbHnyhcXmvm+/N3SWZqJI9oXGeUOEAuCoDTfoa58L1wBwc+KdNkrQMhf0o0N14JwuYYlT9MAgIg==",
+     "shasum": "6367d0b21f41c22d1cca537dd93dace27e682a55",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCKH/ZQjNZi04Fpw8n2THyqjRgJtTf6byS+iCr7NQ54rQIgRw58qqIVlKp8nNJDuWFgJo/SSCmR8/AZnKqNImg0v+M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.29.tgz",
+     "unpackedSize": 353304
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "1ab79b002314e20f9d6ef96fcab9f39f37e0923e",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.29"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.3",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.3_1777459394318_0.30400071743478896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 81,
+     "integrity": "sha512-eaH8t+woc1PgvogeRKnvztCz5uisuamDHNhUu0/qvIGdAxHwqfD6JdkwTbczA9MJMPshJSBTwTDErjX1H97sTg==",
+     "shasum": "10f5199d7b6389705a10f2d847114f20e5043f15",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDfj0DkimxKyoHolOLDZlKwq4s/xP+7gs1qROnNv2jY5wIgWzqi0MIwUR04gK3BuSLff9gT7bq1hxI9McMBjmTiKQk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.3.tgz",
+     "unpackedSize": 219280
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "0f42cb2387a144c792a1bc96ce860b6964dc67bb",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.30": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.30",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.30_1778688473262_0.25230824466413093"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.30"
+     },
+     "fileCount": 99,
+     "integrity": "sha512-9HARBXCE9nc/ojgPuQI3xb98bPrudDFPMjhB7oy7WqouHitbj2KUN+oJj8XSVIhi3vpcOJSijT/gFsqiRy0jxQ==",
+     "shasum": "b0b673efd7ea7823c3cf0c617c1c0ea3f9699a4d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD6kmeaiYdE1a5Lp+fnnUUjyf4FNflT0xqlWaNzyDDbGwIhALmsqO0YGS9LntX96qkQHxWfhe3v91SWPqjSvlzsp1w6"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.30.tgz",
+     "unpackedSize": 353490
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "2872180c775bf097d06a43587518a48e052db89c",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.30"
+   },
+   "0.1.31": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.31",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.31_1778958857408_0.9919743811500696"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.31"
+     },
+     "fileCount": 99,
+     "integrity": "sha512-RDYoCjAHvIxL4nAOkF7veKuKjjew3Z77MwVlC4rUEheLLRFQX8VjEBeDjZxPcImkze+ps/RA0RkpjIkPdORTDQ==",
+     "shasum": "635eaf3883b317b2d7af33ae3109646523314cdf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICrB12sUGK/n7x/TM8YY+Sre4aEx9lIIvTItML7hD/fKAiEAuePWGb0xqKpcwEjKzKPRocYZxZimPZOj/GBQYqBDzCY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.31.tgz",
+     "unpackedSize": 353433
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "6c9ce5303296a0fbed05a958bf0d21fef5621fd5",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.31"
+   },
+   "0.1.32": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.32",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.32_1778959682986_0.476614518435591"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.32"
+     },
+     "fileCount": 102,
+     "integrity": "sha512-djtlzbs30pJVR8LSNgqkIAPQgbDwdVya8LMazTPi7ZBXQOWOLADAHmVwkgiVS+fL94pRRzYlLCGNjHrDNCe/mQ==",
+     "shasum": "42803a1f45d62b51c85409991036a24ee2a87f84",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFOq5AgK1eOfr3thvRVrbBxm8pe7iYkost144u+rYVr+AiAV2mnM1Z85EOqzQMWWZpgir8fdkNoyCSQu7IQBh3Ab2g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.32.tgz",
+     "unpackedSize": 354067
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "a8a5f757059e541d4ed58a81f7aad83a62bbd55e",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.32"
+   },
+   "0.1.33": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.33",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.33_1779047149384_0.5167819962140625"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.33"
+     },
+     "fileCount": 105,
+     "integrity": "sha512-YUrBgjsipoaqoEKdygJYkDcwgQxomttWr1SqV/xQY9YU5lee9wA/ejg93JnvI4rw82h2jpVtmP2rVaQEjEa7ew==",
+     "shasum": "4db077cab2576c9cc037f2fc7b6abbf877caed35",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFI1+e95zJVrKHl1NMv1rQ8VOUZSiA/tLu+xuyiqekvpAiEAq/F/DFQ9B1h9gILTRZhT3lfhsLI4kycZRV46fO7J9a4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.33.tgz",
+     "unpackedSize": 372805
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "6ee4b9ef72e566d2052227b6e440efe12efb77d9",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.33"
+   },
+   "0.1.34": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.34",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.34_1779047296224_0.5481019865070225"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4be2a2aa2dc0]",
+     "name": "duckerbrother"
+    },
+    "_npmVersion": "11.12.1",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.34"
+     },
+     "fileCount": 105,
+     "integrity": "sha512-dBfur0NORtIWTsjDT1aPpoo5p/1Ps4pr/Pu0Jw7r6p4/SoSg/xyIOtmgQsM4r0So62093CnDHOkC8EbNkL5TqQ==",
+     "shasum": "6ea1fab2558bcfdafd5f06974130017df4c95704",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDNeWqH0bWi/h3AH82UzRvvx57G5uSSP/mk5k5HSJ+UOQIgcCwgLNT2Bc37Kcwo680EqjuF1A/rPJL0uoVrCbvig3Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.34.tgz",
+     "unpackedSize": 372805
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "2f8ca02ef47956d8229f3488563a9a2a160dc612",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.34"
+   },
+   "0.1.38": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.38",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.38_1786274396676_0.2573426489769557"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.0.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.38"
+     },
+     "fileCount": 105,
+     "integrity": "sha512-O0TAopPunD34Hit6eSsjTxeRw5tIYDaBlLFM1MT7vCmBV+mnxaJl2DiwsnyESf9DAlWghPBD0aCCENciEKVCoA==",
+     "shasum": "98b1827a045559ecb93d143709a1e9a451e4507d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHH6q7P+e/TYJjY+pZrYAdrqKclvnIgfI4dvnMWF9FNgAiB4flVxdV/neI6IiTzRk2LQa/SQnDwVjAcvN2O9DgHJ+w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.38.tgz",
+     "unpackedSize": 375563
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "f3e0a6912edd1825e14ed49b8886e8fa41ca1e6f",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.38"
+   },
+   "0.1.39": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.39",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.39_1788006446308_0.023949597196558203"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nats": "2.29.3",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.39"
+     },
+     "fileCount": 147,
+     "integrity": "sha512-YUIhRejM0WW3WueWXolBnKBgjyJXWwSL2+cxRChSoWN3I9V1REdc2ZZehcSQPKvEYHGh5tu2px5mCVejFGGWYg==",
+     "shasum": "04022ecb571e75ff6704e50a089ea4a1d7c72462",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFefKWEt+SjE01VZj0bmxKezNh87zHNFHpIGMXjsvy4TAiBKxLZgobxMHKrBPVTuM2ZuqGyOCX9YczGg/B0mh9xikg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.39.tgz",
+     "unpackedSize": 490589
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "29cc9ce98edde56ea431091d161b09061300d2f1",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.39"
+   },
+   "0.1.40": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.40",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.40_1788009349201_0.5515725631136716"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.4",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.40"
+     },
+     "fileCount": 147,
+     "integrity": "sha512-OTF7YYMveB3/CFvDMeWAeEsr4eLp/u3I4bcEdmhrBRxZjUyAhVJRdU0k/3w+Ps+vtu152CVDMVwCsi1itR0Irw==",
+     "shasum": "906522fcf566131dc201517efcc4cbdcc4e8cdcc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD3gDF815yHOsUtam6IVa6ol+lp3SYnnX3PL4wzvh/1aAIhAJLtphWtO6236RtEXDOD9we4wEfeUg2MRYThpYRACP9g"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.40.tgz",
+     "unpackedSize": 476439
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d9ed727eab9be816163f852518557b25ccff1049",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.40"
+   },
+   "0.1.41": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.41",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.41_1788017349384_0.49181964345917417"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.41"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-Uv+TNmrrwbIqt/bWEKSksD3EkVl8hhWjMdj+Vb10tA1QuSiUvWpWr2Wu4EPe9nEzvNugrbLAOpRk7j6KOMmAIg==",
+     "shasum": "578bb74e038ad0e3ca807c3b646b111f8aed58c2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFmyI07PccRqvV4aRq+4On72cZi7qMpv7l0u9l9sKSCvAiEAumuALuaMciHZz7Xpz95LKHiwmt7W1NwFZ5Z72cOg0LI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.41.tgz",
+     "unpackedSize": 507580
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "5012f9cffe8403ae1d933408a5812e23c34639a7",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.41"
+   },
+   "0.1.42": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.42",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.42_1788017737979_0.6330759062678903"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.42"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-/ztnPZts1nHVmQdgP6CUvfft3b9ztQpybDkW8nKwUnel+RKqg/Ixtr03gSp14auPnolGDMH9HZ7icxH8gGlYdA==",
+     "shasum": "4fb25c634c3a6d2f6094e499ca3d3f9795bbe68d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQChbz8rgQjjBIgY8gXIxT3Wky+n/x5dFo2g2BMnPrn+nAIgL18IVJNlkptd+18lSdzPc8Pm9EZeCHMtfKQRgoVCMbg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.42.tgz",
+     "unpackedSize": 506618
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "1571ae834a8574b1abdf9c1b1158024472559c31",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.42"
+   },
+   "0.1.43": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.43",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.43_1788018247110_0.9123436371310645"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.43"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-+OKbCA+PJuRmLmnBMP1ms5HCMDDAefsm2dTdD/u9ZvLgQbHGOldJ+FdxuoHAMrl3lKdP4+GpteL5KgMAKhFOCw==",
+     "shasum": "92eac2d133f735ddc838bb1f9397fd864f1da617",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCaW+1PLky2z/MhV7fbUqunisF2XQ/5AmRLjm4jzHlnTgIhAOLNWUwJ45yHM1kBmIRD0SzIm3GT9Jsfk0+168wDzNLm"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.43.tgz",
+     "unpackedSize": 506052
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "241c4b12aadfde4013271816e7e015bfd12f7f4a",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.43"
+   },
+   "0.1.44": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.44",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.44_1788018797208_0.9012076049157676"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.44"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-oX6YkI5MDJ++f77W1T1Y8nkdLa3nh67nVbRZpBETC9HPuQ2UNx/OO97im7UHFuM65k2QY9WY1+tTZJ41zHfl7Q==",
+     "shasum": "6a3fcc1a025fbe30e4ba1a44b88c04646e8f053d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF6xVRXKo2JwuTrrI+zJ29ptyrwuR1036YorQF2GpnM5AiEAw31X1xqOH3zED5+fd/kBsukTmZLOxhXmZmhe69YMRY4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.44.tgz",
+     "unpackedSize": 506528
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "6c1fc008634a4169ba356a337a5fec36c98aac88",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.44"
+   },
+   "0.1.45": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.45",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.45_1788020405089_0.17158816036999336"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.45"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-vrCXNg1GHK1X1SaiE36QV2SBYIB99eUJFrq6yZRq/Xvwq/DYHeiQHt71xh6VIWJK0QYLKw+y2Q1ELgG5o6IwEg==",
+     "shasum": "3da6f58fc06b7e6255c14564e24c3c6644d07095",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH7qGXZcmvIdGOOZ1LPeGT5W55Ym5qE1X7svPssylQCjAiBRXqOGYFkYmxCKqZ9tVY8+fxKPlPKPx1b5J+0FsoDeLQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.45.tgz",
+     "unpackedSize": 505945
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "2f53e1b293bda7ce3227956cc365ca3307fcfd0e",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.45"
+   },
+   "0.1.46": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.46",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.46_1788023167478_0.19705846205761524"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.46"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-oJpJEuYUil0n6Oel58N0I1gOi4re51N2Ftg9+IecUeD+XUBL89YFnnPScZ1m5rcLaJU8K/FSsS39wO3n/NnzCQ==",
+     "shasum": "09c43754b8990a5d08121436b8bf92e2894ade79",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDfsiNMH/xAT1rkPIROQIdT1kYt1GZb0jPgaCeDpv/v2wIhAL2bbjasmZtdygVvWfZ+X1rPwGzN4UA3NcR8w7Z77/d7"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.46.tgz",
+     "unpackedSize": 506100
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d83347df74260bfa956d5e7db27df201f1913eed",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.46"
+   },
+   "0.1.47": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.47",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.47_1788025712268_0.36469531770903596"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.47"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-xvlP4JrkqYU0mhZDOEbyqcUPSs2b+0w38q32pTRQ5IE+hm9b8nxFuwtiON8pl3zv7GYYCmLSLXcHbSu6nsxJuQ==",
+     "shasum": "609bb903aa2612ac0b9edc102c83d35c8f3ecdc4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDmANd6P/cpFtOyH81z/RE+p1b+MEhK2dYzCUlFkMFQ6QIhAPCOftMp1tJzfRpo5EaA6U9yxAVeWgo/XJKkps0a+uOI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.47.tgz",
+     "unpackedSize": 506175
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "319cbc658ee26c84a2fb68e6e003a88058cd47b5",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.47"
+   },
+   "0.1.48": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.48",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.48_1788026262705_0.8389127874884552"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.3.5",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.48"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-jXWRwRneuSN45RHaOaZZteTWvbyfXqJXB/mqAxq+HWJLMZgWS5DTeqT8VsAXwrFbJaQ1FuutYaDpa4pBZRsXng==",
+     "shasum": "84fed5f0e1f18a361c1f5664ac2baf1b5080c0a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQClN5FxST/LhPzhJbt5VdqYRqUTeJLZc+AG208pamzqNQIhAILnY02GhZQrfjagH+9nb/rF/NRxmj28PgCHkXDUhJ2n"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.48.tgz",
+     "unpackedSize": 506401
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "aaac839910dcae9d256afdf1b3bad47764655985",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.48"
+   },
+   "0.1.49": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.49",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.49_1788115497697_0.5853012328309972"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.5.0",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.49"
+     },
+     "fileCount": 159,
+     "integrity": "sha512-SZ7czs0vWrVo+J+j9HGkYaUPN+6f0zmH/PzuE/ls+xyUoTPRxB5OfBe7aZ2VMnFYC8roUEgpkbPGbtSbw8rPGA==",
+     "shasum": "b02dfba8f656e4d82d56ee074edabef68afca38a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAP0w6JGJWe+qfFHcATWVgxqehK1nNGodVR58Dsno45SAiEAyvtVB323WBL41s+pPNXH/CYRxlU9CgsRwjhnzTHgqM0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.49.tgz",
+     "unpackedSize": 515301
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d573ee1d6d3b7291df324c33938fac4fdd1e3dff",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.49"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.5",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.5_1777483952872_0.02117401707660993"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 84,
+     "integrity": "sha512-oNhxn72qeeKYV4UWmY90rEcOs+m0KNlKmPYUL04wqSuofnFudg7ps8I39rZiXE4er2DjEaeR0f/ShuT0S/ygGg==",
+     "shasum": "ded837246e763183372c78d4e77ba5ca17fc4c66",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD2O29hEobnguOQy4IAQaRRR95WohQCmuE57wJvhDzMGwIhAMm/abkdc8yab8GWD4y04E3SkBlxkhoX4NaFTZqediRJ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.5.tgz",
+     "unpackedSize": 234095
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "c0c42cc7bb2f631e3a7e53734eedac405f22ca35",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.5"
+   },
+   "0.1.50": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.50",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.50_1788127096961_0.39252439565159314"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:6d648641-cb59-44ab-9f3f-eafa8ccd14d4"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "6.5.0",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "nodemailer": "9.0.6",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "@types/nodemailer": "8.0.1",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.50"
+     },
+     "fileCount": 156,
+     "integrity": "sha512-N/g5Brz3yagIxDcfuC6Cp50p3xKm/g4auev8Cy1va1KqBibVS5mIMK0NuTkWO9t7gls4IGRfGUg+BbQNbFoHTA==",
+     "shasum": "7ee4b76b2716e6be2cd1ddff15c39a6e8eb2838a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICBdlQgBt2AtH3xVfEWefbtboNF2F98NXGI1B4oSKp0NAiBTr4AgiDaw6MnjI5Rem8nF2ldyBJViK0AIDNZYj4T4Xg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.50.tgz",
+     "unpackedSize": 511223
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "56016663dbb66a78c4c6db1f937295049438ab6a",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.50"
+   },
+   "0.1.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.7",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.7_1777579831958_0.7785977627901859"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.7"
+     },
+     "fileCount": 84,
+     "integrity": "sha512-TJ7r2/8eF4+lw+cNtKkTgckCxT7tXDYJIOgjE9EVgzYsUS/Orwt34WcIloS4XyM5TXYhh5cnLJDnESuPzlWxbg==",
+     "shasum": "4308a469391349e686ea852938f0006d6d75d0d8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCDdGJYATX3VkHcAffMPDwKWSxsdNtLBRmuv50Kvh5+uAIgFZOVHbaJ3Lg6r1REICg/BF0MU7wdnM3i6qPqe6x9EnI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.7.tgz",
+     "unpackedSize": 238420
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "333319c97f3ff244d3e960a79d29e9076bc37114",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.7"
+   },
+   "0.1.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.8",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.8_1777582086780_0.7239959800688949"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.8"
+     },
+     "fileCount": 84,
+     "integrity": "sha512-BL4B3ucxg3098J9Q5U+HzfKfLsBaQlDXk64Wv2CC4JiKN3MgPd1pkOz3ilLql1hV82bOoPTlpv/e9eCy0+Y/rA==",
+     "shasum": "6add4e924c165fc39eada76c3cf667da5b4ac4ed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCH7XzOJzo8gxS+E0qgvGnYdCHxt58zrntLygdOW8cJVgIhALH0rNetz/7UP4yvhqHz4BvbgHCnYOW5+KHaSKInv7hW"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.8.tgz",
+     "unpackedSize": 239770
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "57e8fa1ffe3c3a0661870df49e9f7d283ffbda02",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@diskd-ai/email-client-mcp@0.1.9",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/email-client-mcp_0.1.9_1777647634578_0.8983277306193913"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:2f05d7257e9c]",
+     "name": "it-baron"
+    },
+    "_npmVersion": "11.11.0",
+    "bin": {
+     "email-client-mcp": "dist/server.js"
+    },
+    "bugs": {
+     "url": "https://github.com/diskd-ai/email-client-mcp/issues"
+    },
+    "dependencies": {
+     "@diskd-ai/sdk": "5.1.3",
+     "@modelcontextprotocol/sdk": "^1.26.0",
+     "imapflow": "^1.2.9",
+     "smol-toml": "^1.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "Drive-backed multi-account email MCP with reliable IMAP-to-mailboxes sync.",
+    "devDependencies": {
+     "@biomejs/biome": "2.4.7",
+     "@types/node": "^22.10.0",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+     "vitest": "^2.1.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@diskd-ai%2femail-client-mcp@0.1.9"
+     },
+     "fileCount": 87,
+     "integrity": "sha512-ecCKY3NGd8cU0En3SLHxm19erMwQdUcaTb1DLM0Urxb+ilRcuNKvPNbaHrDmPeTPFAK23WA75HkxRTXZDmXR8A==",
+     "shasum": "854705d1255be55beb3f5de2441ed21b3474b41a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDUaZ8zhVKT57PnAZ9Hnqs9ih3J0a1pOdYyyI+Q/hZenAiAxKw5SOFGd3Kab1TalCv1+D8Q9K/LYO1pAemALpbz+1A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@diskd-ai/email-client-mcp/-/email-client-mcp-0.1.9.tgz",
+     "unpackedSize": 255408
+    },
+    "engines": {
+     "node": ">=24.0.0"
+    },
+    "gitHead": "d818766dfe9484e88e1ed7af35c16c77f69d447d",
+    "homepage": "https://github.com/diskd-ai/email-client-mcp#readme",
+    "license": "LGPL-3.0-or-later",
+    "main": "./dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:2f05d7257e9c]",
+      "name": "it-baron"
+     },
+     {
+      "email": "[redacted-email:4be2a2aa2dc0]",
+      "name": "duckerbrother"
+     }
+    ],
+    "name": "@diskd-ai/email-client-mcp",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/diskd-ai/email-client-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsx src/server.ts stdio",
+     "lint": "biome check .",
+     "lint:fix": "biome check --write .",
+     "prepublishOnly": "bun run build && bun run test",
+     "start": "node dist/server.js stdio",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/server.d.ts",
+    "version": "0.1.9"
+   }
+  }
+ },
+ "name": "@diskd-ai/email-client-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@diskd-ai%2Femail-client-mcp"
+}

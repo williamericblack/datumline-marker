@@ -1,0 +1,1071 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "24.38.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4725a07c3217]",
+    "name": "icedlee337"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "24.34.0",
+   "24.34.1",
+   "24.34.2",
+   "24.35.0",
+   "24.35.1",
+   "24.35.2",
+   "24.35.3",
+   "24.35.4",
+   "24.36.0",
+   "24.37.0",
+   "24.38.0",
+   "24.38.1",
+   "24.38.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@onivoro/server-mcp-auth",
+  "_rev": "13-32e452165f07059b164d57de56930793",
+  "bugs": {
+   "url": "https://github.com/onivoro/monorepo/issues"
+  },
+  "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+  "dist-tags": {
+   "latest": "24.38.2"
+  },
+  "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "modelcontextprotocol",
+   "nestjs",
+   "jwt",
+   "jwks",
+   "oauth",
+   "auth",
+   "authentication",
+   "authorization",
+   "cognito",
+   "auth0",
+   "entra",
+   "scopes",
+   "rfc-9728",
+   "protected-resource-metadata",
+   "ai",
+   "llm"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4725a07c3217]",
+    "name": "icedlee337"
+   }
+  ],
+  "name": "@onivoro/server-mcp-auth",
+  "readme": "# @onivoro/server-mcp-auth\n\nResource server auth for MCP servers built with [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Validates incoming JWT tokens, enriches auth context, auto-discovers scopes, and serves RFC 9728 Protected Resource Metadata.\n\n## Start here\n\nUse this package when your MCP server should trust tokens issued by an external provider such as Cognito, Auth0, Entra, or another JWKS-backed OAuth/OIDC server.\n\nIf you are choosing between the `@onivoro/server-mcp*` packages, start with:\n[MCP Server Package Guide](https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-package-guide.md)\n\n## What this package does\n\n- validates JWT bearer tokens using JWKS\n- enriches MCP auth context before guards and handlers run\n- serves Protected Resource Metadata for MCP auth discovery\n- provides a tested `McpJwtAuthStrategy` that also implements the MCP SDK verifier interface\n\n## What this package does not do\n\n- publish OAuth authorization-server endpoints\n- protect the MCP HTTP route by itself unless the transport also enables bearer challenges\n- replace `@onivoro/server-mcp`\n\n## Installation\n\n```bash\nnpm install @onivoro/server-mcp-auth\n```\n\n**Peer dependencies:** `@onivoro/server-mcp`, `@modelcontextprotocol/sdk`, `@nestjs/common`, `@nestjs/core`, `jsonwebtoken`, `jwks-rsa`\n\n## Quick start\n\n```typescript\nimport { Module } from '@nestjs/common';\nimport { McpHttpModule } from '@onivoro/server-mcp';\nimport { McpAuthModule, McpCognitoAuthStrategy } from '@onivoro/server-mcp-auth';\n\n@Module({\n  imports: [\n    McpAuthModule.configureCognito({\n      region: 'us-east-1',\n      userPoolId: '<pool>',\n      clientId: '<client-id>',\n      resourceServerUrl: 'https://api.example.com/mcp',\n    }),\n    McpHttpModule.registerAndServeHttp({\n      metadata: { name: 'my-server', version: '1.0.0' },\n      authStrategy: McpCognitoAuthStrategy,\n      requireBearerAuth: true,\n    }),\n  ],\n})\nexport class AppModule {}\n```\n\n`McpAuthModule` makes the selected strategy available in the DI container. `McpHttpModule` resolves that existing provider via the `authStrategy` class reference; it does not register the strategy on its own.\n\nWith `requireBearerAuth: true`, unauthenticated HTTP requests are rejected at the transport layer with a standards-compliant `401` challenge and `WWW-Authenticate` metadata. That is the configuration MCP HTTP clients need to trigger OAuth automatically.\n\nWithout `requireBearerAuth`, `McpJwtAuthStrategy` still validates and enriches auth during tool execution, but anonymous HTTP requests are not challenged automatically.\n\nImport `McpAuthModule` in the same Nest application that imports `McpHttpModule.registerAndServeHttp()` or `McpStdioModule.registerAndServeStdio()`, otherwise Nest will not be able to resolve the selected auth strategy and its config dependencies.\n\n## Standalone vs bolted-on servers\n\n`resourceServerUrl` must be the public MCP endpoint URL. This package cannot infer that URL reliably because deployments may use Nest global prefixes, reverse proxies, custom domains, or custom MCP routes.\n\n| App shape | `McpHttpModule` route | Nest global prefix | Public MCP URL / `resourceServerUrl` |\n|-----------|-----------------------|--------------------|--------------------------------------|\n| Standalone default | omitted or `'mcp'` | none | `https://api.example.com/mcp` |\n| Standalone custom | `'internal/mcp'` | none | `https://api.example.com/internal/mcp` |\n| Existing app default | omitted or `'mcp'` | `api` | `https://api.example.com/api/mcp` |\n| Existing app custom | `'internal/mcp'` | `api` | `https://api.example.com/api/internal/mcp` |\n\nFor MCP clients to start OAuth automatically, the same app should also import `McpHttpModule.registerAndServeHttp({ authStrategy: McpJwtAuthStrategy, requireBearerAuth: true })`. The auth module provides validation and metadata; the HTTP module sends the `401` challenge on the MCP route.\n\n## What you get\n\n| Feature | Description |\n|---------|-------------|\n| **JWT validation** | Signature verification via JWKS, issuer/audience/expiry checks |\n| **Auth enrichment** | Extracts `clientId`, `scopes`, `expiresAt`, and custom claims into `McpAuthInfo` |\n| **Scope auto-discovery** | Collects all scopes from `@McpGuard(McpScopeGuard, { scopes })` across tools |\n| **Protected Resource Metadata** | Serves `/.well-known/oauth-protected-resource` (RFC 9728) |\n| **SDK compatibility** | Implements both `McpAuthStrategy` and the SDK's `OAuthTokenVerifier` |\n| **Testing utilities** | `McpTestAuthStrategy`, `createMockAuthInfo()`, `createMockJwt()` |\n\n## Configuration\n\n### Minimum required config\n\n### For JWT validation only\n\n```typescript\nMcpAuthModule.configureJwt({\n  jwksUri: 'https://auth.example.com/.well-known/jwks.json',\n  serveProtectedResourceMetadata: false,\n})\n```\n\n### For Protected Resource Metadata\n\n```typescript\nMcpAuthModule.configureJwt({\n  jwksUri: 'https://auth.example.com/.well-known/jwks.json',\n  issuer: 'https://auth.example.com',\n  resourceServerUrl: 'https://api.example.com/mcp',\n})\n```\n\n### For automatic MCP OAuth challenge flow\n\n```typescript\nMcpAuthModule.configureJwt({\n  jwksUri: 'https://auth.example.com/.well-known/jwks.json',\n  issuer: 'https://auth.example.com',\n  resourceServerUrl: 'https://api.example.com/mcp',\n})\n\nMcpHttpModule.registerAndServeHttp({\n  metadata: { name: 'my-server', version: '1.0.0' },\n  authStrategy: McpJwtAuthStrategy,\n  requireBearerAuth: true,\n})\n```\n\nWithout `requireBearerAuth`, the strategy still validates tokens during tool execution, but MCP HTTP clients will not receive the transport-level `401` challenge they use to start OAuth automatically.\n\n### `McpAuthConfig`\n\n| Field | Type | Default | Description |\n|-------|------|---------|-------------|\n| `jwksUri` | `string` | *required* | JWKS endpoint URL |\n| `issuer` | `string?` | \u2014 | Expected JWT issuer (`iss` claim) |\n| `audience` | `string?` | \u2014 | Expected audience (`aud` claim) |\n| `algorithms` | `string[]?` | `['RS256']` | Accepted signing algorithms |\n| `clientIdClaim` | `string?` | `'client_id'` | JWT claim for client ID. Cognito: `'client_id'`, Auth0: `'azp'`, Entra: `'appid'` |\n| `scopeClaim` | `string?` | `'scope'` | JWT claim for scopes. Auth0: `'permissions'` |\n| `scopeFormat` | `'string' \\| 'array' \\| 'auto'` | `'auto'` | Whether scope claim is space-delimited or array |\n| `extraClaims` | `Record<string, string>?` | \u2014 | Map JWT claim names to `McpAuthInfo.extra` keys |\n| `resourceIdentifier` | `string?` | \u2014 | RFC 8707 resource indicator |\n| `resourceServerUrl` | `string?` | \u2014 | Public MCP endpoint URL for PRM `resource` field |\n| `authorizationServers` | `string[]?` | \u2014 | Auth server URLs for PRM |\n| `serveProtectedResourceMetadata` | `boolean?` | `true` | Serve `/.well-known/oauth-protected-resource` |\n| `protectedResourceMetadataMode` | `'root' \\| 'path' \\| 'both'` | `'both'` | Which RFC 9728 discovery routes to serve |\n| `resourceName` | `string?` | \u2014 | Human-readable name for PRM |\n| `resourceDocumentationUrl` | `string?` | \u2014 | Docs URL for PRM |\n| `jwksCache` | `boolean?` | `true` | Cache JWKS responses |\n| `jwksCacheMaxAge` | `number?` | `600_000` | Cache TTL in ms |\n| `jwksRateLimit` | `boolean?` | `true` | Rate-limit JWKS requests |\n| `jwksRequestsPerMinute` | `number?` | `10` | Max JWKS requests per minute |\n\n### Async configuration\n\n```typescript\nMcpAuthModule.configureJwtAsync({\n  imports: [ConfigModule],\n  inject: [ConfigService],\n  useFactory: (config: ConfigService) => ({\n    jwksUri: config.get('JWKS_URI'),\n    issuer: config.get('JWT_ISSUER'),\n    audience: config.get('JWT_AUDIENCE'),\n  }),\n})\n```\n\n## Provider-specific examples\n\n### AWS Cognito\n\n```typescript\nMcpAuthModule.configureCognito({\n  region,\n  userPoolId: poolId,\n  clientId,\n  resourceServerUrl: 'https://api.example.com/mcp',\n})\n```\n\n### Auth0\n\n```typescript\nMcpAuthModule.configureJwt({\n  jwksUri: `https://${domain}/.well-known/jwks.json`,\n  issuer: `https://${domain}/`,\n  audience: apiIdentifier,\n  clientIdClaim: 'azp',\n  scopeClaim: 'permissions',\n  scopeFormat: 'array',\n})\n```\n\n### Microsoft Entra ID\n\n```typescript\nMcpAuthModule.configureJwt({\n  jwksUri: `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,\n  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,\n  audience: clientId,\n  clientIdClaim: 'appid',\n  extraClaims: { 'tid': 'tenantId', 'oid': 'objectId' },\n})\n```\n\n## Execution pipeline\n\nWhen `requireBearerAuth` is enabled, HTTP auth happens before MCP request handling. After that, the auth strategy still runs during tool execution:\n\n| Stage | Component | Role |\n|-------|-----------|------|\n| 1 | Transport | Extracts raw `authInfo` from the HTTP/stdio request |\n| 2 | **McpJwtAuthStrategy** | Validates JWT, enriches `McpAuthInfo` with decoded claims |\n| 3 | Guards | Check scopes, roles, or custom rules against enriched auth |\n| 4 | Validation | Zod schema validation of tool params |\n| 5 | Interceptors | Cross-cutting concerns (logging, metrics) |\n| 6 | Handler | Tool implementation |\n\n## McpScopeRegistry\n\nAuto-discovers all scopes declared via `@McpGuard(McpScopeGuard, { scopes: [...] })`:\n\n```typescript\n@McpTool({ name: 'delete-item', description: 'Delete an item', schema })\n@McpGuard(McpScopeGuard, { scopes: ['write', 'admin'] })\nasync deleteItem(params: DeleteParams) { ... }\n```\n\nThe `McpScopeRegistry` collects `['write', 'admin']` and exposes them via `getScopesArray()`. These are automatically included in the Protected Resource Metadata `scopes_supported` field.\n\nDynamically registered tools are picked up via `McpToolRegistry.onRegistrationChange()`.\n\n## Protected Resource Metadata routes\n\nWhen `serveProtectedResourceMetadata` is enabled, this package can serve:\n\n- Root discovery: `/.well-known/oauth-protected-resource`\n- Path-derived discovery: `/.well-known/oauth-protected-resource/<resource-path>`\n\nChoose the route mode with `protectedResourceMetadataMode`:\n\n- `'root'`: serve only the root route\n- `'path'`: serve only the path-derived route for `resourceServerUrl`\n- `'both'`: serve both routes for compatibility\n\n`@onivoro/server-mcp` defaults its bearer challenge to the path-derived PRM URL for the actual request path. This supports both standalone MCP servers and existing Nest apps that use `app.setGlobalPrefix()`. For example, `route: 'mcp'` serves `/mcp` standalone and `/api/mcp` behind a global `api` prefix; the default challenge URLs are `/.well-known/oauth-protected-resource/mcp` and `/api/.well-known/oauth-protected-resource/api/mcp` respectively.\n\nIf you need to advertise the root route instead, set `requireBearerAuth: { resourceMetadataUrl: '/.well-known/oauth-protected-resource' }` in `McpHttpModule`.\n\n## Tested behavior\n\nThe package test suite covers:\n\n- JWT validation and enrichment\n- `resourceIdentifier` enforcement\n- Protected Resource Metadata route modes\n- config validation\n- composition with `McpHttpModule` for real HTTP `401` challenges\n\n## Troubleshooting\n\n- Tool calls still work anonymously\n  You likely configured `McpJwtAuthStrategy` but did not enable `requireBearerAuth` in `McpHttpModule`.\n- PRM is not discoverable\n  Set `resourceServerUrl`, and ensure `serveProtectedResourceMetadata` is not disabled.\n- Startup fails on auth config\n  That is expected for invalid PRM config. When PRM is enabled, `resourceServerUrl` and an authorization-server source are required.\n- JWT validation fails for the wrong issuer or audience\n  Verify `issuer`, `audience`, and `resourceIdentifier` against the provider\u2019s actual token claims.\n\n## Testing\n\n```typescript\nimport { McpTestAuthStrategy, createMockAuthInfo, createMockJwt } from '@onivoro/server-mcp-auth';\n\n// Use McpTestAuthStrategy in integration tests\nconst module = await Test.createTestingModule({\n  imports: [\n    McpHttpModule.registerAndServeHttp({\n      metadata: { name: 'test', version: '1.0.0' },\n      authStrategy: McpTestAuthStrategy,\n    }),\n  ],\n}).compile();\n\nconst testAuth = module.get(McpTestAuthStrategy);\ntestAuth.setAuthInfo(createMockAuthInfo({ scopes: ['admin'], extra: { userId: 'u-1' } }));\n\n// createMockJwt for unit tests (decodable but unsigned)\nconst token = createMockJwt({ sub: 'test-user', scope: 'read write' });\n```\n\n## Exports\n\n| Export | Type | Description |\n|--------|------|-------------|\n| `McpAuthModule` | Module | Dynamic module with `configureJwt()`, `configureJwtAsync()`, `configureCognito()`, and `configureCognitoAsync()` |\n| `McpCognitoAuthStrategy` | Class | Cognito-aware access-token verifier for `authStrategy` |\n| `McpAuthConfig` | Interface | Configuration options |\n| `McpAuthAsyncOptions` | Interface | Async factory options |\n| `MCP_AUTH_CONFIG` | Symbol | Injection token for config |\n| `McpJwtAuthStrategy` | Service | JWT auth strategy \u2014 implements `McpAuthStrategy` + `OAuthTokenVerifier` |\n| `McpJwksService` | Service | JWKS key fetching with caching and rate limiting |\n| `McpScopeRegistry` | Service | Auto-discovers scopes from guard metadata |\n| `McpProtectedResourceController` | Controller | RFC 9728 metadata endpoint |\n| `McpTestAuthStrategy` | Service | Test-friendly auth strategy |\n| `createMockAuthInfo` | Function | Factory for test `McpAuthInfo` objects |\n| `createMockJwt` | Function | Creates decodable unsigned JWTs for testing |\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/onivoro/monorepo.git"
+  },
+  "time": {
+   "24.34.0": "2026-04-22T06:02:41.411Z",
+   "24.34.1": "2026-04-22T11:13:23.460Z",
+   "24.34.2": "2026-04-22T21:32:38.217Z",
+   "24.35.0": "2026-04-23T01:59:26.847Z",
+   "24.35.1": "2026-04-24T21:25:24.122Z",
+   "24.35.2": "2026-04-27T20:25:15.058Z",
+   "24.35.3": "2026-05-09T15:39:49.281Z",
+   "24.35.4": "2026-05-09T16:15:02.775Z",
+   "24.36.0": "2026-05-09T20:36:07.799Z",
+   "24.37.0": "2026-05-10T08:21:42.795Z",
+   "24.38.0": "2026-05-10T20:58:31.684Z",
+   "24.38.1": "2026-05-12T05:04:52.425Z",
+   "24.38.2": "2026-05-15T06:33:19.373Z",
+   "created": "2026-04-22T06:02:41.090Z",
+   "modified": "2026-05-15T06:33:19.528Z"
+  },
+  "versions": {
+   "24.34.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.34.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.34.0_1776837761240_0.9772598514890296"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "Resource server auth for MCP servers built with [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Validates incoming JWT tokens, enriches auth context, auto-discovers scopes, and serves RFC 9728 Protected Resource Metadata.",
+    "directories": {},
+    "dist": {
+     "fileCount": 29,
+     "integrity": "sha512-aJBVS+jUQdfB9pETZaw6WtuW/aQnv+vOFhcY65hdxmpUYDfpP+nv/HsgsTqYFqA3WOx8Sxp2nGjUq2sDtTFIKQ==",
+     "shasum": "8db7d80486e62633374d42d5776fc3d2dd6b7c24",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDqQGka8ocXtVcJ4k4u+N9BnwHNFLYUqxvHeWnvU0mDUwIhANKpfnAwpWpdxUlz8yjqaBcYdBrWttDyh3B6+eHPHX+V"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.34.0.tgz",
+     "unpackedSize": 40159
+    },
+    "gitHead": "a3f90d7ada333c6c0406e354849283c857e94c30",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.0"
+   },
+   "24.34.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.34.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.34.1_1776856403316_0.6142429382875925"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "Resource server auth for MCP servers built with [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Validates incoming JWT tokens, enriches auth context, auto-discovers scopes, and serves RFC 9728 Protected Resource Metadata.",
+    "directories": {},
+    "dist": {
+     "fileCount": 29,
+     "integrity": "sha512-vQtiI+vyklLVrOJDmU2lLOfyzVl6EbIxSU9YEHz97rq4Db/0CxpALucp7MNgRdLoAErpx+fXyP9d/Ph2MXXpEg==",
+     "shasum": "a7d588816d80cd9198a13068a1f8ac6328beec23",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD89JAYi8Y/r0FvvpL+G80B0rKN/3AdG5Ux4ZevxchUTQIgISyJgQsdkvgvG+xT/UhkAn6VQ7xCyZd2GNNOXWcCaBw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.34.1.tgz",
+     "unpackedSize": 40159
+    },
+    "gitHead": "0f390195f2af3a71ffcef11320b58c7446f24c2c",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.1"
+   },
+   "24.34.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.34.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.34.2_1776893558067_0.9510755814722525"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.34.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "Resource server auth for MCP servers built with [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Validates incoming JWT tokens, enriches auth context, auto-discovers scopes, and serves RFC 9728 Protected Resource Metadata.",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-pLGiBlv0zsO6JIioKtpzZKYMxpXFDDo1p4H0PbsGndKv7M9GwoY/EjCLU/LmrgLTqmxnK2syPM2ZI7wj7jAVNw==",
+     "shasum": "97a0c5d1f8a348522fec69e3e873ee3f71a74b00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCh+wS8GT9ef/xvXRG8uqiciRut3RCtrTs7Td5rEjUsEAIhAJ/fMr1juvyOAcJUfKj4N11dOjmUVh7lhX6PkWshMoHz"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.34.2.tgz",
+     "unpackedSize": 41798
+    },
+    "gitHead": "87bbf44de652a58cbbacca1ccc910a9a3364e288",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.34.2"
+   },
+   "24.35.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.35.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.35.0_1776909566669_0.33102847469555297"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "Resource server auth for MCP servers built with [`@onivoro/server-mcp`](https://www.npmjs.com/package/@onivoro/server-mcp). Validates incoming JWT tokens, enriches auth context, auto-discovers scopes, and serves RFC 9728 Protected Resource Metadata.",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-cUEqsHJt7K06/NEb/O4OmpciHQYF7UsiawjMjHgErahZrbcN7mGK/Yb5zxCcihREH74l4ywtq2bYgXw40VAReg==",
+     "shasum": "5690378adb8c5f8c41431e5b12a9a568247cd851",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEiurh+mhxbv7XpFpv0LZVGqlvQSL4PiLts2YCr55aYmAiA2fpKvPutWdIwzKh7pwwTq6UmZqY8Q5wMyYOA6YWGRLw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.35.0.tgz",
+     "unpackedSize": 41821
+    },
+    "gitHead": "17f4f99fe6379903f2b2ef6e6fedc40943e0466f",
+    "homepage": "https://github.com/onivoro/monorepo#readme",
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.0"
+   },
+   "24.35.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.35.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.35.1_1777065923957_0.022046321307443106"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-syPCyocaw7C4K4MwtYtgrLbWw1l6HGzXrrXkMHYypiK+YVW2MGagPfGnc8/ISNMT7EjBxQ7MfeT6Y+PmU4fyZA==",
+     "shasum": "5124062a87e002ed432787ef24d4a86abbd236b3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDgwTWAXj8j94P+3RZCwTaZeMK1O8YQLcfusXFQEHp/IgIgaVulYNyyz4f8LUwTZMMZsMnzyDIins5MVszCCCYV+vg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.35.1.tgz",
+     "unpackedSize": 42375
+    },
+    "gitHead": "73866e79047b0584cc29e3cd4348bc19951079ff",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.1"
+   },
+   "24.35.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.35.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.35.2_1777321514900_0.7343968368688463"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-GgPD7FqJdQOZRZf28HW9lKuqYNjJNLM2iuxB1Fy0pyL1VLWWv7jxzeURE2SxInH0+Q5mOA7o8mbGRomkHGfurw==",
+     "shasum": "f44365c83b58fe97a04965e11ca3ad6a4964f41e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDZIdddcxiU8TThId6B9ELJ3L0RFBZM5Ahh5BUIXB8edwIgHucUBX63ooxtGMOTKUyU0mxS56GfHiipjqYEXHSqWgc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.35.2.tgz",
+     "unpackedSize": 42375
+    },
+    "gitHead": "5d3419081048ddedd2810d205b1bf829634b3cc8",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.2"
+   },
+   "24.35.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.35.3",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.35.3_1778341189131_0.3321691419416877"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.3",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-ipMmWvHK6J+wWBVsgEQwMsJNCWwNUgwsrJYgXSnI6PmmF7XMl5byAgqCbfF+T3aawpHx9wlgIE2VDI6jdkTCOw==",
+     "shasum": "638b63bc7d7cb615f6c7dc885874d5ec2a360af6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICoFUIxk1QqbmTbwEQe4TP+RIq0deiDN87z2gjuKI9cTAiEAmumK5A8kDpjD8N044b/XZuThtD18hiAGyv9lOzzlrJ4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.35.3.tgz",
+     "unpackedSize": 42693
+    },
+    "gitHead": "2f7d7c102d56b98f12e61e4f7ff456706828e6ac",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.3"
+   },
+   "24.35.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.35.4",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.35.4_1778343302607_0.24871340444541357"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.35.4",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-r/4FlTuCIXROtSWHti3jRkp31T0xmMubVnF/PIf7BJOE/nUDS0Qt31dtKmlLAyJvIFmLl9rDh7DukbhzDLx79Q==",
+     "shasum": "81476f3191d674255b85352bbcb3ecb011c95fad",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAjTG40JD+M3XdpKfTz0rsdhb3Ncp7hoknvJLGZrBjBSAiEA8BrXyWeRcwMUX0PH4i22Oc7W1zDyIwSASpvnkbztyhc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.35.4.tgz",
+     "unpackedSize": 42693
+    },
+    "gitHead": "7071f6296e6fe7680b22239595c6c1a09da6f1b5",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.35.4"
+   },
+   "24.36.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.36.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.36.0_1778358967642_0.6095105287118299"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.36.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-Y5NA8CZJfIPQakmqCBEL8aD5TNWyhNiR5npdqp/1cP5ROoN9qu6KYNNp3rst228FJZLJZtKMs0Z44sgHNKPwxA==",
+     "shasum": "f42ae7f87cf26b9bc7e13b663dabffae66b339aa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCa58iY9iKhaKv/BB2d090VamIOgAyg78QlC3zbPJYu5gIgBavbNrB7189gbazZQHKb+x301UP3Onj0W8t+4foF9So="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.36.0.tgz",
+     "unpackedSize": 52600
+    },
+    "gitHead": "802792e07fbe835963c83e235180988e9fdf8264",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.36.0"
+   },
+   "24.37.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.37.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.37.0_1778401302653_0.5656758562013504"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.37.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-JbjxUriDgmQmTtRqRfVzPwoSODAfdzHz8I2Fwnz+3zrPie7yqeQRA+5dcltmVrO1d9cs/OfpjZhJPzHWHCjNcw==",
+     "shasum": "f8cb3fc910daa9b8dca51b6310655fff84781e7d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB14GqPctmuKWE3o4PwoN8JDfRjROPeLYALGvnDBY9myAiAVI2UvuZmJQg3omak9rSeGLdSV6rlLh0HA4qIMcXiU0w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.37.0.tgz",
+     "unpackedSize": 71385
+    },
+    "gitHead": "f77c87fe2e2b06c7c0e86761867f3353a5cbd309",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.37.0"
+   },
+   "24.38.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.38.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.38.0_1778446711533_0.9265854821758763"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.0",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-HrFdAy8irOllycOv1vDeIfs9zrpwK6f6H4x+M6F+p+xQKD+lRaOVFEKWqluanTEC1GxP0oDnpqxAwn1N86BV2A==",
+     "shasum": "49d355a0acad30d9ed84c07dc05725ecaac152d0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAzqe4tRrI6bn/0XULK4wkW+skYmuNilkia6fFjPWJg3AiEAiEi++g9YAMT+yMHdw3m44pUcH4YON/em4XUiKHLOvaM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.38.0.tgz",
+     "unpackedSize": 72842
+    },
+    "gitHead": "aa60b8695d8782dc522ee2331b97d4416f119a1a",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.0"
+   },
+   "24.38.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.38.1",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.38.1_1778562292253_0.9807484720246287"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.1",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-0I50yO39fyVFHnS0WIjyDl/5Ds/eBYsxITFrmaTm1WPkL/+b9czfgdiwr6bNDiGnnmiLiMnstZ24O9xfVKFZtw==",
+     "shasum": "35f3af7b5ac8f09069c10990ef6260dc4053f72d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBSG+0j0qLqErkyXVuAXEbFNIDvuFVyOXd5ScyVcfkAdAiEAodeq3vMo8GEVonnqr+cPmiIHZNt6izePWBL5+T8ycpQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.38.1.tgz",
+     "unpackedSize": 72842
+    },
+    "gitHead": "062ab9d46c0c032121077cb48cfcbb9c56eaa816",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.1"
+   },
+   "24.38.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@onivoro/server-mcp-auth@24.38.2",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-mcp-auth_24.38.2_1778826799254_0.27488561061491756"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4725a07c3217]",
+     "name": "icedlee337"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/onivoro/monorepo/issues"
+    },
+    "dependencies": {
+     "@onivoro/server-mcp": "^24.38.2",
+     "tslib": "^2.3.0"
+    },
+    "description": "JWT authentication for MCP servers \u2014 JWKS validation, scope auto-discovery, and RFC 9728 Protected Resource Metadata",
+    "directories": {},
+    "dist": {
+     "fileCount": 50,
+     "integrity": "sha512-B6A/dGa74ZWtRZcpYDuLcb3pc2sZHKX6BUJOlCK4wEjusJdH6X9txUb/F0FtCkEhC91zfMMjOtndldmpSdUZpg==",
+     "shasum": "ac88cc4885be819407aedf8a35f388e3983314a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDvIEdwB36hVe9J2FQ1pl2/eNHKhbn4TsACU/1wV3/QfQIgCxDRHTzGYQ3t4yZ/8H6RJ6UNtoNyoj31Ofs/D13zIp0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@onivoro/server-mcp-auth/-/server-mcp-auth-24.38.2.tgz",
+     "unpackedSize": 72842
+    },
+    "gitHead": "be9e8662b5ec38ad83510299696f8187b75c78e3",
+    "homepage": "https://github.com/onivoro/monorepo/blob/main/libs/server/mcp-auth/README.md",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "nestjs",
+     "jwt",
+     "jwks",
+     "oauth",
+     "auth",
+     "authentication",
+     "authorization",
+     "cognito",
+     "auth0",
+     "entra",
+     "scopes",
+     "rfc-9728",
+     "protected-resource-metadata",
+     "ai",
+     "llm"
+    ],
+    "license": "MIT",
+    "main": "./src/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4725a07c3217]",
+      "name": "icedlee337"
+     }
+    ],
+    "name": "@onivoro/server-mcp-auth",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.28.0",
+     "@nestjs/common": "^10.0.0 || ^11.0.0",
+     "@nestjs/core": "^10.0.0 || ^11.0.0",
+     "jsonwebtoken": "^9.0.0",
+     "jwks-rsa": "^3.0.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/onivoro/monorepo.git"
+    },
+    "type": "commonjs",
+    "types": "./src/index.d.ts",
+    "version": "24.38.2"
+   }
+  }
+ },
+ "name": "@onivoro/server-mcp-auth",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@onivoro%2Fserver-mcp-auth"
+}

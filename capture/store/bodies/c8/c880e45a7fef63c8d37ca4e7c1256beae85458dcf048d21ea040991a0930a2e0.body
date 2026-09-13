@@ -1,0 +1,542 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@ni-c/imap-mcp",
+  "_rev": "7-bd0fd9656e1cf26bba13e23e4ae99dc0",
+  "author": {
+   "name": "Willi Thiel"
+  },
+  "bugs": {
+   "url": "https://github.com/ni-c/imap-mcp/issues"
+  },
+  "description": "MCP server for IMAP mailboxes: read, search, organise and draft mail \u2014 it cannot send",
+  "dist-tags": {
+   "latest": "0.5.0"
+  },
+  "homepage": "https://imap-mcp.ni-c.de",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "imap",
+   "email",
+   "mail",
+   "mailbox",
+   "read-only"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "name": "@ni-c/imap-mcp",
+  "readme": "# imap-mcp\n\n<!-- badges: start -->\n\n[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/imap-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/imap-mcp/actions/workflows/ci.yml)\n[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ni-c/imap-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/ni-c/imap-mcp)\n<a href=\"https://socket.dev/npm/package/@ni-c/imap-mcp\"><img src=\"https://socket.dev/api/badge/npm/package/@ni-c/imap-mcp\" alt=\"Socket supply-chain report\" height=\"20\"></a>\n[![Glama score](https://glama.ai/mcp/servers/ni-c/imap-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ni-c/imap-mcp)\n<br>\n[![npm version](https://img.shields.io/npm/v/%40ni-c%2Fimap-mcp)](https://www.npmjs.com/package/@ni-c/imap-mcp)\n[![container image](https://img.shields.io/badge/ghcr.io-ni--c%2Fimap--mcp-4f46e5?logo=docker&logoColor=white)](https://github.com/ni-c/imap-mcp/pkgs/container/imap-mcp)\n[![HTTP via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-4f46e5?logo=modelcontextprotocol&logoColor=white)](https://mcp-hub.ni-c.de)\n<br>\n[![docs](https://img.shields.io/badge/docs-imap--mcp.ni--c.de-4f46e5?logo=readthedocs&logoColor=white)](https://imap-mcp.ni-c.de)\n[![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)\n<!-- badges: end -->\n\nA [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for any IMAP\nmailbox. It speaks IMAP rather than one vendor's API, so it works with whatever provider you\nalready have.\n\nLets MCP clients like Claude Code, Claude Desktop or Codex read and search your mail, organise\nit into folders, save attachments and draft replies \u2014 with every message fenced as untrusted\ncontent, and the write tools off unless you turn them on.\n\nEleven tools, not fifty: a mail account is a workflow, not an API surface, so related\noperations are folded into one tool with a mode rather than split across many. And eleven is\nthe ceiling, not the floor \u2014 `IMAP_ALLOW_TOOLS=essential` registers a curated six instead, and\nunder the read-only default that narrows to four. See\n[choosing which tools load](#choosing-which-tools-load).\n\n<!-- <picture> is resolved against the colour scheme of the page showing it, so GitHub\n     picks the variant that matches its own theme toggle. npm strips <picture> and\n     <source> when it sanitises the README and keeps the <img>, which is why that\n     fallback carries its own dark card. The URLs are absolute because relative ones\n     are simply invisible on the npm package page. -->\n<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://imap-mcp.ni-c.de/architecture-dark.svg\">\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"https://imap-mcp.ni-c.de/architecture-light.svg\">\n  <img src=\"https://imap-mcp.ni-c.de/architecture.svg\" alt=\"An MCP client talking to imap-mcp over stdio, which connects to an IMAP server over TLS and returns message bodies fenced as untrusted content\" width=\"800\">\n</picture>\n\n<img src=\"https://imap-mcp.ni-c.de/demo.gif\" alt=\"Listing the tools registered under the read-only default, listing an inbox, and reading a phishing message \u2014 which comes back with the injection shapes named first, the body fenced line by line, and the tracking beacon defused\" width=\"800\">\n\n## What makes it different\n\n**It cannot send mail. That is the feature.** An agent with access to private data, exposure to\nuntrusted content, and a channel to the outside world is exploitable by anyone who can put a\nmessage in the inbox \u2014 the pattern that produced\n[EchoLeak](https://msrc.microsoft.com/update-guide/vulnerability/CVE-2025-32711), where one\ncrafted email exfiltrated internal data from Microsoft 365 Copilot with no user interaction.\nThis server has the first two and deliberately not the third. `save_draft` writes the reply\ninto your Drafts folder; you send it from your own mail client. No amount of clever text in a\nmessage can make this server post anything anywhere.\n\n**Writes are off until you turn them on.** With only `IMAP_HOST`, `IMAP_USER` and\n`IMAP_PASSWORD` set, the server registers six read tools and nothing else. The mailbox tools\nappear with `IMAP_READ_ONLY=false` \u2014 note the default is `true`, the opposite of the other\nservers in this family, because this one reaches a mailbox. Tools that are off are not registered at all \u2014 a\ncapability the model cannot see is one it cannot be talked into using.\n\n**Mail is treated as hostile input, because it is.** Anyone in the world can put text in your\ninbox. Message bodies are fenced between markers carrying a per-call random nonce, _and_ every\nline inside them is prefixed with that nonce, so the \"this is data\" signal does not stop at the\nedges of a long forwarded thread. A reminder follows the block, because otherwise the last\ninstruction-shaped sentence in the model's context is the attacker's. Zero-width characters and\ndirectional overrides are stripped before the model sees anything, hidden HTML elements are\ndropped on a best-effort basis (the fencing, not the stripping, is what carries the weight), and\nmarkdown image syntax \u2014 inline and reference style \u2014 is defused so a rendering client cannot be\nmade to fetch a tracking URL.\n\nThat covers folder names too, and it did not always: a folder name is chosen by whoever created\nthe folder, which on a shared mailbox is not necessarily you. `list_mailboxes` returns the name\ntwice \u2014 `path` exactly as the server spelled it, because that is the handle every other tool\ntakes, and `display_name` cleaned up for reading, with a warning on the entry when the two differ.\n\nAlongside the message you get a server-side assessment: the SPF/DKIM/DMARC verdicts with the\nauthserv-id they came from, which prompt-injection shapes matched, and which words mix Latin\nwith Cyrillic or Greek letters. When something matches, the warning is the first thing in the\nresult rather than a field buried in JSON.\n\nThose verdicts carry a `forgeable` flag, and by default it is always `true`. A sender can write\nan `Authentication-Results` header of their own, and if your provider does not add one, theirs\nis the only one there \u2014 nothing inside the message distinguishes the two. Set\n`IMAP_TRUSTED_AUTHSERV_ID` to the id your provider stamps (it is the first token of the header\non any message you already have) and only that id counts as authentic. Until you do, `spf=pass`\nis reported as what it is: a claim, from a header anyone could have written.\n\n**\"New mail\" that actually works.** The server tags messages it has handed over with a custom\nIMAP keyword (`AiSeen` by default), so `list_new_messages` returns each message once. The human\n`\\Seen` state is never touched \u2014 everything is read with `BODY.PEEK`.\n\n**Deleting and moving ask a person.** Where the client supports MCP elicitation, `delete_messages`,\n`move_messages` and deleting a folder raise a real dialog that the model cannot answer on its\nbehalf. Where it does not, they fall back to a two-call token \u2014 and say so, rather than implying\nsomebody approved. `ELICITATION=false` takes that fallback deliberately; it never removes the\nguard. See [Asking a person](https://imap-mcp.ni-c.de/guide/approval).\n\n## Requirements\n\n- Node.js 22 or newer\n- An IMAP account. Providers with two-factor authentication generally need an app-specific\n  password.\n\n## Configuration\n\n| Variable                    | Required | Default       | Description                                                  |\n| --------------------------- | -------- | ------------- | ------------------------------------------------------------ |\n| `IMAP_HOST`                 | yes      | \u2014             | Hostname of the IMAP server, e.g. `imap.example.net`         |\n| `IMAP_USER`                 | yes      | \u2014             | Account username, usually the address                        |\n| `IMAP_PASSWORD`             | yes      | \u2014             | Password or app-specific password                            |\n| `IMAP_PORT`                 | no       | `993` / `143` | Defaults by TLS mode                                         |\n| `IMAP_TLS`                  | no       | `implicit`    | `implicit`, `starttls` or `none`                             |\n| `IMAP_MAILBOX`              | no       | `INBOX`       | Mailbox the message tools default to                         |\n| `IMAP_READ_ONLY`            | no       | **`true`**    | Exactly `false` registers the five mailbox tools             |\n| `IMAP_ALLOW_TOOLS`          | no       | \u2014             | Tool names, `list_*` prefixes or `essential`                 |\n| `IMAP_DENY_TOOLS`           | no       | \u2014             | Same syntax; subtracted from the allow list                  |\n| `IMAP_SEEN_KEYWORD`         | no       | `AiSeen`      | Keyword for new-mail tracking; empty turns it off            |\n| `IMAP_TRUSTED_AUTHSERV_ID`  | no       | \u2014             | The authserv-id your provider stamps; see below              |\n| `IMAP_DRAFTS_MAILBOX`       | no       | auto          | Overrides the folder found via the `\\Drafts` flag            |\n| `IMAP_MAX_MESSAGES`         | no       | `100`         | Default page size                                            |\n| `IMAP_MAX_ATTACHMENT_BYTES` | no       | `1048576`     | Ceiling for returning an attachment inline                   |\n| `IMAP_MAX_DOWNLOAD_BYTES`   | no       | `26214400`    | Ceiling for writing one to disk                              |\n| `IMAP_MAX_EXTRACT_BYTES`    | no       | `10485760`    | Ceiling for reading a document's text; max `67108864`        |\n| `IMAP_ATTACHMENT_TYPES`     | no       | see below     | Comma-separated content-type allowlist                       |\n| `IMAP_DOWNLOAD_DIR`         | no       | \u2014             | Setting it allows saving attachments there                   |\n| `IMAP_INSECURE_TLS`         | no       | `false`       | Exactly `true` accepts a self-signed certificate             |\n| `ELICITATION`               | no       | `true`        | `false` replaces the dialog with the token. **Not prefixed** |\n\nBooleans are compared against the literal string `true`; `1`, `yes` and `True` are not true.\n`IMAP_READ_ONLY` is the mirror image: only the literal `false` turns it off, so a typo leaves\nthe write tools unregistered.\n\n> **`IMAP_ALLOW_WRITE` is gone.** It has been replaced by `IMAP_READ_ONLY`, and an installation\n> that still sets it **refuses to start**. Silently ignoring a removed security variable is the\n> worst of the options: whoever set it once believes it is still in force. The default is\n> unchanged \u2014 writes are still off unless you ask for them.\n\n### Choosing which tools load\n\n`IMAP_ALLOW_TOOLS` and `IMAP_DENY_TOOLS` take comma-separated tool names; a trailing `*`\nmatches a whole family. `essential` is a curated preset of six \u2014 `list_mailboxes`,\n`list_new_messages`, `list_messages`, `get_message`, `set_message_flags` and `move_messages`.\nFour of those are read tools, so it stays useful under the read-only default.\n\n```sh\nIMAP_ALLOW_TOOLS=essential\nIMAP_ALLOW_TOOLS=list_new_messages,get_message,move_messages\nIMAP_DENY_TOOLS=delete_messages\n```\n\nOne boundary the list cannot draw: `move_messages` copies as well as moves (`mode: \"copy\"`),\nand the two are one tool. Denying `move_messages` removes both; there is no way to keep moving\nand forbid copying, or the other way round. Both modes ask for confirmation.\n\nAn entry that matches no tool aborts startup and names it, so a typo cannot silently hide a\ntool \u2014 an absent tool is not something anyone traces back to an environment variable. A\nfiltered tool is never registered, so it is absent from `tools/list` and unknown to\n`tools/call` alike, exactly like a write tool under `IMAP_READ_ONLY`.\n\nIt covers **tools**. The attachment resources this server also exposes are not filtered.\n\nIf you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de) is the other\nanswer \u2014 its `/hub` endpoint replaces every server's tools with six meta-tools.\nThe password is deleted from the process environment as soon as it is read, so it is not\nvisible to child processes or in `/proc/<pid>/environ`.\n\nWithout `IMAP_DOWNLOAD_DIR` this server never writes to the filesystem. The three size limits are\nseparate on purpose, because they answer three different questions:\n`IMAP_MAX_ATTACHMENT_BYTES` protects the model's context window,\n`IMAP_MAX_DOWNLOAD_BYTES` protects your disk, and `IMAP_MAX_EXTRACT_BYTES` bounds how much\nhostile input one parser is handed. Raising any one of them is not a request to raise the others.\n\nThe server starts without credentials on purpose \u2014 it completes the handshake and lists its\ntools, and every call then fails with setup instructions instead of reaching a server.\n\n## Installation\n\n### Claude Code\n\n```sh\nclaude mcp add imap-mcp \\\n  -e IMAP_HOST=imap.example.net -e IMAP_USER=[redacted-email:9a0b7e5b6fe7] -e IMAP_PASSWORD=\u2026 \\\n  -- npx -y @ni-c/imap-mcp\n```\n\n### Claude Desktop\n\n```json\n{\n  \"mcpServers\": {\n    \"imap-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/imap-mcp\"],\n      \"env\": {\n        \"IMAP_HOST\": \"imap.example.net\",\n        \"IMAP_USER\": \"[redacted-email:9a0b7e5b6fe7]\",\n        \"IMAP_PASSWORD\": \"\u2026\"\n      }\n    }\n  }\n}\n```\n\n### Codex\n\n```toml\n[mcp_servers.imap-mcp]\ncommand = \"npx\"\nargs = [\"-y\", \"@ni-c/imap-mcp\"]\nenv = { IMAP_HOST = \"imap.example.net\", IMAP_USER = \"[redacted-email:9a0b7e5b6fe7]\", IMAP_PASSWORD = \"\u2026\" }\n```\n\n### Docker\n\n```sh\ndocker run --rm -i \\\n  -e IMAP_HOST=imap.example.net \\\n  -e IMAP_USER=[redacted-email:9a0b7e5b6fe7] \\\n  -e IMAP_PASSWORD=\u2026 \\\n  ghcr.io/ni-c/imap-mcp\n```\n\nSaving attachments needs a writable directory, and the image runs as uid 1000 \u2014 so a\nbind mount has to be owned by it on the host: `-e IMAP_DOWNLOAD_DIR=/data -v\n\"$PWD/attachments:/data\"` with `chown 1000:1000 attachments`. Without\n`IMAP_DOWNLOAD_DIR` the container never writes anything.\n\n### Through mcp-hub\n\nA client that cannot spawn a local process \u2014 ChatGPT connectors, Claude on the web,\nCursor, LibreChat \u2014 reaches imap-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one\ncontainer serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login\nbehind a single password and long-lived tokens for the clients that cannot do OAuth. Its\n`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of\nthem without N\u00d7tool schemas in the model's context, and it speaks both protocol revisions\n\u2014 a question this server asks travels through it to the person at the far end.\n\nIts `/config/mcp.json` uses Claude Code's format, so the entry is the one you already\nhave:\n\n```json\n{\n  \"mcpServers\": {\n    \"imap-mcp\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/imap-mcp\"],\n      \"env\": {\n        \"IMAP_HOST\": \"imap.example.net\",\n        \"IMAP_USER\": \"[redacted-email:6557af49428c]\",\n        \"IMAP_PASSWORD\": \"\u2026\",\n        \"IMAP_ALLOW_TOOLS\": \"essential\"\n      },\n      \"denyTools\": [\"delete_messages\"]\n    }\n  }\n}\n```\n\n`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not\nthe same thing as `*_ALLOW_TOOLS` in `env` \u2014 the difference, and the mistake it invites,\nare in the [client guide](https://imap-mcp.ni-c.de/guide/clients#through-mcp-hub).\n\n## Tools\n\n**Read** \u2014 always registered\n\n| Tool                | What it does                                                                             |\n| ------------------- | ---------------------------------------------------------------------------------------- |\n| `get_server_info`   | Capabilities, permanent flags, whether the keyword is storable, which tool groups are on |\n| `list_mailboxes`    | Every folder with message and unseen counts and its special-use role                     |\n| `list_messages`     | Lists and searches: sender, recipient, subject, body, date range, flags                  |\n| `list_new_messages` | Messages not handed over yet; marks them afterwards, `dry_run` to preview                |\n| `get_message`       | Headers and body, fenced untrusted, plus the security assessment; `include_thread`       |\n| `get_attachments`   | Without `part_id` lists them, with `part_id` reads, extracts or saves one                |\n\n**Mailbox** \u2014 needs `IMAP_READ_ONLY=false`\n\n| Tool                | Confirmation                                              |\n| ------------------- | --------------------------------------------------------- |\n| `set_message_flags` | none \u2014 flags are reversible, and `\\Deleted` is refused    |\n| `move_messages`     | \ud83d\udc64 for both `move` and `copy`, \ud83d\udd12 where the client cannot |\n| `delete_messages`   | \ud83d\udc64 asks the user, \ud83d\udd12 where the client cannot              |\n| `manage_mailbox`    | \ud83d\udc64 for `delete`, \ud83d\udd12 for `rename`, none for `create`       |\n| `save_draft`        | none \u2014 a draft does not leave the mailbox                 |\n\n\ud83d\udc64 raises a dialog the model cannot answer \u00b7 \ud83d\udd12 needs a confirmation token: call once to\nreceive one, then again with it.\n\n`copy` is confirmed as well as `move`, because the thing that cannot be taken back is not\nthe deletion \u2014 it is the disclosure. A destination is a free-form folder name, and on a\nshared account or a public namespace one call hands every message to everyone who can read\nit, leaving the source folder untouched. For the same reason `set_message_flags` refuses to\nadd `\\Deleted`: it is half a deletion, and the next client to close the mailbox may finish\nit. Use `delete_messages`, which asks.\n\nNeither a confirmation nor a dialog quotes a mailbox name inside its own sentence \u2014 folder\nnames come from the account, which on a shared mailbox means a colleague chose them.\n\n### Structured output\n\nEvery tool declares an `outputSchema` and answers with `structuredContent`\nalongside the text block, so a client can use the result without parsing prose:\n\n```jsonc\n{\n  \"untrusted\": true,\n  \"source\": \"imap\",\n  \"mailbox\": \"INBOX\",\n  \"total_matching\": 214,\n  \"offset\": 0,\n  \"returned\": 25,\n  \"next_offset\": 25,\n  \"messages\": [{ \"uid\": 4711, \"subject\": \"\u2026\", \"from\": \"\u2026\", \"seen\": false }],\n}\n```\n\nEvery tool that reports anything out of the mailbox carries `untrusted: true`\nand `source: \"imap\"` as fields \u2014 a sender display name, a folder name a\ncolleague chose and an attachment filename are all attacker-controllable, and\nthey reach the model through the listing tools long before anyone opens a\nmessage. Only `get_server_info` and the five write tools are without it: those\nreport this server's own configuration, or what it just did with the uids it was\ngiven.\n\n`get_message` and a text attachment keep the per-call nonce fence in the text\nblock \u2014 the structured half states the same fields, so a client is not made to\nparse the fence to find them. An image attachment keeps its bytes in the content\nblock, where a client renders them, rather than repeating the base64.\n\nA refusal is now an **error result**: an attachment the policy rejects, one whose\nbytes are an executable whatever it claimed, one too large to inline. Each was a\nplain result that read like an answer.\n\nAttachments are also available as MCP resources at `imap://message/{uid}/part/{partId}`, which\nmatters where the server has no useful filesystem. The resource path runs the same allowlist,\nsize limit and magic-byte check as the tool \u2014 it is not a second, unguarded door.\n\n## Not exposed, on purpose\n\nNo sending, no SMTP, no raw IMAP passthrough, no `APPEND` of arbitrary MIME, no HTML\ncomposition, no OAuth2, and **no OCR** \u2014 a scanned PDF has no text to extract and says so\nrather than guessing. The first is the whole security argument (see `SECURITY.md`); the\nsecond would make every guard here optional; the last is planned but needs a test account\nbefore it ships.\n\nAnd one thing the tool filter does not cover: **attachment resources**. `IMAP_ALLOW_TOOLS`\nnarrows `tools/list`, not `resources/list`, so a server with a narrow allow list still serves\nthose. `IMAP_DOWNLOAD_DIR` and the content-type allowlist are what constrain them \u2014 worth\nknowing before concluding that a filtered install reaches less of the mailbox than it does.\n\n## Safety\n\n- **Every result carrying mailbox content is marked untrusted**, message bodies additionally\n  fenced with a per-call nonce and marked line by line.\n- **Attachments pass two independent gates.** The declaration is checked against a\n  content-type allowlist, an executable-extension refusal list and a size ceiling; the bytes\n  are then checked against magic numbers. An executable renamed to `.pdf` and declared\n  `application/pdf` clears every declaration check and fails on its bytes \u2014 including when\n  saving to disk, where it would be more dangerous, not less.\n- **A `part_id` must come from a listing call**, so the body cannot be pulled out through the\n  attachment tool and escape its framing.\n- **Documents are parsed in a process that can be killed.** `mode: \"text\"` reads a PDF or\n  Office file with a bundled PDF.js and a ZIP reader \u2014 the only place this server parses a\n  binary a stranger sent. It runs in a child process with a heap limit and a timeout, its\n  stdout discarded rather than shared with the JSON-RPC transport, PDF.js's `eval` support\n  off, compressed streams measured against a ceiling _before_ PDF.js inflates them, and an\n  entry allowlist that decides what is decompressed _before_ the buffer is sized. Nothing in\n  that path touches the network or the filesystem.\n- **Extracted text says what it is.** Extraction returns every text-drawing instruction in a\n  file, including text set below one point or drawn in the colour of the paper, and returns\n  nothing that was drawn as a picture. The result says so above the fence, because \"the\n  document says X\" is otherwise a claim the user has no way to check.\n- **Downloads cannot escape their directory.** The target comes only from the environment, the\n  filename is sanitised, the resolved path is re-checked, and the file is opened with `wx` and\n  mode `0600` \u2014 so nothing is overwritten and no planted symlink is followed.\n- **Mailbox names, flags and addresses are refused if they contain line breaks.** IMAP is a\n  line protocol and a draft is a mail header; a CR is an injection primitive, not a typo.\n- **TLS is never disabled globally.** `IMAP_INSECURE_TLS` is scoped to the connection it names;\n  `NODE_TLS_REJECT_UNAUTHORIZED` appears nowhere.\n- **Every change to the mailbox is logged to stderr** with the UIDs and folder \u2014 never the\n  subject. stderr is the one channel the model does not read.\n- **Responses are bounded.** Whole items are dropped rather than the JSON being sliced, and the\n  truncation notice comes first so the recovery hint survives.\n\n`SECURITY.md` has the trust model, what these measures do _not_ cover, and how to report a\nvulnerability.\n\n## Documentation\n\nThe full guide, tool reference and security notes live at\n**[imap-mcp.ni-c.de](https://imap-mcp.ni-c.de)** (source in [`docs/`](docs/)).\n\n## Development\n\n```bash\nnpm install\nnpm test\nnpm run build\n```\n\nThe test suite runs against an in-memory IMAP fake, so it needs no server and no\nnetwork. For a live server to point the real thing at, see\n[CONTRIBUTING.md](CONTRIBUTING.md) \u2014 it starts a throwaway mailbox in a container.\n\n## Releasing\n\n1. Add the CHANGELOG entry and bump `package.json`.\n2. `npm run lint && npm run build && npm run test:coverage`\n3. Commit, then push a signed tag: `git tag -s vX.Y.Z -m \"vX.Y.Z\" && git push origin main vX.Y.Z`\n\nThe release workflow publishes to npm (Trusted Publishing, with provenance), creates\nthe GitHub release from the CHANGELOG section and updates the MCP Registry entry.\n\n## Contributing\n\nIssues, discussions and pull requests are welcome \u2014 see\n[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use\n[private reporting](https://github.com/ni-c/imap-mcp/security/advisories/new)\nrather than a public issue; the policy is in [SECURITY.md](SECURITY.md).\n\n## License\n\n[MIT](LICENSE) \u00a9 Willi Thiel\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ni-c/imap-mcp.git"
+  },
+  "time": {
+   "0.1.0-rc.1": "2026-08-30T21:11:53.095Z",
+   "0.2.0": "2026-08-30T21:29:04.129Z",
+   "0.3.0": "2026-09-03T14:23:37.921Z",
+   "0.4.0": "2026-09-04T12:53:54.476Z",
+   "0.5.0": "2026-09-07T19:05:11.262Z",
+   "created": "2026-08-30T21:11:52.686Z",
+   "modified": "2026-09-07T19:05:11.539Z"
+  },
+  "versions": {
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/imap-mcp@0.2.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imap-mcp_0.2.0_1788125343967_0.5093454276760723"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:71549038-8c84-4e81-b9a1-ff910d3c9f61"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "imap-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/imap-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "imapflow": "^1.7.6",
+     "mailparser": "^3.9.17",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server for IMAP mailboxes: read, search, organise and draft mail \u2014 it cannot send",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@resvg/resvg-js": "^2.6.2",
+     "@types/mailparser": "^3.4.6",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "eslint": "^10.9.1",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fimap-mcp@0.2.0"
+     },
+     "fileCount": 66,
+     "integrity": "sha512-jlcd010EUnqEyQBsM+AW1Buer4gfyzUyjbYeUOpHJ8oUI1ZqIwclpn6OjjgyF4VXj7QNwgafwO2HyTTtb0fXzQ==",
+     "shasum": "f288cd728ecb710a2a8ba3809b0e86f6ed6c0cb3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIG8X7Y5QxDBwm/LlBjflI/4XS5EWQ+kMh7vaXmWbvIRpAiAE9tBw72ZnegJzQlatVV95h5b9nrn0gvwBjMOWsyETwg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/imap-mcp/-/imap-mcp-0.2.0.tgz",
+     "unpackedSize": 295887
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "0cc623f8a2b13e7f60953e65d09a1121e87a4c4f",
+    "homepage": "https://imap-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "imap",
+     "email",
+     "mail",
+     "mailbox",
+     "read-only"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/imap-mcp",
+    "name": "@ni-c/imap-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/imap-mcp.git"
+    },
+    "scripts": {
+     "assets": "node scripts/gen-assets.mjs",
+     "assets:check": "node scripts/gen-assets.mjs --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "eslint . && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/imap-mcp@0.3.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imap-mcp_0.3.0_1788445417707_0.32435182388096284"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:71549038-8c84-4e81-b9a1-ff910d3c9f61"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "imap-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/imap-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "imapflow": "^1.7.6",
+     "mailparser": "^3.9.17",
+     "mcp-approval": "^0.8.0",
+     "mcp-tool-allowlist": "^0.2.1",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server for IMAP mailboxes: read, search, organise and draft mail \u2014 it cannot send",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/mailparser": "^3.4.6",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fimap-mcp@0.3.0"
+     },
+     "fileCount": 63,
+     "integrity": "sha512-XzOLIas4SKAGI0HJpnnlEa8PT5kZ6OYezvF4p6Nu1xd1P29FzxflO4ckokbk1jWOnnfurwhQinW/A9YfgvMLXQ==",
+     "shasum": "3b128934ad6817fffd90d01a37c2d1f419f0c2c1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDHEXSLUwN7E1Q0J0wGo5CIUeKLcQ28TjJKQbPyIzqavAIgV5v1/lwZsEVbyN4VXX1lSTdfAq7+/P20vTmSS/Fygko="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/imap-mcp/-/imap-mcp-0.3.0.tgz",
+     "unpackedSize": 343873
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "c375fbc29061fa78b3674a51fbd621b8d8b4ee72",
+    "homepage": "https://imap-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "imap",
+     "email",
+     "mail",
+     "mailbox",
+     "read-only"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/imap-mcp",
+    "name": "@ni-c/imap-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/imap-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/imap-mcp@0.4.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imap-mcp_0.4.0_1788526434347_0.2165786481893024"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:71549038-8c84-4e81-b9a1-ff910d3c9f61"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "imap-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/imap-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "fflate": "^0.8.3",
+     "imapflow": "^1.7.6",
+     "mailparser": "^3.9.17",
+     "mcp-approval": "^0.8.0",
+     "mcp-tool-allowlist": "^0.2.1",
+     "unpdf": "^1.8.1",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server for IMAP mailboxes: read, search, organise and draft mail \u2014 it cannot send",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/mailparser": "^3.4.6",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fimap-mcp@0.4.0"
+     },
+     "fileCount": 78,
+     "integrity": "sha512-BkUJlEJ5BjWuMNXVCEHeTkioKSGdtGCpjhNO1iSKWK64Hlw9VA8sR8tYfPw0/ErnGP3ntkclbQO3i/KobfN3Fg==",
+     "shasum": "d68063b013e5b2592b94bcd721cf5943a7108c4e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHEVtrEB2Jvan1b3/NkNKjUvXqnrF16ZAzKXqkOAjCm4AiAwrFWgtBPvWoIhyGz+RJOsGL05S4g7QaD4cX0hYWl/ww=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/imap-mcp/-/imap-mcp-0.4.0.tgz",
+     "unpackedSize": 496128
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "188ec579269e8fdef16779d6f02df0ca642cba90",
+    "homepage": "https://imap-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "imap",
+     "email",
+     "mail",
+     "mailbox",
+     "read-only"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/imap-mcp",
+    "name": "@ni-c/imap-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/imap-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/imap-mcp@0.5.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/imap-mcp_0.5.0_1788807911051_0.8072592823790048"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:71549038-8c84-4e81-b9a1-ff910d3c9f61"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "imap-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/imap-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "fflate": "^0.8.3",
+     "imapflow": "^1.7.6",
+     "mailparser": "^3.9.17",
+     "mcp-approval": "^0.8.2",
+     "mcp-tool-allowlist": "^0.2.1",
+     "unpdf": "^1.8.1",
+     "zod": "^4.5.4"
+    },
+    "description": "MCP server for IMAP mailboxes: read, search, organise and draft mail \u2014 it cannot send",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/mailparser": "^3.4.6",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "5.0.0",
+     "fast-check": "^4.9.0",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.3.0/svg-asset-set-0.3.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fimap-mcp@0.5.0"
+     },
+     "fileCount": 53,
+     "integrity": "sha512-J/+INHnn/WgpjZ3yoxj6WvuzRg2mdshu6jhUfSiHAS8+mUuWVDVb3SRaSKXRx96GIoe/x4D4xhN3FSb7YgH+JA==",
+     "shasum": "a05b256e8e0ab9ee66f58741a065570646cd85f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD5Fuuh1yghSXNQ8a+tmp1R1KRfSqbFrdmL9jfQu6ICwAIgUDfHazqHjdGcGFy0SS8LI40Y06VSDbEnlklaDzfFg0g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/imap-mcp/-/imap-mcp-0.5.0.tgz",
+     "unpackedSize": 365476
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "92761085a5c1440ec3178163fc3bccdd45f1da23",
+    "homepage": "https://imap-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "imap",
+     "email",
+     "mail",
+     "mailbox",
+     "read-only"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/imap-mcp",
+    "name": "@ni-c/imap-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/imap-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   }
+  }
+ },
+ "name": "@ni-c/imap-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ni-c%2Fimap-mcp"
+}

@@ -1,0 +1,972 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.14.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:f3cfa8fe5540]",
+    "name": "jmonti"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.13.0",
+   "0.13.1",
+   "0.13.3",
+   "0.13.4",
+   "0.13.5",
+   "0.14.0",
+   "0.14.1",
+   "0.14.2",
+   "0.14.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@ezmodo/mcp-server",
+  "_rev": "9-33a9da7e9f30e3e0f7fe63fdf3f6e4a6",
+  "author": {
+   "name": "ezmodo Team"
+  },
+  "bugs": {
+   "email": "[redacted-email:cbd8f54d50cf]",
+   "url": "https://ezmodo.com/support"
+  },
+  "description": "MCP server for ezmodo - AI-first project management",
+  "dist-tags": {
+   "latest": "0.14.3"
+  },
+  "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "ezmodo",
+   "ai",
+   "project-management"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:f3cfa8fe5540]",
+    "name": "jmonti"
+   }
+  ],
+  "name": "@ezmodo/mcp-server",
+  "readme": "# EzModo MCP Server\n\nModel Context Protocol (MCP) server for ezmodo - AI-first project management.\n\n## Install\n\nPoint any MCP client at the package. There is nothing to configure:\n\n```json\n{\n  \"mcpServers\": {\n    \"ezmodo\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"-p\", \"@ezmodo/mcp-server\", \"ezmodo-mcp-server\"]\n    }\n  }\n}\n```\n\nThe first tool call returns a sign-in URL. Open it, approve the access, and\nretry \u2014 the server holds the token from then on and refreshes it itself. No API\nkey, no environment variable, no CLI.\n\nThat block is the same for Claude Desktop, Cursor, Windsurf, Zed, Codex and\nanything else that speaks stdio MCP; only the file it goes in differs.\n\n**Claude Code users should install the plugin instead**, which bundles this\nserver along with the work-tracking skills, slash commands and hooks:\n\n```\n/plugin marketplace add EasyModeOnly/ezmodo-plugins\n/plugin install ezmodo@ezmodo\n```\n\n### Signing in\n\nSign-in happens through the `authenticate` tool rather than at startup, because\na server launched by an editor has no terminal to prompt in:\n\n| Action | What it does |\n| --- | --- |\n| `authenticate` | Starts browser sign-in and returns the URL to open |\n| `authenticate action:\"status\"` | Reports which credential is in use |\n| `authenticate action:\"sign_out\"` | Forgets the stored tokens |\n\nIt returns the URL immediately rather than blocking until you finish in the\nbrowser, so it cannot trip a client's tool-call timeout. Approve, then retry\nwhatever you were doing.\n\nTokens are stored at `~/.config/ezmodo/mcp-oauth.json` (`%APPDATA%\\ezmodo\\` on\nWindows), mode `0600`.\n\nThe sign-in asks for `ezmodo:read` and `ezmodo:write`. It deliberately does not\nask for `ezmodo:delete`: consent is accept-or-decline over the whole set, and\n\"permanently delete your projects\" should not be a condition of installing an\nMCP server. Set `EZMODO_OAUTH_SCOPES` if you want a different set.\n\n## Using an API key instead\n\nFor CI, containers and anything headless where no browser exists, set\n`EZMODO_API_KEY` and skip sign-in entirely:\n\n```json\n{\n  \"mcpServers\": {\n    \"ezmodo\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"-p\", \"@ezmodo/mcp-server\", \"ezmodo-mcp-server\"],\n      \"env\": {\n        \"EZMODO_API_KEY\": \"ezm_sk_your_key_here\"\n      }\n    }\n  }\n}\n```\n\nGenerate one at **Settings \u2192 API Keys** on [ezmodo.com](https://ezmodo.com).\nKeys start with `ezm_sk_` and are shown once. Pre-rename `zeph_sk_` keys remain\nvalid indefinitely.\n\n### Which credential wins\n\nResolved per call, in this order:\n\n1. `EZMODO_API_KEY` (or legacy `ZEPHLY_API_KEY`) \u2014 an explicit credential beats\n   an implicit one, which is what keeps CI predictable.\n2. The OAuth token this server obtained for itself.\n3. The credential `ezmodo auth login` stored, if you happen to have the CLI.\n\n`authenticate action:\"status\"` reports which of these is actually in use.\n\n### Other environment variables\n\n- `EZMODO_API_URL` (optional): custom API URL. Defaults to production\n  (`https://ezmodo.com/api`).\n- `EZMODO_OAUTH_SCOPES` (optional): space-separated scopes to request at\n  sign-in.\n\n## What the server provides besides tools\n\n**Instructions.** The initialize result carries the work-tracking contract \u2014\ncreate the task before you edit, tick steps off, capture knowledge, link the\ncommit, finish at `in_review`. Most clients inject it into system context, so\nthe discipline travels with the tools rather than needing a per-editor plugin.\n\n**Prompts.** `start`, `resume`, `submit` and `untracked`, which clients surface\nas slash commands. `submit` is local-only, since it reads git SHAs.\n\n## Running from source\n\n```bash\nexport EZMODO_API_KEY=\"ezm_sk_your_key_here\"\nexport EZMODO_API_URL=\"http://localhost:8787/api\"  # Local Go API\nnpm run dev\n```\n\n## Available Tools\n\nThe MCP server provides these tools for AI agents:\n\n### 1. `create_task`\nCreate a new task in a project with AI context.\n\n**Parameters:**\n- `projectId` (required): Project ID\n- `title` (required): Task title\n- `description` (required): Task description (markdown supported)\n- `priority` (optional): `low`, `medium`, `high`, `urgent` (default: `medium`)\n- `assigneeType` (optional): `human` or `ai` (default: `ai`)\n- `assigneeId` (optional): Assignee identifier (default: `claude`)\n- `assigneeName` (optional): Assignee name (default: `Claude`)\n- `knowledge` (optional): Array of structured KnowledgeItem objects with `type`, `content`, and optional `tags`\n\n### 2. `update_task`\nUpdate an existing task.\n\n**Parameters:**\n- `taskId` (required): Task ID\n- `status` (optional): Task status\n- `priority` (optional): Task priority\n- `description` (optional): Updated description\n- `addKnowledge` (optional): Array of structured KnowledgeItem objects to add\n\n### 3. `complete_task`\nMark a task as completed.\n\n**Parameters:**\n- `taskId` (required): Task ID\n- `completionNotes` (optional): Completion notes\n\n### 4. `get_project_context`\nRetrieve project context, configuration, and metadata.\n\n**Parameters:**\n- `projectId` (required): Project ID\n\n### 5. `add_task_context`\nAdd knowledge or memory to a task for AI continuity.\n\n**Parameters:**\n- `taskId` (required): Task ID\n- `knowledge` (optional): Knowledge snippets to add\n- `memory` (optional): Memory data to store\n\n### 6. `search_tasks`\nSearch for tasks with filters.\n\n**Parameters:**\n- `projectId` (optional): Filter by project\n- `status` (optional): Filter by status\n- `assignedToAI` (optional): Filter for AI-assigned tasks\n- `searchText` (optional): Text search in title/description\n- `limit` (optional): Max results (default: 50)\n\n### 7. `get_documentation`\nRetrieve project documentation.\n\n**Parameters:**\n- `projectId` (required): Project ID\n- `docType` (optional): Filter by type (`guide`, `api`, `process`, `context`)\n- `tags` (optional): Filter by tags\n\n### 8. `manage_watch`\nWatch or unwatch a task, subscribing **you** (the API key's owner) to\nnotifications about its status changes and comments.\n\nYou are subscribed automatically to tasks you're assigned, own, create or\ncomment on, so this is for following work that isn't yours.\n\n**Parameters:**\n- `action` (required): `watch` or `unwatch`\n- `taskId` (required): The task to (un)watch\n\nBoth actions are idempotent. There is deliberately no `userId` parameter \u2014 the\nacting user is always the key's owner, so an agent cannot subscribe someone else.\n\n### 9. `list_watched`\nList the tasks you're watching, with status, priority, project and when each\nlast changed \u2014 enough to answer \"what's happening on the work I follow?\" without\na `get_task` per row. Each result carries `reason` (`manual`, `assignee`,\n`owner` or `commenter`), why you're subscribed.\n\n**Parameters:**\n- `organizationId` (required): Organization to list for\n- `limit` (optional): Max results (default: 200)\n\n### 10. `list_notifications`\nYour in-app notifications \u2014 mentions, replies, assignments, and activity on\nwatched tasks.\n\n**Parameters:**\n- `unreadOnly` (optional): Only unread (default: `true`)\n- `limit` (optional): Max results (default: 20, max: 100)\n\n## Usage Example\n\nOnce configured in Claude Desktop, you can use natural language:\n\n```\n\"Create a task in project abc123 titled 'Implement user authentication'\nwith high priority and assign it to me\"\n\n\"Show me all in-progress tasks in my current project\"\n\n\"Mark task xyz789 as completed with notes about the implementation\"\n\n\"Watch task xyz789 for me\"\n\n\"What's changed on the tasks I'm watching?\"\n```\n\n## AI Agent Guidelines\n\n### Providing URLs to Users\n\nWhen providing ezmodo URLs to users, **always use the actual orgSlug value** from the project context, never use placeholders.\n\n**\u274c Wrong:**\n```\nView in ezmodo: https://ezmodo.com/{orgSlug}/projects/zephly/epics\n```\n\n**\u2705 Correct:**\n```\nView in ezmodo: https://ezmodo.com/emo/projects/zephly/epics\n```\n\n**How to get the orgSlug:**\n1. Call `get_current_project_context()` or `list_projects()` to get project data\n2. Extract the `orgSlug` field from the response\n3. Use that actual value in any URLs you provide to users\n\n**Example:**\n```javascript\n// Response from get_current_project_context():\n{\n  \"projectId\": \"axFzraDA4yCLgVyVBFoG\",\n  \"projectName\": \"zephly\",\n  \"orgSlug\": \"emo\",  // <-- Use this actual value!\n  \"organizationId\": \"VByHaD78P7B8ky7X4NZf\"\n}\n\n// Then provide URL like:\n\"View your epic at: https://ezmodo.com/emo/projects/zephly/epics\"\n```\n\nThis ensures users can click the link and go directly to the correct resource.\n\n### Project-First Hierarchy\n\nezmodo uses a project-first hierarchy: **Organization \u2192 Projects \u2192 Epics \u2192 Tasks**\n\n- **Project**: Primary work container - blue theme\n- **Epic**: Project-scoped milestone - orange theme\n- **Task**: Individual work item within a project\n- **Goal**: Organization-wide strategic objective (optional, links to epics)\n\nWhen working with the MCP tools:\n- Use `create_epic`, `get_epic`, `update_epic` for project milestones\n- Use `create_task`, `get_task`, `update_task` for work items\n- Tasks belong to projects (required) and optionally to epics\n\n## Security\n\n- **API Keys**: Your API key authenticates with the ezmodo Go API\n- **Revocable**: You can revoke API keys anytime in your ezmodo settings\n- **Rate Limiting**: API keys have rate limits to prevent abuse\n- **Audit Trail**: All API usage is logged in your ezmodo account\n\n## Troubleshooting\n\n### \"Not authenticated with EzModo\"\nNobody has signed in and no `EZMODO_API_KEY` is set. Call `authenticate`, open\nthe URL it returns, then retry. Tool calls return this as guidance rather than a\nbare error, so the agent can act on it.\n\n### A 403 after signing in successfully\nSigning in worked; the account just does not belong to any EzModo organization\nyet, so there is nothing for tools to return. Signing in again will not change\nit \u2014 no credential substitutes for belonging to a workspace.\n\nTool calls answer this one themselves: the result carries an `onboardingUrl`,\nand opening it lets you create a personal workspace, create a team, or ask to\njoin an organization your verified email already matches. If you expected to be\na member of one already, you are probably signed in as a different identity than\nyou think \u2014 check which email that page shows, and ask an administrator to\ninvite that exact address.\n\n### \"This email address already belongs to a different EzModo account\"\nSign-in worked, but no account could be created for the identity you signed in\nwith, because that address is already registered under a different one \u2014 most\noften a password account and a Google/Microsoft/GitHub/Apple sign-in for the\nsame person. Creating a workspace will not help; the same collision happens\nthere. Sign in the way you originally did, or contact support to have the two\nlinked.\n\n### Sign-in never completes\nThe flow needs a browser \u2014 this client cannot take a username and password\ndirectly, because skipping the browser would skip the consent screen. If no\nbrowser can open (over SSH, or in a container), the URL is still in the tool\nresult; open it anywhere and approve. Or set `EZMODO_API_KEY` instead, which is\nthe right answer for a headless machine.\n\n### \"Invalid or revoked API key\"\nRegenerate the key in ezmodo settings. Check it has not been revoked, and that\nit has not passed an expiry date if you set one.\n\n### \"Failed to connect to API\"\n- Check your `EZMODO_API_URL` configuration\n- Verify your internet connection\n\n### The client doesn't see the server\n- Restart it after updating config \u2014 MCP servers are read at startup\n- Check the config file path is correct\n- Verify the JSON syntax\n\n## Development\n\n### Building from Source\n\nFor contributors with repository access:\n\n```bash\ncd mcp-server\nnpm install\nnpm run dev\n```\n\n### Testing Locally\n\n1. Start the Go API locally:\n   ```bash\n   cd ../api && go run cmd/api/main.go\n   ```\n\n2. Set local API URL:\n   ```bash\n   export EZMODO_API_URL=\"http://localhost:8787/api\"\n   export EZMODO_API_KEY=\"your_api_key\"\n   ```\n\n3. Run MCP server:\n   ```bash\n   npm run dev\n   ```\n\n## Support\n\n- **Documentation**: [ezmodo.com/mcp/docs](https://ezmodo.com/mcp/docs)\n- **Support**: [ezmodo.com/support](https://ezmodo.com/support)\n- **Email**: [redacted-email:c318da533dd5]\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/EasyModeOnly/ezmodo-mcp-server.git"
+  },
+  "time": {
+   "0.13.0": "2026-09-08T18:38:57.836Z",
+   "0.13.1": "2026-09-08T18:48:38.496Z",
+   "0.13.3": "2026-09-08T20:12:20.071Z",
+   "0.13.4": "2026-09-09T12:23:06.192Z",
+   "0.13.5": "2026-09-09T13:54:40.106Z",
+   "0.14.0": "2026-09-11T18:42:59.545Z",
+   "0.14.1": "2026-09-12T19:39:23.978Z",
+   "0.14.2": "2026-09-12T22:57:31.146Z",
+   "0.14.3": "2026-09-12T22:58:25.992Z",
+   "created": "2026-09-08T18:38:57.455Z",
+   "modified": "2026-09-12T22:58:26.153Z"
+  },
+  "versions": {
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.13.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1788892737706_0.7875146841106333"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:f3cfa8fe5540]",
+     "name": "jmonti"
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/EasyModeOnly/ezmodo/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 98,
+     "integrity": "sha512-vEBIpZzgu05N8i33G53k3nZaC3oCy1ZKjFJY+3gTLy2DuvRPjCBRjvG4RpeLWKtY1fJ1DSBgSMtdelNlISXMIQ==",
+     "shasum": "f9b58bfe3297b96e1ff2d1963dd1dce4cde1836b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCGKDtapZwOsqiNE+RVsgbO/xEVAzgzRFdfVTbjeDS9eAIgW5cUifjjmBw8RP068kM/Pac5AoNHEIbCaH+txw3/kn0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 641605
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "411596ea44a8f232b234182b8bc7e5d90801ce50",
+    "homepage": "https://github.com/EasyModeOnly/ezmodo#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/EasyModeOnly/ezmodo.git"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.13.0"
+   },
+   "0.13.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.13.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.1_1788893318306_0.9746030260811709"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/EasyModeOnly/ezmodo/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 98,
+     "integrity": "sha512-OBsPGVmHYJ2W5U4Rl0ClkRj/FL2EsIvfdO3Lv+vpjVUqQNOW0YnNUAwjsXsIceLgFh9SuOHPdZMdBL5w1y2bKw==",
+     "shasum": "043116bbc6776a91c925e6c2a968f707bfc6e38b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHscuAe1P53QRD2a28NMfk9+ED8tLQKezCS77FpSO6HyAiA2TqQ6yQTTXS0U0sd2WZYWWlukzcNnmV0q8izB/ntIJQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.13.1.tgz",
+     "unpackedSize": 641605
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "b9ac3665fd056b1fa23d5f04d82f650134737969",
+    "homepage": "https://github.com/EasyModeOnly/ezmodo#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/EasyModeOnly/ezmodo.git"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.13.1"
+   },
+   "0.13.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.13.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.3_1788898339863_0.5325702749116885"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/EasyModeOnly/ezmodo/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 98,
+     "integrity": "sha512-5mtWQbC5Zjsu1ifnNol1hrnC3fu2TXS5hLsg+VXhc567elfMLHYBr8NEZcpYufIKUNmw3oCL093Wgejb3DNIjA==",
+     "shasum": "aca84c5066b5259c125fdc4b77ebe68bdd01a050",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDmQTFSmG5nneI62TNJhkQKq0g4OGTA3YnEAZ7IuyGgYAiEA7+olvo/1S+h4oj8M3+vX21shUaQ/ivJ0nXFLJWxKHHg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.13.3.tgz",
+     "unpackedSize": 641605
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "5a6b89691165e81fbe59da8ea30a641c14e2350c",
+    "homepage": "https://github.com/EasyModeOnly/ezmodo#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/EasyModeOnly/ezmodo.git"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.13.3"
+   },
+   "0.13.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.13.4",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.4_1788956586043_0.37959811144057665"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 102,
+     "integrity": "sha512-VOMGp+kwxGvGIR8a/GWIVXKDvqXrT+gvw5oF8PinGnwdgewUcdNAefFkAN0cXmotNt+/zMdhZrPYiuxgMtsTLQ==",
+     "shasum": "0a04dee3626e43386ae29ccf7e160739fb26dcb1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCq0N0sxHRaF39JuxxhmLeUwWnvgzvngYRZm1mXhjzUIgIhAL/MbZRPcvfFbmUCAen0paHK35Isr7uzI/OzoQU2zEJX"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.13.4.tgz",
+     "unpackedSize": 662222
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "59319705aecf9a19e919f75bec06d3945abc28fb",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.13.4"
+   },
+   "0.13.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.13.5",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.5_1788962079954_0.7989925915097902"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 103,
+     "integrity": "sha512-0GIpcsHxvHueJdewjUz7PEAMlIU+sEhJYbycqTs4Y3VdgJ7U2l4L/CWIHMtaZVXo73XmRc9F4ji6lBGI53j8Cw==",
+     "shasum": "8adc1a124523727df8d8ac7c80d49f9c21521564",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAKfLZBghcbaxhHdDa/J+VIZ9sfweE+PpgEDPKLmpQCWAiAGZb147mxuqSW+9iUobx74ALDqlUYrfE/dDc3hhB9tMg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.13.5.tgz",
+     "unpackedSize": 668610
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "8d94ec81c79319cd8d57b34dc43f6f6175376de3",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.13.5"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.14.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.0_1789152179434_0.6545773962600601"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 114,
+     "integrity": "sha512-l3WuowYTHeS71Gjp7vQl6R1Q4Lzb6PtSibiWxq2ekfyM/Polh2aIP1TiP0y42qU0bBIvdjF7+AVOZDq4tei4Ag==",
+     "shasum": "f747141b0cb0a121b119c5462e59ff5331aa6b8b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCCeE5258Y+/D6lJZ9ShTRVW8icwZtJ9GGAkHbnWWcvAAIgVUeE8iHhJj4xdWw+ZOwrFoHUeOAjUzt5fFUcDvMLhCw="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCGoq+H9W4974leU6Xd7zeKqxP9FvmbuKU1i1hRisrKYQIhAIuEvytBYtr9n0ZSjyZRrpEFd5pp4zx8EGH8f+7FQDB5"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.14.0.tgz",
+     "unpackedSize": 726733
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "cf3cb8800f6c8edecb1921cd943bf11d1dbf9a1e",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "generate:instructions": "node scripts/build-instructions.mjs",
+     "generate:prompts": "node scripts/build-prompts.mjs",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.14.0"
+   },
+   "0.14.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.14.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.1_1789241963873_0.6110890117335703"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 114,
+     "integrity": "sha512-pWV3f58d65l5rflqQQKHFjIDeD2kstq+JDksG/TdWEbCnM/RleT/y6o+vg/GNGZs2xhNDREUMjoZvQ2Ho5fCkA==",
+     "shasum": "a8794af5c08718e660004a039a5857b13cd5903d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDef3+1LF6MZNhhdXIjFLwqJz8X4S/nU4TtJ74S/jJHoAiAv75YKpor7PT8HHD0U8AvcSHUFD2iV3LkAm3lX/MV4dw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAMJbmW6bSLl1mX4RY805szEOdlIxCNtC6XE+kE4g0W9AiEA+j3YvKd1infc3HokaGljgJenPlsozVglTOdWt8pk/zQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.14.1.tgz",
+     "unpackedSize": 737587
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "cadc7601a26861d61771e8439a6b3078349ceb71",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "generate:instructions": "node scripts/build-instructions.mjs",
+     "generate:prompts": "node scripts/build-prompts.mjs",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.14.1"
+   },
+   "0.14.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.14.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.2_1789253851059_0.26369413975799794"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "mcp-server": "index.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 114,
+     "integrity": "sha512-J9G6xzPlVTenmkoHOupEW5BEYs9TJUkV5kH0L26JBhdhM9atEMPTzHwM4th225zy2Y77Q2sda4xIdOxNBRccxw==",
+     "shasum": "62fc961b0c5f66741520fd8c328e21874e4e765e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEnod16FbBGzQT/qiQCJnsPspBz4r/7AfShA9RHMz+qAAiBW7o+sT7z/JI2bU0Y3qCpZ500uy0ZuXDfQJe0o6wB+Fg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCMk6TWOmXR/29VMRCgbsKIakGoI+hcHaTpUXflzY3QogIgdhAG7HFFyxpM6WrzDxD7yKQQKQt3SLf8Xp7X5nbfZ38="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.14.2.tgz",
+     "unpackedSize": 745220
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "4ea37e10d0284957bc54126852daece9dde87a30",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/EasyModeOnly/ezmodo-mcp-server.git"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "generate:instructions": "node scripts/build-instructions.mjs",
+     "generate:prompts": "node scripts/build-prompts.mjs",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.14.2"
+   },
+   "0.14.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@ezmodo/mcp-server@0.14.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.3_1789253905896_0.1322091896610511"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bd753fdb-ee5d-45b9-bfae-342d42ce0187"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "ezmodo Team"
+    },
+    "bin": {
+     "ezmodo-mcp-server": "index.js",
+     "ezmodo-mcp-server-http": "http.js",
+     "mcp-server": "index.js",
+     "zephly-mcp-server": "index.js"
+    },
+    "bugs": {
+     "email": "[redacted-email:cbd8f54d50cf]",
+     "url": "https://ezmodo.com/support"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for ezmodo - AI-first project management",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@jest/globals": "^30.3.0",
+     "eslint": "^10.8.0",
+     "jest": "^30.5.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 114,
+     "integrity": "sha512-jBjUwZwLZ/0orL9hGLHWmAZsZb1EfodCGQSsrw6OEyBxMMZKzYkjWPQaVybjGya1kdsRJKgcaqXasR7fk8SwpA==",
+     "shasum": "dd3080a28aa8d11f379fe4437438cde58d760a7e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCn8XbmxYHOB2QyuOtjroLKnIX/lcnY3RA6sK82Wy4eaAIgXbuHadCh0kBYx1w2bqlwBO4YuLtaGcQPXmq7rtJCSXo="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH1amOIYPK3WU0bMj66ChUr4NwUMVIAtg2KHq/3F8w7WAiEAiKSU6/M+346lTYEv35zzdKXsiKXOt/rtxv0pUhNhb/A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ezmodo/mcp-server/-/mcp-server-0.14.3.tgz",
+     "unpackedSize": 745220
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9d567b73a457140813def6080cd5ba92f027a4ba",
+    "homepage": "https://ezmodo.com/docs/emo/ezmodo/help/cli-mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ezmodo",
+     "ai",
+     "project-management"
+    ],
+    "license": "MIT",
+    "main": "index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:f3cfa8fe5540]",
+      "name": "jmonti"
+     }
+    ],
+    "name": "@ezmodo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/EasyModeOnly/ezmodo-mcp-server.git"
+    },
+    "scripts": {
+     "build:development": "BUILD_ENV=development node --input-type=module -e 'console.log(\"Development build configured\")'",
+     "build:production": "BUILD_ENV=production node --input-type=module -e 'console.log(\"Production build configured\")'",
+     "build:staging": "BUILD_ENV=staging node --input-type=module -e 'console.log(\"Staging build configured\")'",
+     "dev": "BUILD_ENV=development node index.js",
+     "dev:http": "BUILD_ENV=development node http.js",
+     "generate:instructions": "node scripts/build-instructions.mjs",
+     "generate:prompts": "node scripts/build-prompts.mjs",
+     "lint": "eslint . --fix",
+     "start": "node index.js",
+     "start:http": "node http.js",
+     "test": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest",
+     "test:coverage": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+     "test:smoke": "BUILD_ENV=development node test.js",
+     "test:watch": "BUILD_ENV=development NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    },
+    "type": "module",
+    "version": "0.14.3"
+   }
+  }
+ },
+ "name": "@ezmodo/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ezmodo%2Fmcp-server"
+}

@@ -1,0 +1,4180 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.109",
+  "maintainers": [
+   {
+    "email": "[redacted-email:16e5c7769ac0]",
+    "name": "hachej"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.0",
+   "0.1.100",
+   "0.1.101",
+   "0.1.103",
+   "0.1.104",
+   "0.1.105",
+   "0.1.107",
+   "0.1.108",
+   "0.1.109",
+   "0.1.76",
+   "0.1.77",
+   "0.1.78",
+   "0.1.79",
+   "0.1.80",
+   "0.1.81",
+   "0.1.82",
+   "0.1.83",
+   "0.1.84",
+   "0.1.85",
+   "0.1.86",
+   "0.1.87",
+   "0.1.88",
+   "0.1.89",
+   "0.1.90",
+   "0.1.91",
+   "0.1.92",
+   "0.1.93",
+   "0.1.95",
+   "0.1.96",
+   "0.1.97",
+   "0.1.98",
+   "0.1.99"
+  ]
+ },
+ "manifest": {
+  "_id": "@hachej/boring-mcp",
+  "_rev": "32-1f6962d443f205fe60c2a32a49b65eac",
+  "bugs": {
+   "url": "https://github.com/hachej/boring-ui/issues"
+  },
+  "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+  "dist-tags": {
+   "latest": "0.1.109"
+  },
+  "homepage": "https://github.com/hachej/boring-ui",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:16e5c7769ac0]",
+    "name": "hachej"
+   }
+  ],
+  "name": "@hachej/boring-mcp",
+  "readme": "# `@hachej/boring-mcp`\n\nReusable boring-ui MCP plugin foundation.\n\nThis package is the generic MCP capability that child apps can enable. It owns:\n\n- generic MCP management overlay shell for app-left chrome;\n- provider template, source, tool, policy, redaction, status, and facade contracts;\n- deny-before-allow read-only policy helpers;\n- reusable Composio managed connector provider for hosted OAuth/session onboarding;\n- MCP SDK Streamable HTTP transport for real MCP-compatible endpoints, including Composio session MCP URLs;\n- fake-transport-testable facade seams;\n- normalized tool catalog search/describe contracts;\n- governed `mcp_readonly_call` execution boundary with audit metadata;\n- thin agent bridge tool registry for the seven stable boring-mcp operations;\n- server-only managed connector adapter seam with app-injected secret resolution.\n\nIt intentionally does **not** own app-specific secret storage or app identity. Apps provide the Composio API key resolver, source persistence, enabled provider config, and actor resolution; boring-mcp owns generic Composio session creation, hosted connect URL creation, MCP protocol transport, catalog, policy, bridge tools, redaction, and read-only execution path.\n\n## Enable in an app\n\nApps mount the MCP UI as an app-left management overlay, alongside Plugins and Skills, instead of a Workbench source/panel:\n\n```tsx\nimport { BoringMcpSourcesOverlay } from '@hachej/boring-mcp/front'\n\n<CoreWorkspaceAgentFront\n  appLeftOverlayActions={[{\n    id: 'boring-mcp',\n    label: 'MCP',\n    icon: <McpIcon />,\n    render: ({ onClose, headerInsetStart, headerInsetEnd, workspaceId }) => (\n      <BoringMcpSourcesOverlay\n        options={{ enabledProviderIds: ['notion'], sourceApi: { enabled: true, workspaceId } }}\n        onClose={onClose}\n        headerInsetStart={headerInsetStart}\n        headerInsetEnd={headerInsetEnd}\n      />\n    ),\n  }]}\n/>\n```\n\nServer composition can enable just the prompt, or the full generic bridge tool stack. For hosted Composio-backed sources, the app supplies only source persistence, the server-side API key resolver, enabled provider config, and actor resolution:\n\n```ts\nimport {\n  createBoringMcpServerPlugin,\n  createComposioManagedConnectorProvider,\n  createComposioMcpTransport,\n  createManagedConnectorAdapter,\n} from '@hachej/boring-mcp/server'\n\nconst configs = [\n  { provider: 'notion', displayName: 'Notion', toolkitId: 'notion', connectUrlOrigins: ['https://app.composio.dev'] },\n]\nconst secretResolver = {\n  async resolveSecret() {\n    return { storage: 'server-env' as const, value: process.env.COMPOSIO_API_KEY! }\n  },\n}\n\nconst connector = createManagedConnectorAdapter({\n  registry: mcpSourceRegistry,\n  provider: createComposioManagedConnectorProvider(),\n  secretResolver,\n  configs,\n  redactionCanaries: ['app-owned-mcp-canary'],\n})\n\nconst transport = createComposioMcpTransport({ secretResolver, configs })\n\ncreateCoreWorkspaceAgentServer({\n  plugins: [createBoringMcpServerPlugin({\n    registry: mcpSourceRegistry,\n    transport,\n    resolveActor: async (_params, ctx) => resolveActorForAgentSession(ctx.sessionId),\n  })],\n})\n```\n\nWhen `registry`, `transport`, and `resolveActor` are provided, the plugin contributes the seven stable agent tools automatically: `mcp_servers_list`, `mcp_server_status`, `mcp_server_doctor`, `mcp_server_probe`, `mcp_tools_search`, `mcp_tool_describe`, and `mcp_readonly_call`.\n\nFor trusted, app-configured non-Composio endpoints, apps can use `createMcpSdkStreamableHttpTransport({ endpoint })` directly. User-supplied endpoints must cross both authoritative shared constructors: build the template with `createUserRegisteredMcpProviderTemplate(...)` and the persisted/runtime source with `createUserRegisteredMcpSource(...)`. A structural object with `provider: \"user-registered\"` is intentionally rejected; persistence rehydrates accepted records through the source constructor before transport use.\n\nApps may also list the package in `package.json#boring.defaultPluginPackages` for server/plugin discovery, but shipped app chrome should mount the front overlay explicitly when the UI must render.\n\n## Security boundaries\n\nBefore production provider enablement, apps should record the [Composio security preflight](./docs/composio-security-preflight.md) and run `validateManagedConnectorPreflight` as launch evidence. The runtime `createManagedConnectorAdapter` seam stays small: provider config plus an app-owned server secret resolver; reusable boring-mcp never binds app env/Vault details.\n\n- Browser UI never receives provider OAuth tokens, connector API keys, or MCP session headers.\n- Raw provider meta-tools are not exposed by this foundation.\n- Unknown tools are disabled by default.\n- Mutating/admin tool names are denied before any provider call.\n- Provider results pass redaction and secret-leak checks before agent/UI use.\n\n## Production launch gate / smoke checklist\n\nBefore enabling boring-mcp in a shipped app, operators should verify:\n\n1. `evaluateBoringMcpLaunchGate` passes for the app composition: plugin id, registry list/get/disconnect, transport, provider templates, all seven bridge tools, timeout, rate/budget gate, readonly input limit, and reviewed docs.\n2. Managed providers pass `validateManagedConnectorPreflight`; app secrets stay server-side and never appear in browser/workspace files.\n3. Source list/status/probe/tool catalog/read-only call responses pass the secret-leak guard using representative OAuth/session canaries.\n4. Provider metadata calls use timeout + retry policy; read-only tool calls use timeout but no automatic retry.\n5. Rate/budget hooks block before provider `listTools`/`callTool` when local limits are exceeded.\n6. Disconnect/revoke is verified through the injected registry status/result and never performs provider tool execution.\n7. Local smoke with a fake managed connector: connect -> status connected -> search tools -> describe tool -> governed readonly call -> disconnect -> verify non-connected status.\n8. Protocol smoke with a fake Streamable HTTP MCP server: real MCP SDK client transport -> list tools -> describe -> governed readonly call -> block mutating tool -> disconnect blocks future call.\n9. Composio smoke with fake Composio HTTP API + fake MCP server: create session -> hosted connect URL -> session MCP headers + server API key on MCP calls -> meta-tool discovery when needed -> search/readonly call -> raw `COMPOSIO_*` meta-tools hidden.\n\n## Current status\n\nReusable boring-mcp now includes source handlers, optional launch preflight helpers, generic managed connector adapter seam, reusable Composio managed connector provider, MCP SDK Streamable HTTP transport, normalized tool catalog search/describe, governed read-only execution, exported/generic agent bridge tools, and production launch-gate helpers. Real app secret binding remains app-owned; Constellation-specific code is not required for the generic MCP feature to run against Composio or another MCP-compatible endpoint.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/hachej/boring-ui.git"
+  },
+  "time": {
+   "0.0.0": "2026-07-10T19:54:59.884Z",
+   "0.1.100": "2026-08-14T19:26:50.211Z",
+   "0.1.101": "2026-08-19T07:57:36.005Z",
+   "0.1.103": "2026-08-21T13:04:12.266Z",
+   "0.1.104": "2026-08-24T12:55:30.126Z",
+   "0.1.105": "2026-08-24T16:02:55.451Z",
+   "0.1.107": "2026-09-01T19:51:36.325Z",
+   "0.1.108": "2026-09-02T19:33:00.413Z",
+   "0.1.109": "2026-09-04T06:16:06.770Z",
+   "0.1.76": "2026-07-10T20:46:51.184Z",
+   "0.1.77": "2026-07-10T20:52:48.872Z",
+   "0.1.78": "2026-07-10T21:03:35.876Z",
+   "0.1.79": "2026-07-11T20:07:59.490Z",
+   "0.1.80": "2026-07-12T07:52:58.795Z",
+   "0.1.81": "2026-07-12T15:12:54.920Z",
+   "0.1.82": "2026-07-13T05:42:09.426Z",
+   "0.1.83": "2026-07-13T07:45:30.143Z",
+   "0.1.84": "2026-07-13T10:19:29.056Z",
+   "0.1.85": "2026-07-13T21:59:31.873Z",
+   "0.1.86": "2026-07-15T08:42:50.842Z",
+   "0.1.87": "2026-07-15T12:45:06.628Z",
+   "0.1.88": "2026-07-17T12:58:43.220Z",
+   "0.1.89": "2026-07-17T14:35:36.347Z",
+   "0.1.90": "2026-07-20T13:30:04.228Z",
+   "0.1.91": "2026-07-27T06:25:31.274Z",
+   "0.1.92": "2026-07-29T06:55:33.347Z",
+   "0.1.93": "2026-07-30T14:09:02.258Z",
+   "0.1.95": "2026-08-03T15:02:43.710Z",
+   "0.1.96": "2026-08-13T08:49:34.870Z",
+   "0.1.97": "2026-08-13T12:47:00.458Z",
+   "0.1.98": "2026-08-13T21:23:46.222Z",
+   "0.1.99": "2026-08-14T16:23:28.613Z",
+   "created": "2026-07-10T19:54:59.592Z",
+   "modified": "2026-09-04T06:16:07.126Z"
+  },
+  "versions": {
+   "0.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.0.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.0.0_1783713299731_0.49213531324812276"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:16e5c7769ac0]",
+     "name": "hachej"
+    },
+    "_npmVersion": "10.9.4",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-workspace": "workspace:*",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-7sRSN+3kHUjRJssIiezyl94AcKHQjL1epNg26tpVB4spDhwwpx6MGOSOFrgcHnLV8tV+KuvHTuQamBo6Fx/Kyw==",
+     "shasum": "99e5364abf8209b6d672c54ed61129d64c9d91b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD08unEGd+e8TlLLs0ihJqhssNSW/Tu7pdxkUx1bUwThgIhAKZyskxO4psG7aNU5IQ6xUx2M3gHyMKLqEWfj6vDjS91"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.0.0.tgz",
+     "unpackedSize": 155076
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "gitHead": "ef37b3219ee2012f6365c0dd05c42fcdce6375a2",
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-workspace": "workspace:*",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.0.0"
+   },
+   "0.1.100": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.100.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.100",
+    "_integrity": "sha512-0zBbpkjWTn22eS8GD8KJcwPYH4OS8weY3/HNrVaWpmFAezD9aVPN+JZbaCE07iI1vBy2W2LJA3adfMl3YXmmBA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.100_1786735610060_0.04524280386527901"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.100.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.100",
+     "@hachej/boring-workspace": "0.1.100",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.100"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-0zBbpkjWTn22eS8GD8KJcwPYH4OS8weY3/HNrVaWpmFAezD9aVPN+JZbaCE07iI1vBy2W2LJA3adfMl3YXmmBA==",
+     "shasum": "37ffcdb5cdd15ea4dfd708d59424fd9339e20bf1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDD2CMTyReSDFwDXFzT4kT40rLOgNFF6qdLq3RP7M/cYAIhAPlgU6pnm+fudpxG4Vqsj8ew/+9MA7QQTCM4vZtNdXQ0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.100.tgz",
+     "unpackedSize": 224575
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.100",
+     "@hachej/boring-workspace": "0.1.100",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.100"
+   },
+   "0.1.101": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.101.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.101",
+    "_integrity": "sha512-whaeuoH6h6/A038kKl0WiLengofzjsENj3q+VbSy0zcTD2YURTJSHgmYDG3MfnHPuwHaYX5yWj+Ay9qsSiWR/w==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.101_1787126255857_0.08355152932195553"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.101.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.101",
+     "@hachej/boring-workspace": "0.1.101",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.101"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-whaeuoH6h6/A038kKl0WiLengofzjsENj3q+VbSy0zcTD2YURTJSHgmYDG3MfnHPuwHaYX5yWj+Ay9qsSiWR/w==",
+     "shasum": "a7fd3bff10cef956df9d4b3dcf19fafc8e969334",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCCNXrizIEoV+NtrIDPMn2fii2mbukZ6mn5c8AnVzlIZQIhAMNKSdKCZe3DIW0ApSGgarxIpuUjjHjcCs+TE3NfU+ok"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.101.tgz",
+     "unpackedSize": 224575
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.101",
+     "@hachej/boring-workspace": "0.1.101",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.101"
+   },
+   "0.1.103": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.103.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.103",
+    "_integrity": "sha512-yW1M6TFnQGI55dgIvHxVy07Ckb9mu9OuN/W6n1S0gbLb6rOpDzX5dS7JH76mR9i/xIPqTG+X7So0uCllXv2tSQ==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.103_1787317452133_0.8903337624981569"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.103.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.103",
+     "@hachej/boring-workspace": "0.1.103",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.3",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.103"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-yW1M6TFnQGI55dgIvHxVy07Ckb9mu9OuN/W6n1S0gbLb6rOpDzX5dS7JH76mR9i/xIPqTG+X7So0uCllXv2tSQ==",
+     "shasum": "696eb770fc50f378ef19a99843a795923e83da84",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDuSYN+dj/Gx/n1trxg8X7PcGfk9YtsE77XczdQoHX/1AIhAK+qyIgr3FWI+mSSU2Dqpw2C/HLamr4abepGOGBe+5AJ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.103.tgz",
+     "unpackedSize": 224575
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.103",
+     "@hachej/boring-workspace": "0.1.103",
+     "fastify": "^5.11.3",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.103"
+   },
+   "0.1.104": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.104.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.104",
+    "_integrity": "sha512-bnert5ic6m4muCHaDpTiX2gWLkTJoQDX+c5RdgsjCNtNbc+DLQSPTRZDbeOUPfXIrReazOpHL+V9fq/NaHmFjA==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.104_1787576129979_0.4064840399057894"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.104.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.104",
+     "@hachej/boring-workspace": "0.1.104",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.3",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.104"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-bnert5ic6m4muCHaDpTiX2gWLkTJoQDX+c5RdgsjCNtNbc+DLQSPTRZDbeOUPfXIrReazOpHL+V9fq/NaHmFjA==",
+     "shasum": "db379b3df59e866e0c4ce72d1f55bb06b63c734c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCrGnBhuXsLmX137ZcR+cJy3bedjpFgl01Twen1UXgCyAIhAMxslZLP+XgFozCUZqrRZIaa4IOCbWCdsh03oMtjMjI+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.104.tgz",
+     "unpackedSize": 224575
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.104",
+     "@hachej/boring-workspace": "0.1.104",
+     "fastify": "^5.11.3",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.104"
+   },
+   "0.1.105": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.105.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.105",
+    "_integrity": "sha512-/4Wh1s9gp/8kPYZyVuJWj+RrWdH9SoTPhydikR2IrQlblsKivO1HOBJhANqyCNQRr7oKb2cH1GFp2Zk702jRvQ==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.105_1787587375323_0.12178454246740045"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.105.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.105",
+     "@hachej/boring-workspace": "0.1.105",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.12.0",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.105"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-/4Wh1s9gp/8kPYZyVuJWj+RrWdH9SoTPhydikR2IrQlblsKivO1HOBJhANqyCNQRr7oKb2cH1GFp2Zk702jRvQ==",
+     "shasum": "e5b533567f6cae991f94b7903d31fa3139f7ce9e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCm93Fe/DqUJ0gKe772BP8JXGSzg5uDub7oFNS3/eAHWwIhAMwzVy5Tp78sd6dqond3QYaeosF+fGlyczDTjCLjZrN3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.105.tgz",
+     "unpackedSize": 224575
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.105",
+     "@hachej/boring-workspace": "0.1.105",
+     "fastify": "^5.12.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.105"
+   },
+   "0.1.107": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.107.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.107",
+    "_integrity": "sha512-BugjbCgQ6/zOD63cHp7MK6TUIkpPZJf9Aa+d3L1xFWcRLHVcrRwDG2Pfh/GqtHNiucmG7Y27uU8gfPSqf+onCQ==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.107_1788292296199_0.13773629869653892"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.107.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.107",
+     "@hachej/boring-workspace": "0.1.107",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.12.1",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.107"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-BugjbCgQ6/zOD63cHp7MK6TUIkpPZJf9Aa+d3L1xFWcRLHVcrRwDG2Pfh/GqtHNiucmG7Y27uU8gfPSqf+onCQ==",
+     "shasum": "340bb7a751c41acb12105724dc7b0b5cb85b495c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDdvFt8EzNuJfIP9TzxDtLrOTQFquxg69R1FSxVyiJSJQIhAK8imVbQdO6oGZuUFYXpKySq/14mkcuOpcNQkww6qko9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.107.tgz",
+     "unpackedSize": 224576
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.107",
+     "@hachej/boring-workspace": "0.1.107",
+     "fastify": "^5.12.1",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.107"
+   },
+   "0.1.108": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.108.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.108",
+    "_integrity": "sha512-S7aCIKhuLV0KNYtkcNXbp3ajkTIhA5t6PKfzuIE/ilsUnxWo3pX//nzYdSNAGotBQ4qDOZn6ITOEV73CvHUb5Q==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.108_1788377580277_0.677630168550007"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.108.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.108",
+     "@hachej/boring-workspace": "0.1.108",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.12.1",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.108"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-S7aCIKhuLV0KNYtkcNXbp3ajkTIhA5t6PKfzuIE/ilsUnxWo3pX//nzYdSNAGotBQ4qDOZn6ITOEV73CvHUb5Q==",
+     "shasum": "c94b7115f7fcd3873c2f7a5ce3fc59dc84355e43",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD6P+r/DdPZ4W42YKiVBdzYc7ry05wzoNI2YOGWizLjZAIgWY0FVf0fwfnu97DBXFwO0q/4RF+j1khPp0ysj/575x4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.108.tgz",
+     "unpackedSize": 224576
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.108",
+     "@hachej/boring-workspace": "0.1.108",
+     "fastify": "^5.12.1",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.108"
+   },
+   "0.1.109": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.109.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.109",
+    "_integrity": "sha512-XLzoNfkj198zMKZn3xTCLOW3w4mmHdzPrssxjcd+guLJ+zLjHWXqiNxYyYdweelKa7XluLINv0uvd67l9LOdPQ==",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.109_1788502566617_0.5714109078170764"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.109.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.109",
+     "@hachej/boring-workspace": "0.1.109",
+     "@testing-library/jest-dom": "^7.0.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.12.1",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.109"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-XLzoNfkj198zMKZn3xTCLOW3w4mmHdzPrssxjcd+guLJ+zLjHWXqiNxYyYdweelKa7XluLINv0uvd67l9LOdPQ==",
+     "shasum": "d4d0866211775b62c5947eb5cacd8ad67762ef84",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHDTREwzCK10A54FULLqJ0jrnqNUx2d9ureQxOLT7PP9AiARqcc1Fa6U90G0KZvtbV6E9DPXJyxhqbNXEX6+jXNGEA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.109.tgz",
+     "unpackedSize": 224576
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.109",
+     "@hachej/boring-workspace": "0.1.109",
+     "fastify": "^5.12.1",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.109"
+   },
+   "0.1.76": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.76.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.76",
+    "_integrity": "sha512-+A37Kg1gzKgOepowzxBXTxV0iSrx6116lX/MsUmtf1cafBdbaP+6AmrnVlNZ6m5kE9ta8AU2Lwv4+Qn94RiTqA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.76_1783716410827_0.45689624835259535"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.76.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-workspace": "0.1.76",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.76"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-+A37Kg1gzKgOepowzxBXTxV0iSrx6116lX/MsUmtf1cafBdbaP+6AmrnVlNZ6m5kE9ta8AU2Lwv4+Qn94RiTqA==",
+     "shasum": "f747e84727b9d0cae881d21a92c75bdb5a626114",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5Oqxb3Mivt4kkZzsE87QUkxgE5VYwXlPlM2+9F/KFswIhANnfnv5XZOGzFs+tLiyj+tlwZRCiFoDdZCAB5wIZ1hP3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.76.tgz",
+     "unpackedSize": 156133
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-workspace": "0.1.75",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.76"
+   },
+   "0.1.77": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.77.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.77",
+    "_integrity": "sha512-+LgrGq8vXxszNl/ev2PPrFtjJc5bX5UB2P8puRsud5UcDjWV3jRPHtGlP4gU7CvVaojXBJVlx9Nf/b70FKm2Gw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.77_1783716768710_0.909906939772291"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.77.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-workspace": "0.1.77",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.77"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-+LgrGq8vXxszNl/ev2PPrFtjJc5bX5UB2P8puRsud5UcDjWV3jRPHtGlP4gU7CvVaojXBJVlx9Nf/b70FKm2Gw==",
+     "shasum": "d096e239e8812ad4e91b7697fc9becfd4228d934",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD9vIBiGjqufajSW+t+pkCTnLSB6syt3EWW9EZAfrRJigIhAMNc45z1B06Imk2dViLia/KGZTMvKifLOZ17AyYBYmRb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.77.tgz",
+     "unpackedSize": 156133
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-workspace": "0.1.75",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.77"
+   },
+   "0.1.78": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.78.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.78",
+    "_integrity": "sha512-fGcG9NPkWOdK6bhR0r9BaCvo8Pp20g2iyeP6bRf0uwNgD0XKCMVNVSXFXY300OqyVknSV3LKmeeyZtYkDk74Fw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.78_1783717415733_0.9440268478771752"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.78.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-workspace": "0.1.78",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.78"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-fGcG9NPkWOdK6bhR0r9BaCvo8Pp20g2iyeP6bRf0uwNgD0XKCMVNVSXFXY300OqyVknSV3LKmeeyZtYkDk74Fw==",
+     "shasum": "0d757a83f9397b6126aaf675871bf82d98ad600c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDmpUfdMdkTj1kVzz+vTQipA6X4qiHp1js8r+0rUX2JlAiB3+vxavnzDYjohhfXmvD6/HrwHVZIsuqHYeAeFPDunRw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.78.tgz",
+     "unpackedSize": 156133
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-workspace": "0.1.78",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.78"
+   },
+   "0.1.79": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.79.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.79",
+    "_integrity": "sha512-unCymPy3WWTiMVRwxz3deVLYtWSQst/jy/7GB0SVJYWpCL9ftkNo11sgrifrGSBTKQ3hlTrGcXdahtlhUbYXuQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.79_1783800479356_0.4570547368987492"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.79.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.79",
+     "@hachej/boring-workspace": "0.1.79",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.79"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-unCymPy3WWTiMVRwxz3deVLYtWSQst/jy/7GB0SVJYWpCL9ftkNo11sgrifrGSBTKQ3hlTrGcXdahtlhUbYXuQ==",
+     "shasum": "651ebdeabf8e746b7af3ec5f73123406d21d04c5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF6hdwaRJoSkCr8cl9HOEhRNmtXcZ4euPbq9udHluz5lAiAU+30V5Z09k91opsqxjBxAJCYGwbkTcceFrany7RVzFw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.79.tgz",
+     "unpackedSize": 179674
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.79",
+     "@hachej/boring-workspace": "0.1.79",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.79"
+   },
+   "0.1.80": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.80.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.80",
+    "_integrity": "sha512-p0brcqlQzf5cchtaR1ICnDb0fShnvPElQoWCzKhTuClVKlRQf/L+cs/K4YW0ZmayvH60RQQMWSNyNLh1uDKuOA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.80_1783842778666_0.6220107895445208"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.80.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.80",
+     "@hachej/boring-workspace": "0.1.80",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.80"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-p0brcqlQzf5cchtaR1ICnDb0fShnvPElQoWCzKhTuClVKlRQf/L+cs/K4YW0ZmayvH60RQQMWSNyNLh1uDKuOA==",
+     "shasum": "e0b640dc290d2debaee259b8d491d14484d1bd86",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCTtdMmlC9NOxhO+kwxKjR1ttYIaicPH3SUV4J300p6RAIgIfluB7PpxgX48bPf32Y2IBD0KZ6GUObyQ0vJBJqbhVw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.80.tgz",
+     "unpackedSize": 179674
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.80",
+     "@hachej/boring-workspace": "0.1.80",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.80"
+   },
+   "0.1.81": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.81.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.81",
+    "_integrity": "sha512-YVNz+DtAgwss99P/qLr+QZveSnNQszbQMMgLr+3eFczCxUcGvbzda8CZmjA/KoNJ8fFlF36iB8y/xirEvEOwcg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.81_1783869174779_0.3426507964306884"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.81.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.81",
+     "@hachej/boring-workspace": "0.1.81",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.81"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-YVNz+DtAgwss99P/qLr+QZveSnNQszbQMMgLr+3eFczCxUcGvbzda8CZmjA/KoNJ8fFlF36iB8y/xirEvEOwcg==",
+     "shasum": "81c25a68f9f27b330947f5bf36471de59cd27106",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDDo7qG+Gjw85q8+u4yMqzveytsceDlwT88CgnIfVI0eAiArUoO4nKGgsaAmSXV31HytbSSv+DNzJ+N9p1UJQlWMlQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.81.tgz",
+     "unpackedSize": 179674
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.81",
+     "@hachej/boring-workspace": "0.1.81",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.81"
+   },
+   "0.1.82": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.82.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.82",
+    "_integrity": "sha512-Qj/t3JhGBC9k3pIhOfS9m60XxoJ43nm3aukPHZjY69b+1C+KPvqoex9/FCXAUQ8mtby3Z/U+7BTTJdCtPo881Q==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.82_1783921329275_0.026063545944121636"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.82.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.82",
+     "@hachej/boring-workspace": "0.1.82",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.82"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-Qj/t3JhGBC9k3pIhOfS9m60XxoJ43nm3aukPHZjY69b+1C+KPvqoex9/FCXAUQ8mtby3Z/U+7BTTJdCtPo881Q==",
+     "shasum": "e33b973ca1db9a884738fac162f6294980e27a2a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHYUEaWWGQ5tsE7V97r4gBTs6hr7aE6wbnWRf788+iG8AiEAknGwipvvKmYFbnxJf4ScwtcLiKLwhuHKL5C+V1fQzXM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.82.tgz",
+     "unpackedSize": 179674
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.82",
+     "@hachej/boring-workspace": "0.1.82",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.82"
+   },
+   "0.1.83": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.83.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.83",
+    "_integrity": "sha512-drKC7g36LeA345a8QQHVA7luSKU7Ch7N9z+NSo73TiIS94uNPrkCmqhxfMaYcVL5HqMHbdVn0epZCXP0evBNIQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.83_1783928730012_0.24249386454200295"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.83.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.83",
+     "@hachej/boring-workspace": "0.1.83",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.83"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-drKC7g36LeA345a8QQHVA7luSKU7Ch7N9z+NSo73TiIS94uNPrkCmqhxfMaYcVL5HqMHbdVn0epZCXP0evBNIQ==",
+     "shasum": "c836661ec25e494ec9708dd040041c0f4ff0a48c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCj5/YGz3pEVTUpPVELf7yLgq5Z8EdDXShL4Zkhh8abLgIgbTgquBJ+A7HzWA3bITjgY57QCotQtHp8gCA0mR2jbc0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.83.tgz",
+     "unpackedSize": 182405
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.83",
+     "@hachej/boring-workspace": "0.1.83",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.83"
+   },
+   "0.1.84": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.84.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.84",
+    "_integrity": "sha512-eltQ4JoWMh4/+OUbZZcoihn6hSECQBDw3pKCI4GT5r6nxTzFquZWlYSXTlSAR0BBEpFC5BjQW+WG1ZAIhO9Krg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.84_1783937968912_0.5484989160721006"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.84.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.84",
+     "@hachej/boring-workspace": "0.1.84",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.84"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-eltQ4JoWMh4/+OUbZZcoihn6hSECQBDw3pKCI4GT5r6nxTzFquZWlYSXTlSAR0BBEpFC5BjQW+WG1ZAIhO9Krg==",
+     "shasum": "52f86f84cb9e27057b6965a355753240183fd5ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICQh7/gvem4xKuiF/ErW1elAqNjcmvM8yNHUDj4xm3p4AiBi3/o2jkddQnhsCLFRsXeULE4iwphwzyiwKeCs2KFxyQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.84.tgz",
+     "unpackedSize": 182405
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.84",
+     "@hachej/boring-workspace": "0.1.84",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.84"
+   },
+   "0.1.85": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.85.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.85",
+    "_integrity": "sha512-f7juEwJXU9Y8KghRXugXLvC+4EUmy7D9zqtGTDvv1axugHh5FzIBEnHPPK65jzBWoI5b8EDUcO1osn1MsHuPog==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.85_1783979971645_0.9086101559996462"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.85.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.85",
+     "@hachej/boring-workspace": "0.1.85",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.85"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-f7juEwJXU9Y8KghRXugXLvC+4EUmy7D9zqtGTDvv1axugHh5FzIBEnHPPK65jzBWoI5b8EDUcO1osn1MsHuPog==",
+     "shasum": "d1f9431793f1d85d74dd079b50402b5a3619f35d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDon/44BqcOqLE4BgsXYf5JD5I887EM9K8KvbJNP4IPnwIgcmXvVfE939DtWXF2ACzQtzrQg7HmHbwU74LzJ0IspUs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.85.tgz",
+     "unpackedSize": 187275
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.85",
+     "@hachej/boring-workspace": "0.1.85",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.85"
+   },
+   "0.1.86": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.86.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.86",
+    "_integrity": "sha512-1uN2tlcyPfov5ibP7VzEGtsC1rDZfOiDWuZfhejONfzNCD7N3lCCL+7Qps4yNY0zChwgESoUzfqc9D392CAR3g==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.86_1784104970655_0.9203912364368549"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.86.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.86",
+     "@hachej/boring-workspace": "0.1.86",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.86"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-1uN2tlcyPfov5ibP7VzEGtsC1rDZfOiDWuZfhejONfzNCD7N3lCCL+7Qps4yNY0zChwgESoUzfqc9D392CAR3g==",
+     "shasum": "56c51a83b7ebd39130182e56a43c5720f1e0f8ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDOBc+kHlUmNigrEhpI3gog1KVioXl8zDHa8YZR7qYZPwIhAKogvbWDu4i8lSApuH4Cdiav5d8tGAFL4ejlvJ8APhcH"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.86.tgz",
+     "unpackedSize": 187275
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.86",
+     "@hachej/boring-workspace": "0.1.86",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.86"
+   },
+   "0.1.87": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.87.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.87",
+    "_integrity": "sha512-eBiR8b4SXxx7HkFwx00XokcqaM9Jkz6I6F9BvV1XHwPN0VybC3zCQS+WaEep9iNaETmkbXYumKwhrGTyjRe7LA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.87_1784119506487_0.06582019944909967"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.87.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.87",
+     "@hachej/boring-workspace": "0.1.87",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.87"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-eBiR8b4SXxx7HkFwx00XokcqaM9Jkz6I6F9BvV1XHwPN0VybC3zCQS+WaEep9iNaETmkbXYumKwhrGTyjRe7LA==",
+     "shasum": "a7062c6b791105aa8c9b8c2d95b2a2c279f928f4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAmWle85FSmYJCmf6e0X3EPKCOFzmFR9gztS9eJS8LKKAiEAvk0bnx53t4vItoh+v017fzMq9IO1es93IzNFBsg6Etk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.87.tgz",
+     "unpackedSize": 187275
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.87",
+     "@hachej/boring-workspace": "0.1.87",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.87"
+   },
+   "0.1.88": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.88.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.88",
+    "_integrity": "sha512-3VYaM9Gvgc7wnaKGCAm1q3en7gHwGQ4mATo6ja2trLtri2uyN3GugilWNP7Sl9LtUc3pDPizU/U69muQf3UOLA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.88_1784293123079_0.28922951360572036"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.88.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.88",
+     "@hachej/boring-workspace": "0.1.88",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.88"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-3VYaM9Gvgc7wnaKGCAm1q3en7gHwGQ4mATo6ja2trLtri2uyN3GugilWNP7Sl9LtUc3pDPizU/U69muQf3UOLA==",
+     "shasum": "1007e2b9d1f93370f29feac787437fca456052b9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDMM8cPGYhlxQ6C3jOvUYR/Dn1mjOIauP+z7XwBUS7tUQIhAOFvav7jTzG0UATURIFIK+GJWPsuBL/olbFM7z86g9Xn"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.88.tgz",
+     "unpackedSize": 187297
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.88",
+     "@hachej/boring-workspace": "0.1.88",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.88"
+   },
+   "0.1.89": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.89.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.89",
+    "_integrity": "sha512-R8lCLOd3rROU1Wuak6a8eoHUv04q/Y11KxAAGjT8EQD/sihFQjsyNbz2Z/H9pTex8TZstpv/o8z74y/uChCuNg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.89_1784298936209_0.25577251082792896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.89.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.89",
+     "@hachej/boring-workspace": "0.1.89",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.89"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-R8lCLOd3rROU1Wuak6a8eoHUv04q/Y11KxAAGjT8EQD/sihFQjsyNbz2Z/H9pTex8TZstpv/o8z74y/uChCuNg==",
+     "shasum": "02caa699ae4a56d58fd521c51e2464812f951f16",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCjDZCcqjDeHnp/YWcoLHVOk8SDt/Vu+MLjYgXqKu6ZbAIhAJ0rKahzjJFETznKJDU6vt2NCrUrxhly8scm1uXfT8aS"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.89.tgz",
+     "unpackedSize": 187297
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.89",
+     "@hachej/boring-workspace": "0.1.89",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.89"
+   },
+   "0.1.90": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.90.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.90",
+    "_integrity": "sha512-uijt5dez1ANQmclslJzEOFT79lDR+aFW3L+NwEuj1mV2pEXhtEPOMZBBQewoph0IXexZ43sOmWflV85r0loupw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.90_1784554204063_0.9130818235192875"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.90.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.90",
+     "@hachej/boring-workspace": "0.1.90",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.90"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-uijt5dez1ANQmclslJzEOFT79lDR+aFW3L+NwEuj1mV2pEXhtEPOMZBBQewoph0IXexZ43sOmWflV85r0loupw==",
+     "shasum": "548e72e306734935d65df5ad4df435645bdee9a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDlIIobNZwn4wMUpld/AMuO049gUethIEbq37bv+Sd9nAIgO2zuA9nhI6rCGXUPlxHbWKMatuqko7S+xgEbodLwJfQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.90.tgz",
+     "unpackedSize": 187297
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.90",
+     "@hachej/boring-workspace": "0.1.90",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.90"
+   },
+   "0.1.91": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.91.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.91",
+    "_integrity": "sha512-ia1RM9ZwdYqNEVAKGnfCYSHgPonIF4ndlHMcjo/FRw98k/5ZV7Kf5XPUd1n7hsoFGUVoVTsA1mhni7+2PSTtTw==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.91_1785133531124_0.44886387916775594"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.91.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.91",
+     "@hachej/boring-workspace": "0.1.91",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.91"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-ia1RM9ZwdYqNEVAKGnfCYSHgPonIF4ndlHMcjo/FRw98k/5ZV7Kf5XPUd1n7hsoFGUVoVTsA1mhni7+2PSTtTw==",
+     "shasum": "d04fd2adafc3d5565ceb6e4f58db6177e248f7f1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCZ+Bz/nYtBmxfoDttPSCuJCfP5J2OSjtlPNJ/ed1oiWgIgEAZJjV2s1ck+sXrf3Iy8ulBXFkg8IqIgoTuJmjtnEL4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.91.tgz",
+     "unpackedSize": 187365
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.91",
+     "@hachej/boring-workspace": "0.1.91",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.91"
+   },
+   "0.1.92": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.92.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.92",
+    "_integrity": "sha512-Z5yRLjGsJeF36O5CsKRBCiBnfwjMNHC5FX9fXn6KtxPZF4Na0gaPj6G3Ayh7E+jN5v6FIZ5WwMvDbO3rutKWpQ==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.92_1785308133209_0.7891675034853385"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.92.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.92",
+     "@hachej/boring-workspace": "0.1.92",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.92"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-Z5yRLjGsJeF36O5CsKRBCiBnfwjMNHC5FX9fXn6KtxPZF4Na0gaPj6G3Ayh7E+jN5v6FIZ5WwMvDbO3rutKWpQ==",
+     "shasum": "8e2073440a788a98da56332fef4bdafec9d9cc88",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDGPw8aXsD14pohpXcpyZdhko/KBnooRYEwhedBanYnXwIhAKM/KR3ggS0cp9oK175Q7i7vw50fGt1ipmSAXvRpXA5Z"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.92.tgz",
+     "unpackedSize": 187365
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.92",
+     "@hachej/boring-workspace": "0.1.92",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.92"
+   },
+   "0.1.93": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.93.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.93",
+    "_integrity": "sha512-LvNfcguGkk1AGyOUSjTsxGHhhzkyD5Dm1xfkORninhItmppHH5mqnkDkk2+UOFF6J3EYrGgdGjYjgZLdmcAPOg==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.93_1785420542008_0.9837488624709736"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.93.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.93",
+     "@hachej/boring-workspace": "0.1.93",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.93"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-LvNfcguGkk1AGyOUSjTsxGHhhzkyD5Dm1xfkORninhItmppHH5mqnkDkk2+UOFF6J3EYrGgdGjYjgZLdmcAPOg==",
+     "shasum": "ab28484457f5be11bb0f4d74542a4b808308c39c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH98EtLYwQdRY88+E5oAUMZmEXBsnp0bzAUIuOeO760iAiADsjWSZ3ZPjn9bNyH6eLPehiwrDvtsU/cF7rfdshMwmw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.93.tgz",
+     "unpackedSize": 187365
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.93",
+     "@hachej/boring-workspace": "0.1.93",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.93"
+   },
+   "0.1.95": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.95.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.95",
+    "_integrity": "sha512-lPM8qmdWBlCRe46zxa99sItD+PJV2TR1FXuTYF/ZVmzeb3Xzokw7+RJCB5FhCxDit0koB9vFrUdGn1bO7DdbsA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.95_1785769363504_0.006726654176090419"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.95.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.95",
+     "@hachej/boring-workspace": "0.1.95",
+     "@testing-library/jest-dom": "^6.9.1",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.17",
+     "@types/react-dom": "^19.0.0",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.9.0",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.7",
+     "react-dom": "^19.2.7",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.95"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-lPM8qmdWBlCRe46zxa99sItD+PJV2TR1FXuTYF/ZVmzeb3Xzokw7+RJCB5FhCxDit0koB9vFrUdGn1bO7DdbsA==",
+     "shasum": "df4f15a39b4e67d6e5bcd008e1c5c595cf156fed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFgNEvnDFgkGRJ+aXS2MFEiBY1xLwLeVUJTXQVTCRTdnAiBE1ZcGMclV9kfFLklIy52pkSJR+QQa5LGPFmlJziCW6Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.95.tgz",
+     "unpackedSize": 187365
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.95",
+     "@hachej/boring-workspace": "0.1.95",
+     "fastify": "^5.9.0",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.95"
+   },
+   "0.1.96": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.96.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.96",
+    "_integrity": "sha512-ZXzqcEQJeMQBKhBzu03xTurOcwiEkdpob3zaFs9WGERBOaF4v/G1DZ3lUR0dmeGdaNu+l9M34bjgacykMgVvSA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.96_1786610974743_0.6089204211024863"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.96.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.96",
+     "@hachej/boring-workspace": "0.1.96",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.96"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-ZXzqcEQJeMQBKhBzu03xTurOcwiEkdpob3zaFs9WGERBOaF4v/G1DZ3lUR0dmeGdaNu+l9M34bjgacykMgVvSA==",
+     "shasum": "f1c2aa0266703f013f4a344eea80e6925e39771e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDhFQxTIegfFG8jZ39BhGbpuRDDl8KMN6pQWfjG6xnLZAIhAPxJ8AZ9Q4qLdR0N/Ggf9ZfYY2GwWCGvrLVjMi9bzgBs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.96.tgz",
+     "unpackedSize": 224570
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.96",
+     "@hachej/boring-workspace": "0.1.96",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.96"
+   },
+   "0.1.97": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.97.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.97",
+    "_integrity": "sha512-LqDN/8bM2v5AJWbz7QmDidqtdOtB8ot+icg2lZ24bXnfdEeQYWHAzSaJV2VQr9h224DRF/ubRTbChqi6sXlRxA==",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.97_1786625220332_0.4512985860728933"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.97.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.97",
+     "@hachej/boring-workspace": "0.1.97",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.97"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-LqDN/8bM2v5AJWbz7QmDidqtdOtB8ot+icg2lZ24bXnfdEeQYWHAzSaJV2VQr9h224DRF/ubRTbChqi6sXlRxA==",
+     "shasum": "24bce4b55031451b013904f30c826763964b6543",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDXdB/zeWio+vo2w4GsgDLPaxYpn+ZsCHh4TcZTYyhO5AiAjX1e1MWq9oH52cdRbDiKN/Mf4gtm3EGWtfySMKllnug=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.97.tgz",
+     "unpackedSize": 224570
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.97",
+     "@hachej/boring-workspace": "0.1.97",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.97"
+   },
+   "0.1.98": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.98.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.98",
+    "_integrity": "sha512-OG2b95ziGSrWURmhdzpyWHQYxAFYMRVSazk6JJBSDAYCCoxLyqpTDOsXC+UinGvceDqUxh9JMv9xvFugeNJDig==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.98_1786656226059_0.9476699831370896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.98.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.98",
+     "@hachej/boring-workspace": "0.1.98",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.98"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-OG2b95ziGSrWURmhdzpyWHQYxAFYMRVSazk6JJBSDAYCCoxLyqpTDOsXC+UinGvceDqUxh9JMv9xvFugeNJDig==",
+     "shasum": "a20276607e9f5b7da70edf650f51e5f266684a46",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBrvH/hBTTUjj7EMgCAeuxlTw0Tutc7cWb27rdOKt3K8AiAs/ToL91TLKIWxPL7674z4EBqy180bmJ11xP+akoGpcA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.98.tgz",
+     "unpackedSize": 224570
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.98",
+     "@hachej/boring-workspace": "0.1.98",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.98"
+   },
+   "0.1.99": {
+    "_from": "file:plugins/boring-mcp/hachej-boring-mcp-0.1.99.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@hachej/boring-mcp@0.1.99",
+    "_integrity": "sha512-mjGHilnfousVHx/PD6e6E5sb2QMnDvWNNrXrp9o2K7reuv99wrvehvZ6h+ZS3dWsAfmQ+gm3+5/62B877seGow==",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/boring-mcp_0.1.99_1786724608453_0.9742406760244202"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2d88c1fb-8690-44e7-afe3-341156ced289"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "_resolved": "/home/runner/work/boring-ui/boring-ui/plugins/boring-mcp/hachej-boring-mcp-0.1.99.tgz",
+    "boring": {
+     "front": "dist/front/index.js",
+     "id": "boring-mcp",
+     "label": "MCP",
+     "server": "dist/server/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/hachej/boring-ui/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "8.10.0"
+    },
+    "description": "Reusable boring-ui MCP plugin foundation: generic MCP UI, policy, redaction, and facade contracts.",
+    "devDependencies": {
+     "@hachej/boring-core": "0.1.99",
+     "@hachej/boring-workspace": "0.1.99",
+     "@testing-library/jest-dom": "^7.0.0",
+     "@testing-library/react": "^16.3.0",
+     "@types/node": "^22.20.0",
+     "@types/react": "^19.2.18",
+     "@types/react-dom": "^19.2.4",
+     "@vitejs/plugin-react": "^4.0.0",
+     "fastify": "^5.11.2",
+     "jsdom": "^30.0.1",
+     "react": "^19.2.8",
+     "react-dom": "^19.2.8",
+     "tsup": "^8.4.0",
+     "typescript": "~6.0.3",
+     "vitest": "^4.1.9"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hachej%2fboring-mcp@0.1.99"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-mjGHilnfousVHx/PD6e6E5sb2QMnDvWNNrXrp9o2K7reuv99wrvehvZ6h+ZS3dWsAfmQ+gm3+5/62B877seGow==",
+     "shasum": "6427b644f9a5eb4c281092b4dd831905a634dfad",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAm1qBJRVWRvNzTOGI6rCk2n8TQn8cSwZdT/Gaw/5nKUAiAxPX8HvxAux+nxlEEN6ULn4xDl0vE8SpNqSLzwy7xDiA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hachej/boring-mcp/-/boring-mcp-0.1.99.tgz",
+     "unpackedSize": 224570
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./front": {
+      "import": "./dist/front/index.js",
+      "types": "./dist/front/index.d.ts"
+     },
+     "./package.json": "./package.json",
+     "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+     },
+     "./shared": {
+      "import": "./dist/shared/index.js",
+      "types": "./dist/shared/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/hachej/boring-ui",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:16e5c7769ac0]",
+      "name": "hachej"
+     }
+    ],
+    "name": "@hachej/boring-mcp",
+    "peerDependencies": {
+     "@hachej/boring-core": "0.1.99",
+     "@hachej/boring-workspace": "0.1.99",
+     "fastify": "^5.11.2",
+     "react": "^18.0.0 || ^19.0.0",
+     "react-dom": "^18.0.0 || ^19.0.0"
+    },
+    "pi": {
+     "systemPrompt": "Use boring-mcp bridge tools only when an app has enabled them. Treat MCP sources as read-only unless a tool is explicitly allowed."
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/hachej/boring-ui.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist .tsbuildinfo",
+     "lint": "pnpm run typecheck",
+     "spike:composio": "node scripts/composio-capability-spike.mjs",
+     "test": "vitest run --no-file-parallelism",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "version": "0.1.99"
+   }
+  }
+ },
+ "name": "@hachej/boring-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@hachej%2Fboring-mcp"
+}

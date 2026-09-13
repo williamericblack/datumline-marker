@@ -1,0 +1,2129 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.3.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92bc934077fc]",
+    "name": "dulzuradev"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.6.0",
+   "0.6.1",
+   "0.6.2",
+   "0.6.3",
+   "0.6.4",
+   "0.7.0",
+   "0.8.0",
+   "0.8.1",
+   "0.9.0",
+   "1.0.0",
+   "1.0.2",
+   "1.0.3",
+   "1.0.4",
+   "1.0.5",
+   "1.0.6",
+   "1.0.7",
+   "1.0.8",
+   "1.1.0",
+   "1.1.1",
+   "1.1.2",
+   "1.2.0",
+   "1.3.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@liveauth-labs/mcp-server",
+  "_rev": "23-2bc0f7a5e3cdb606651f5f0d6ad269a9",
+  "author": {
+   "name": "LiveAuth"
+  },
+  "bugs": {
+   "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+  },
+  "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+  "dist-tags": {
+   "latest": "1.3.0"
+  },
+  "homepage": "https://liveauth.app/integrations/goose",
+  "keywords": [
+   "mcp",
+   "authentication",
+   "proof-of-work",
+   "lightning",
+   "bitcoin",
+   "ai-agents"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:92bc934077fc]",
+    "name": "dulzuradev"
+   }
+  ],
+  "name": "@liveauth-labs/mcp-server",
+  "readme": "# LiveAuth MCP Server\n\n**Caller-funded MCP (1.3.0):** use the existing `createMcpGate({ publicKey, toolName, fundingMode: 'caller' })`. LiveAuthCore verifies caller payment and owns accounting; this package owns payment challenges, retry binding and duplicate execution prevention. [Caller funding, API examples and migration](CALLER-FUNDING.md). PoW authenticates; it does not fund paid tools.\n\n\n[![npm version](https://img.shields.io/npm/v/@liveauth-labs/mcp-server.svg)](https://www.npmjs.com/package/@liveauth-labs/mcp-server) [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![L402](https://img.shields.io/badge/auth-L402-F7931A.svg)](#l402-bundle-flow) [![MCP](https://img.shields.io/badge/protocol-MCP-7C3AED.svg)](https://modelcontextprotocol.io)\n\n> **Authentication, pay-per-call metering, and signed receipts for AI agents and MCP tools: Bitcoin-native, Lightning-backed, and L402 compatible.**\n\nThis MCP server lets any AI agent authenticate against your API using **proof-of-work** (free, no account) or **Lightning Network micropayments** (sats), then **meter and monetize** subsequent tool calls with per-call pricing, idempotent revenue events, and HMAC-signed receipts that auditors can verify offline.\n\n**Use it when you want to:**\n- Gate an API or MCP tool behind real cost-of-compute or real sats (anti-spam by design, not by CAPTCHA).\n- Charge AI agents per call without signing them up for an account.\n- Issue a tamper-evident audit trail (signed `mcp-call-receipt-v1`) for every paid tool invocation.\n- Offer Lightning-backed L402 bundle access for prepaid MCP sessions.\n\n**Try it in 5 seconds \u2014 no account, no API key:**\n\n```bash\nnpx @liveauth-labs/mcp-server\n```\n\nWithout configuration, the server uses LiveAuth's anonymous demo project and the real PoW flow. Add `LIVEAUTH_API_KEY` only when you need a specific project's policy, pricing, or attribution.\n\n---\n\n## Available Tools (Glama / MCP auto-discovered)\n\n| Tool | Purpose |\n|---|---|\n| `liveauth_mcp_start` | Begin a session. Returns a PoW challenge, a Lightning invoice, or an L402 bundle hint. |\n| `liveauth_mcp_confirm` | Submit a solved PoW challenge, a paid Lightning invoice, or an L402 macaroon \u2192 receive a JWT. |\n| `liveauth_mcp_charge` | Meter usage after a call. With `toolName`, resolves registered tool pricing and records a paid revenue event. |\n| `liveauth_mcp_refresh` | Exchange a refresh token for a new JWT \u2014 no re-auth required. |\n| `liveauth_mcp_status` | Poll session/payment status (Lightning confirmation, expiry). |\n| `liveauth_mcp_lnurl` | Fetch the BOLT11 invoice for a session (lnget-compatible). |\n| `liveauth_mcp_payment_confirm` | Confirm a caller payment with the current session; then retry the original operation. |\n| `liveauth_mcp_usage` | Query remaining budget, calls used, and rate-limit windows. |\n\nFull parameter and response schemas are in the [Tool Reference](#tool-reference) below.\n\n---\n\n## 5-Minute Quick Start\n\n### Option 1 \u2014 Credential-free PoW (no account, no key, no wallet)\n\n```bash\nnpx @liveauth-labs/mcp-server\n```\n\nIn an MCP client, call `liveauth_mcp_start`, then call `liveauth_mcp_confirm` with only the returned `quoteId`. The package reuses its existing PoW solver locally and the LiveAuth API verifies the signed challenge before issuing a short-lived session JWT.\n\n### Option 2 \u2014 Production Mode\n\n1. Grab an API key at [liveauth.app](https://liveauth.app).\n2. Add to Claude Desktop's `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"liveauth\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@liveauth-labs/mcp-server\"],\n      \"env\": {\n        \"LIVEAUTH_API_BASE\": \"https://api.liveauth.app\",\n        \"LIVEAUTH_API_KEY\": \"la_pk_your_public_key\"\n      }\n    }\n  }\n}\n```\n\n3. Restart Claude. Done.\n\n### Option 3 \u2014 Programmatic (CLI / SDK)\n\n```bash\nexport LIVEAUTH_API_KEY=la_pk_xxx\nnpx @liveauth-labs/mcp-server\n```\n\nThe package is also a TypeScript SDK \u2014 see [SDK Usage](#sdk-usage) below. The CLI bin is `liveauth-mcp`.\n\n## Why LiveAuth?\n\n**For API providers / tool developers:**\n- Stop bots at the protocol layer. PoW and Lightning sats are non-replayable, non-phishable, and don't require user accounts.\n- Charge per call in sats. We sign a receipt you can show auditors, your customers, or your accountant.\n- Wrap any MCP tool with one line (`createMcpGate`) and you get per-tool revenue, per-tool min/max pricing, and idempotent retries.\n\n**For AI agents / agent builders:**\n- Permissionless access to paid APIs \u2014 solve a PoW or pay sats, get a JWT. No signup, no email, no OAuth dance.\n- Use PoW, Lightning invoices, or L402 bundle macaroons for agent access.\n- Projects can settle through a custom Lightning node when configured; otherwise payments use the LiveAuthCore-configured node.\n\n**The math that matters:** if your tool is being scraped by a bot, charging 1 sat per call is enough to make the scraper unprofitable. We call this *cost-of-attack economics*, and it's the whole reason we exist.\n\n## Installation\n\n```bash\nnpm install -g @liveauth-labs/mcp-server\n```\n\nOr use directly with npx:\n\n```bash\nnpx @liveauth-labs/mcp-server\n```\n\n## Goose\n\nLiveAuth for Goose uses the same standards-based stdio MCP server as every other client\u2014there is no Goose wrapper, daemon, or duplicate authentication runtime.\n\n[Install in Goose](goose://extension?cmd=npx&arg=-y&arg=%40liveauth-labs%2Fmcp-server&timeout=300&id=liveauth&name=LiveAuth&description=Give+Goose+agents+authenticated+access+to+metered+and+paid+capabilities+through+LiveAuth.)\n\nOr print the official deep link and current fallbacks:\n\n```bash\nnpx @liveauth-labs/mcp-server setup goose\n```\n\nFor a one-off Goose CLI session:\n\n```bash\ngoose session --with-extension \"liveauth:npx -y @liveauth-labs/mcp-server\"\n```\n\nManual Goose stdio configuration, when the deep link is unavailable:\n\n```yaml\nextensions:\n  liveauth:\n    type: stdio\n    name: LiveAuth\n    enabled: true\n    cmd: npx\n    args: [\"-y\", \"@liveauth-labs/mcp-server\"]\n    env_keys: []\n    envs: {}\n    timeout: 300\n```\n\nDo not edit an existing Goose config destructively. Prefer the deep link or `goose configure`; if you add project configuration later, enter it through Goose's extension secret settings rather than shared plaintext YAML.\n\n### Goose quick test\n\nAsk Goose:\n\n> Use LiveAuth to start the default authentication flow. Confirm the returned quote, then show my LiveAuth usage.\n\nThe initial flow uses the anonymous demo project's PoW challenge and does not require a wallet. A project public key is optional:\n\n| Variable | When to set it |\n|---|---|\n| `LIVEAUTH_API_KEY` | Project-specific policy, pricing, and attribution. |\n| `LIVEAUTH_API_BASE` | A self-hosted LiveAuth API instead of `https://api.liveauth.app`. |\n| `LIVEAUTH_DEMO=true` | Explicitly opt into the older locally simulated Lightning demo. |\n\nWhen a paid flow is requested, tool results retain the existing invoice fields and also include portable structured data:\n\n```json\n{\n  \"lightning\": {\n    \"invoice\": \"lnbc...\",\n    \"lightningUri\": \"lightning:lnbc...\",\n    \"amountSats\": 21,\n    \"expiresAt\": \"2030-03-17T17:46:40.000Z\",\n    \"status\": \"pending\"\n  }\n}\n```\n\nClients with MCP Apps support can render the included QR, Open Wallet action, expiration, and live paid/pending/expired state. Other clients receive the JSON and QR image content as ordinary MCP results.\n\n### Goose troubleshooting\n\n- If the link does not open, run `npx @liveauth-labs/mcp-server setup goose` and use its one-session or manual fallback.\n- If `npx` is unavailable, install a current Node.js release (Node 18 or newer).\n- If a supplied project key is rejected, remove it to verify the anonymous PoW flow; invalid and revoked keys intentionally do not fall back to demo.\n- If a Lightning invoice expires, call `liveauth_mcp_start` again to obtain a fresh quote.\n- Keep refresh tokens and any non-public credentials out of logs and plaintext configuration.\n\nLiveAuth lets agents acquire authorization at runtime instead of requiring every tool to be provisioned with permanent credentials in advance.\n\n## SDK Usage\n\nThe package can also be imported as a TypeScript/JavaScript SDK. Importing the package does not start the stdio MCP server; the CLI lives at the `liveauth-mcp` bin.\n\n### Client Auth Helper\n\n```ts\nimport { createMcpClient } from '@liveauth-labs/mcp-server';\n\nconst liveauth = createMcpClient({\n  publicKey: 'la_pk_xxx',\n  baseUrl: 'https://api.liveauth.app',\n  onInvoice(invoice) {\n    // Render invoice.bolt11 as a QR code for a paid Lightning test.\n    console.log(invoice.bolt11);\n  },\n});\n\nconst session = await liveauth.start();\nconst token = await liveauth.confirm(session);\n\nconsole.log(token.jwt);\n```\n\nThe client stores confirmed JWTs, refreshes them before expiry when a refresh token is returned, and exposes the current token through `liveauth.token`. Call `liveauth.destroy()` when your app is shutting down to clear token state and refresh timers.\n\nFor PoW, `config.publicKey` is the credential sent in `X-LW-Public`. It may be either the project's primary public key or an active API public key belonging to that project. The API returns the canonical project key in `session.powChallenge.projectPublicKey`; the solver hashes that returned key, and confirmation still sends the configured credential. These two key strings can legitimately differ, so comparing them for equality is not a project-isolation check.\n\nUse sessions from your trusted LiveAuth API endpoint. The server binds the quote and signed challenge to the resolved project and issues a JWT with `projectId` and `authType`. For diagnostics, compare the JWT's `projectId` with the expected project ID from your console, without logging the token. Decoding claims alone does not verify a JWT signature.\n\nTo require a real paid invoice:\n\n```ts\nconst session = await liveauth.start({ forceLightning: true });\nconsole.log(session.invoice?.bolt11);\n\n// Poll this after the invoice is paid.\nconst token = await liveauth.confirmLightning(session);\n```\n\n### Server Gate Helper\n\n```ts\nimport { createMcpGate } from '@liveauth-labs/mcp-server';\n\nconst gate = createMcpGate({\n  publicKey: 'la_pk_xxx',\n  baseUrl: 'https://api.liveauth.app',\n});\n\nconst result = await gate.invoke(\n  jwtFromYourTransport,\n  { message: 'hello' },\n  async (input, context) => ({\n    content: [{ type: 'text', text: input.message }],\n    charge: context.liveAuth.charge,\n  }),\n  {}\n);\n```\n\n`gate.invoke(...)` validates the JWT, charges the configured sats cost or the backend project default, and passes `context.liveAuth` into your handler. The older `gate.gateTool(...)` name is still supported.\n\n### Paid Tool Attribution\n\nIf your MCP server has a registered LiveAuth tool ID, pass `toolId` when creating the gate. Charges then go to:\n\n```text\nPOST /api/mcp/tools/{toolId}/charge\n```\n\ninstead of the legacy generic endpoint:\n\n```text\nPOST /api/mcp/charge\n```\n\nYou can also pass a registered tool slug/name as `toolName`. In that mode charges go to the generic endpoint with tool identity in the body:\n\n```text\nPOST /api/mcp/charge\n```\n\nTool charges preserve the same session budget checks, but also record an immutable revenue event with gross sats, LiveAuth platform fee, developer net sats, tool method name, paying project/session/token, metadata, and idempotency key. When `costSats` is omitted, LiveAuthCore uses the registered tool's default price; without `toolId` or `toolName`, it falls back to the project's global MCP price.\n\nRegistered tools can also have a paid-call webhook URL. On every successful new paid call, LiveAuthCore queues a `liveauth.mcp.tool.paid_call` webhook with the tool identity, gross/platform/net sats, revenue event ID, metadata, and the signed receipt. If the tool webhook URL is blank, LiveAuthCore falls back to the project's webhook URL; idempotent retries do not enqueue duplicates.\n\n```ts\nimport { createMcpGate } from '@liveauth-labs/mcp-server';\n\nconst gate = createMcpGate({\n  publicKey: process.env.LIVEAUTH_PUBLIC_KEY!,\n  baseUrl: process.env.LIVEAUTH_API_URL ?? 'https://api.liveauth.app',\n  toolName: 'paid-research-tool',\n});\n\nconst result = await gate.invoke(\n  jwtFromYourTransport,\n  { url: 'https://example.com' },\n  async (input, context) => {\n    const page = await fetch(input.url).then(r => r.text());\n\n    return {\n      text: page,\n      revenueEventId: context.liveAuth.charge.revenueEventId,\n      receipt: context.liveAuth.charge.receipt,\n      netSats: context.liveAuth.charge.netSats,\n    };\n  },\n  { requestId: 'req_123' },\n  {\n    toolMethodName: 'web_fetch',\n    idempotencyKey: 'req_123',\n    agentId: 'agent_abc',\n    metadata: {\n      urlHost: new URL('https://example.com').hostname,\n    },\n  }\n);\n```\n\nWhen `toolId` or `toolName` is set, `GateToolOptions` supports:\n\n| Option | Purpose |\n|--------|---------|\n| `costSats` | Optional sats to charge for this call. Omit to use registered tool pricing or the project global price. |\n| `toolName` | Optional per-call tool slug/name override when using the generic endpoint. |\n| `toolMethodName` | Method within the tool, such as `web_fetch` or `search`. |\n| `idempotencyKey` | Retry-safe key. Reusing it for the same tool returns the original revenue event and signed receipt instead of double charging. |\n| `agentId` | Optional caller/agent identifier for reporting. |\n| `metadata` | Small JSON object for audit context. Do not store private tool output here. |\n\nTool charge responses include the normal budget counters plus revenue accounting:\n\n```json\n{\n  \"status\": \"ok\",\n  \"callsUsed\": 3,\n  \"satsUsed\": 15,\n  \"grossSats\": 5,\n  \"platformFeeSats\": 1,\n  \"netSats\": 4,\n  \"feeBasisPoints\": 500,\n  \"revenueEventId\": \"event-guid\",\n  \"toolId\": \"tool-guid\",\n  \"toolName\": \"Paid Research Tool\",\n  \"toolSlug\": \"paid-research-tool\",\n  \"receipt\": {\n    \"version\": \"mcp-call-receipt-v1\",\n    \"payload\": \"base64url-canonical-json\",\n    \"signature\": \"base64url-hmac-sha256\",\n    \"signatureAlgorithm\": \"HMAC-SHA256\",\n    \"keyId\": \"liveauth-mcp-receipt-v1\",\n    \"body\": {\n      \"receiptId\": \"mcp_receipt_eventguid\",\n      \"revenueEventId\": \"event-guid\",\n      \"mcpToolId\": \"tool-guid\",\n      \"toolName\": \"Paid Research Tool\",\n      \"toolSlug\": \"paid-research-tool\",\n      \"toolMethodName\": \"web_fetch\",\n      \"grossSats\": 5,\n      \"platformFeeSats\": 1,\n      \"netSats\": 4,\n      \"idempotencyKey\": \"req_123\"\n    }\n  }\n}\n```\n\nThe receipt is a signed per-call audit artifact returned by LiveAuthCore for paid tool charges. Store it with your tool result when you need proof of charge or later reconciliation.\n\nIf no `toolId` or `toolName` is configured, the SDK keeps using `/api/mcp/charge` for backward-compatible usage metering.\n\n## Configuration\n\n### Claude Desktop\n\nAdd to your `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"liveauth\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@liveauth-labs/mcp-server\"],\n      \"env\": {\n        \"LIVEAUTH_API_BASE\": \"https://api.liveauth.app\",\n        \"LIVEAUTH_API_KEY\": \"la_pk_your_public_key\"\n      }\n    }\n  }\n}\n```\n\n**Credential-free mode:** If you omit `LIVEAUTH_API_KEY`, the server calls the normal MCP endpoints without a project header. LiveAuth binds its configured anonymous demo project, returns a signed PoW challenge, and preserves normal verification, JWT, rate-limit, and metering boundaries. `LIVEAUTH_DEMO=true` remains an explicit opt-in to the older locally simulated Lightning preview.\n\n**Other env vars:**\n\n| Variable | Default | Purpose |\n|---|---|---|\n| `LIVEAUTH_API_KEY` | _(unset)_ | Your LiveAuth project public key (`la_pk_\u2026`). |\n| `LIVEAUTH_API_BASE` | `https://api.liveauth.app` | Override for self-hosted LiveAuth. |\n| `LIVEAUTH_DEMO` | `false` | Explicitly use the legacy locally simulated Lightning demo. |\n\n### Other MCP Clients\n\nThe server speaks stdio (JSON-RPC 2.0). Start it with:\n\n```bash\nliveauth-mcp\n```\n\nIt also works with any MCP-compatible client: Cursor, VS Code, ChatGPT, Windsurf, Continue, Cline.\n\n## Tool Reference\n\nFull schemas for each MCP tool. Each tool is JSON-RPC 2.0 compatible and tested under `src/index.test.ts` and `src/cli.test.ts`.\n\n### `liveauth_mcp_start`\n\nStart a new LiveAuth MCP session. Returns a PoW challenge by default, or a Lightning invoice if `forceLightning=true`.\n\n**Parameters:**\n- `forceLightning` (boolean, optional): If true, request Lightning invoice instead of PoW challenge\n- `forceL402` (boolean, optional): If true, start a session that should be confirmed with an L402 bundle macaroon\n\n**Returns (PoW):**\n```json\n{\n  \"quoteId\": \"uuid-of-session\",\n  \"powChallenge\": {\n    \"projectId\": \"guid\",\n    \"projectPublicKey\": \"la_pk_...\",\n    \"challengeHex\": \"a1b2c3...\",\n    \"targetHex\": \"0000ffff...\",\n    \"difficultyBits\": 18,\n    \"expiresAtUnix\": 1234567890,\n    \"signature\": \"sig...\"\n  },\n  \"invoice\": null\n}\n```\n\n**Returns (Lightning):**\n```json\n{\n  \"quoteId\": \"uuid-of-session\",\n  \"powChallenge\": null,\n  \"invoice\": {\n    \"bolt11\": \"lnbc...\",\n    \"amountSats\": 50,\n    \"expiresAtUnix\": 1234567890,\n    \"paymentHash\": \"abc123...\"\n  },\n  \"lightning\": {\n    \"invoice\": \"lnbc...\",\n    \"lightningUri\": \"lightning:lnbc...\",\n    \"amountSats\": 50,\n    \"expiresAt\": \"2009-02-13T23:31:30.000Z\",\n    \"expiresAtUnix\": 1234567890,\n    \"status\": \"pending\"\n  }\n}\n```\n\n**Returns (L402 bundle):**\n```json\n{\n  \"quoteId\": \"uuid-of-session\",\n  \"powChallenge\": null,\n  \"invoice\": null,\n  \"authHint\": \"l402_bundle\"\n}\n```\n\n### `liveauth_mcp_confirm`\n\nSubmit a solved proof-of-work challenge, let the package solve its cached challenge, poll a Lightning payment, or present an L402 macaroon to receive a JWT authentication token.\n\n**Parameters:**\n- `quoteId` (string): The quoteId from the start response\n- `challengeHex` (string, optional, PoW only): The challenge hex from the start response\n- `nonce` (number, optional, PoW only): The nonce that solves the PoW challenge\n- `hashHex` (string, optional, PoW only): The resulting hash (sha256 of `projectPublicKey:challengeHex:nonce`)\n- `expiresAtUnix` (number, optional, PoW only): Expiration timestamp from the challenge\n- `difficultyBits` (number, optional, PoW only): Difficulty bits from the challenge\n- `signature` (string, optional, PoW only): Signature from the challenge\n- `macaroon` (string, L402 only): Bundle macaroon returned from the L402 bundle claim flow\n\nWhen the challenge came from this MCP server, calling confirm with `quoteId` alone reuses the package's existing PoW solver. Explicit solution fields remain supported for compatibility.\n\n**Returns:**\n```json\n{\n  \"jwt\": \"eyJhbGc...\",\n  \"expiresIn\": 600,\n  \"remainingBudgetSats\": 10000,\n  \"refreshToken\": \"abc123def456...\"\n}\n```\n\n**Note:** Store the `refreshToken` securely. It is returned in MCP tool data but never written to stderr or application logs. Use `liveauth_mcp_refresh` to get a new JWT without re-authenticating.\n\n### `liveauth_mcp_charge`\n\nMeter API usage after making an authenticated call. The bundled MCP server calls the generic `/api/mcp/charge` endpoint. Supplying `toolName` lets LiveAuth resolve a registered tool, apply its configured price, and create a paid-tool revenue event; omitting `toolName` keeps backward-compatible generic metering.\n\n**Parameters:**\n- `callCostSats` (number, optional): Cost of the API call in sats. Omit to use backend pricing.\n- `toolName` (string, optional): Registered MCP tool slug/name for per-tool pricing and attribution.\n\n**Returns:**\n```json\n{\n  \"status\": \"ok\",\n  \"callsUsed\": 5,\n  \"satsUsed\": 15\n}\n```\n\nIf budget is exceeded:\n```json\n{\n  \"status\": \"deny\",\n  \"callsUsed\": 100,\n  \"satsUsed\": 1000,\n  \"reason\": \"budget_exceeded\"\n}\n```\n\n### `liveauth_mcp_status`\n\nCheck the status of an MCP session. Use to poll for Lightning payment confirmation.\n\n**Parameters:**\n- `quoteId` (string): The quoteId from the start response\n\n**Returns:**\n```json\n{\n  \"quoteId\": \"uuid-of-session\",\n  \"status\": \"pending\",\n  \"paymentStatus\": \"pending\",\n  \"expiresAt\": \"2026-02-17T12:00:00Z\"\n}\n```\n\nWhen `paymentStatus` is \"paid\", the session is confirmed. Call `liveauth_mcp_confirm` again to get the JWT.\n\n### `liveauth_mcp_lnurl`\n\nGet the Lightning invoice for a session (lnget-compatible). Use this to retrieve the BOLT11 invoice for payment with any Lightning wallet.\n\n**Parameters:**\n- `quoteId` (string): The quoteId from the start response\n\n**Returns:**\n```json\n{\n  \"pr\": \"lnbc2100n1...\",\n  \"routes\": []\n}\n```\n\n**Note:** This is compatible with lnget and other Lightning payment tools. Use this to poll for the invoice when `liveauth_mcp_confirm` returns \"payment pending\".\n\n### `liveauth_mcp_usage`\n\nQuery current usage and remaining budget without making a charge. Use this to check status before making API calls.\n\n**Parameters:** (none required)\n\n**Returns:**\n```json\n{\n  \"status\": \"active\",\n  \"callsUsed\": 5,\n  \"satsUsed\": 15,\n  \"maxSatsPerDay\": 10000,\n  \"remainingBudgetSats\": 9985,\n  \"maxCallsPerMinute\": 60,\n  \"expiresAt\": \"2026-02-17T12:00:00Z\",\n  \"dayWindowStart\": \"2026-02-17T00:00:00Z\"\n}\n```\n\n### `liveauth_mcp_refresh`\n\nRefresh the JWT token without re-authenticating. Use the refreshToken returned from confirm to get a new JWT when the current one expires.\n\n**Parameters:**\n- `refreshToken` (string): The refreshToken from the confirm response\n\n**Returns:**\n```json\n{\n  \"jwt\": \"eyJhbGc...\",\n  \"expiresIn\": 600,\n  \"remainingBudgetSats\": 9985\n}\n```\n\n**Note:** Save the refreshToken securely. You'll need it to extend the session without solving a new PoW or making another Lightning payment.\n\n## Usage Example\n\n### PoW Authentication\n\n1. Call `liveauth_mcp_start` to get a PoW challenge and quoteId\n2. Call `liveauth_mcp_confirm` with the quoteId; the MCP server solves its cached challenge with the existing package solver\n3. Advanced clients may still submit an explicit solution (`hash = sha256(projectPublicKey:challengeHex:nonce)` where `hash < targetHex`)\n4. Use the JWT in `Authorization: Bearer <token>` header for API requests\n5. After each generic API call, call `liveauth_mcp_charge` with a call cost, or omit it to use the project global MCP price\n6. For monetized MCP tools, wrap handlers with `createMcpGate({ toolId })` or `createMcpGate({ toolName })` so each call creates a revenue event and signed receipt\n\n### Lightning Authentication\n\n1. Call `liveauth_mcp_start` with `forceLightning: true` to get a Lightning invoice\n2. Use `liveauth_mcp_lnurl` (or poll `liveauth_mcp_status`) to get the BOLT11 invoice\n3. Pay the invoice using your Lightning node/wallet\n4. Poll `liveauth_mcp_status` with the quoteId until paymentStatus is \"paid\"\n5. Call `liveauth_mcp_confirm` with just the quoteId to receive the JWT\n6. Use the JWT with either generic `liveauth_mcp_charge` metering or SDK paid-tool attribution\n\n## Authentication Flow\n\n```\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510     \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510     \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  AI Agent       \u2502\u2500\u2500\u2500\u2500\u25b6\u2502  MCP Server     \u2502\u2500\u2500\u2500\u2500\u25b6\u2502  LiveAuth API   \u2502\n\u2502                 \u2502     \u2502                 \u2502     \u2502                 \u2502\n\u2502 1. Start       \u2502     \u2502 /api/mcp/start  \u2502     \u2502 Returns PoW    \u2502\n\u2502 2. Solve PoW   \u2502     \u2502                 \u2502     \u2502 challenge       \u2502\n\u2502 3. Confirm     \u2502     \u2502 /api/mcp/confirm\u2502     \u2502 Returns JWT    \u2502\n\u2502 4. API calls   \u2502     \u2502                 \u2502     \u2502                 \u2502\n\u2502 5. Charge      \u2502     \u2502 /api/mcp/charge \u2502     \u2502 Meter usage    \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518     \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518     \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\nPaid tool servers use the same JWT but charge through an attributed endpoint:\n\n```text\nAgent calls MCP tool\n\u2192 Tool server calls POST /api/mcp/tools/{toolId}/charge\n  or POST /api/mcp/charge with toolName\n\u2192 LiveAuth validates JWT and budget\n\u2192 LiveAuth records gross / platform fee / net revenue and returns a signed receipt\n\u2192 Tool handler runs and returns the result\n```\n\n## L402 Bundle Flow\n\nLiveAuthCore supports Lightning-backed L402 bundles for prepaid MCP access. Buy a bundle, claim the macaroon after payment, then start an MCP session in L402 mode and confirm it with that macaroon.\n\n```bash\n# 1. Create a bundle invoice.\ncurl -X POST https://api.liveauth.app/api/public/l402/bundle/invoice \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"publicKey\":\"la_pk_xxx\",\"tier\":\"starter\",\"agentId\":\"agent_abc\"}'\n\n# 2. After the invoice is paid, claim a macaroon.\ncurl -X POST https://api.liveauth.app/api/public/l402/bundle/claim \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"publicKey\":\"la_pk_xxx\",\"paymentHash\":\"payment_hash_from_step_1\"}'\n\n# 3. Start and confirm an MCP session with the macaroon.\ncurl -X POST https://api.liveauth.app/api/mcp/start \\\n  -H \"X-LW-Public: la_pk_xxx\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"forceL402\":true}'\n\ncurl -X POST https://api.liveauth.app/api/mcp/confirm \\\n  -H \"X-LW-Public: la_pk_xxx\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"quoteId\":\"quote_id_from_step_3\",\"macaroon\":\"macaroon_from_step_2\"}'\n```\n\n## Development\n\n```bash\n# Install dependencies\nnpm install\n\n# Build\nnpm run build\n\n# Run locally\nnode dist/cli.js\n```\n\n## Resources\n\n- [LiveAuth Demo & Docs](https://liveauth.app)\n- [MCP Protocol Spec](https://modelcontextprotocol.io)\n- [GitHub Repository](https://github.com/dulzuradev/liveauth-mcp)\n\n## License\n\nMIT\n\n---\n\n**Categories:** `authentication` \u00b7 `payments` \u00b7 `lightning` \u00b7 `l402` \u00b7 `bitcoin` \u00b7 `pay-per-call` \u00b7 `metering` \u00b7 `agent-tools` \u00b7 `anti-abuse` \u00b7 `mcp-server` \u00b7 `typescript`\n\n## Paid execution and diagnostics contract (SDK 1.2.0)\n\nThe gate validates the session, records the charge, then invokes the handler.\n**Authorization plus an accepted execution attempt is billable**, including a handler\nexception, timeout, or cancellation after charging. There is no automatic refund.\nInput rejection before the gate and charge denials do not consume usage. A revenue\nevent with status `Charged` proves billing, not successful tool execution.\n\nRegister the tool and move its lifecycle from `Draft` to `Active` before serving paid\ncalls. Draft means unpublished (`tool_unpublished`); Paused or other non-active states\nreturn `tool_inactive`. Public discovery also requires `Visibility=Public`, but\nvisibility is separate from lifecycle: active private/internal tools can be charged.\nThere is no separate publication flag or new visibility restriction in this change.\nUnknown or removed tools return HTTP 404 with JSON `status=deny`,\n`reason=tool_not_found`, and the supplied tool identity. Registered-tool lifecycle\nand budget denials retain HTTP 200 with `status=deny`.\n\n| Reason | Meaning |\n| --- | --- |\n| `tool_unpublished` | Tool is Draft. |\n| `tool_inactive` | Tool is Paused or otherwise non-active. |\n| `tool_not_found` | No matching non-removed tool. |\n| `budget_exceeded` | Existing budget policy rejected the charge. |\n| `rate_limited` | SDK-supported structured rate denial; the current MCP charge controller does not emit this reason or enforce its per-minute setting. |\n| `denied` | SDK fallback when the denial has no reason. Unknown future reason codes remain available on the SDK error. |\n\n`gate.charge()` returns structured denials with `ok=false`, including JSON HTTP\nerror responses with `status=deny`. `gate.invoke()` and `gate.gateTool()` throw\n`ChargeDeniedError` with `reason`, `code`, `toolName`, and `toolId`. For compatibility\nit extends `BudgetExceededError` (and `LiveAuthMcpError`); new handlers must inspect\n`reason` rather than assume every instance means budget exhaustion. Unrelated HTTP\nauthentication, transport, and validation failures keep their existing error path.\nOlder backends may still return plain-text unknown-tool errors until upgraded.\n\nOn handler failure the gate throws `ToolExecutionError` with `charge`,\n`idempotencyKey`, and a non-enumerable `cause`. Its public message is generic.\nExpose an allowlist of charge fields: `grossSats`, `revenueEventId`, signed `receipt`,\nand the idempotency key. Keep `isError=true` in the MCP response. Do not serialize\nor log the error cause, JWT-bearing handler context, or arbitrary metadata.\nReceipt payload/signature are existing public response artifacts and can be returned.\nA successful charge can have no receipt; preserve this distinction rather than\ninventing one. Billing metadata does not imply successful execution.\n\n```ts\nimport { ChargeDeniedError, ToolExecutionError } from '@liveauth-labs/mcp-server';\n\ntry {\n  return await gate.invoke(jwt, input, handler, {}, { idempotencyKey });\n} catch (error) {\n  if (error instanceof ToolExecutionError) {\n    return {\n      isError: true,\n      content: [{ type: 'text', text: 'Tool execution failed after authorization' }],\n      _meta: { liveauth: {\n        billed: true,\n        grossSats: error.charge.grossSats,\n        revenueEventId: error.charge.revenueEventId,\n        receipt: error.charge.receipt,\n        idempotencyKey: error.idempotencyKey,\n      } },\n    };\n  }\n  if (error instanceof ChargeDeniedError) {\n    // Map known reasons to a public response. Do not serialize error.details wholesale.\n    throw error;\n  }\n  throw error;\n}\n```\n\n### Three distinct identifiers\n\n- Receipt `body.requestId`: LiveAuth's server HTTP request/correlation identifier\n  for the original recorded charge. A retry returns that original receipt.\n- Receipt `body.idempotencyKey`: caller-controlled stable retry key. Deduplication\n  is scoped to caller session, provider and registered tool for caller funding; legacy provider funding uses paying project and tool.\n- InvokeWorks `_meta.requestId`: MCP/client correlation ID, taken from `X-Request-Id`\n  or derived from the JSON-RPC request ID. InvokeWorks also uses it as the\n  LiveAuth idempotency key.\n\nFor example, `_meta.requestId=\"client-123\"`, receipt\n`body.idempotencyKey=\"client-123\"`, and receipt `body.requestId=\"server-456\"`\nare valid together. The SDK accepts `idempotencyKey`; it does not send a separate\nclient request-ID option. Caller context `{ requestId }` is local handler context.\nUse a new key for a new logical call and reuse a key only for the same intended\noperation. Deduplicated charging does not cache handler results: retries can execute\nthe handler again in legacy provider mode. Caller-funded duplicate authorizations return recorded payment status and do not execute again. Tool-state and price checks still precede deduplication.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-02-03T15:37:34.732Z",
+   "0.6.0": "2026-02-19T03:51:09.806Z",
+   "0.6.1": "2026-02-27T04:52:02.122Z",
+   "0.6.2": "2026-03-01T02:58:40.148Z",
+   "0.6.3": "2026-03-01T03:08:05.443Z",
+   "0.6.4": "2026-03-01T03:10:18.133Z",
+   "0.7.0": "2026-03-03T16:37:55.115Z",
+   "0.8.0": "2026-04-14T12:57:54.951Z",
+   "0.8.1": "2026-05-17T01:44:51.790Z",
+   "0.9.0": "2026-05-17T17:51:18.808Z",
+   "1.0.0": "2026-05-17T23:28:03.316Z",
+   "1.0.2": "2026-05-21T13:24:19.739Z",
+   "1.0.3": "2026-06-11T21:12:37.737Z",
+   "1.0.4": "2026-06-12T03:58:12.581Z",
+   "1.0.5": "2026-06-12T18:09:55.660Z",
+   "1.0.6": "2026-06-12T20:33:19.276Z",
+   "1.0.7": "2026-06-12T20:58:47.920Z",
+   "1.0.8": "2026-06-12T21:10:40.979Z",
+   "1.1.0": "2026-08-19T17:44:50.891Z",
+   "1.1.1": "2026-08-21T14:26:34.638Z",
+   "1.1.2": "2026-09-05T18:14:17.263Z",
+   "1.2.0": "2026-09-06T03:47:38.189Z",
+   "1.3.0": "2026-09-11T04:17:37.252Z",
+   "created": "2026-02-03T15:37:34.524Z",
+   "modified": "2026-09-11T04:17:37.416Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.1.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1770133054613_0.5394243506000775"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "10.9.4",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-u9zU0DhRinSb5o4agJs9e7GTjF6oU6v5pGW3/yzhrcW3OI7YOhHyNtEzgLS7IqIAFd9qFNmY9ViKuTKgn4h5CQ==",
+     "shasum": "71c581bd5dd55702b701bfe961671000a5dc641e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCVd7UO7kzFSvY48puhWwAZq1O2Ot9sG6/izVuG1kPejwIhAMKpNMYjiLzjvojhvdPJYjXHGZgVcDe+0jLiZ04q77lB"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 27415
+    },
+    "gitHead": "820c05ce864f1b545afad56b1deb3a6a33b99b92",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.6.0",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1771473069653_0.20462265786435085"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 19,
+     "integrity": "sha512-T76h2fS9QiRK9/M7OVGHrUN/GMJp6gSnlhopcnZgMHcpirAcRG5p16GAnP7G7+FxhvjnbVJbgrq8myIzPro0JA==",
+     "shasum": "6844acba4b4efe443a62713826b6a65ef1ec43bf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC9PuMZcSkfGeBhwG+9emyepu+PxWEyKtrATgvqZpJ7jAiEA8+MT470eAHnZGDe9YwbKMHb7ksU1jMw9vLMFpdr+Oqc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 101825
+    },
+    "gitHead": "2e2499c1c7c7764a7361e34ba38c517582bf6fd2",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.6.1",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1772167921956_0.8377051363277273"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-S2BAHMXMhEpOb9iHjpXZf7v+XClgeLyEcbw0jrs0iOmdLdwYKffpR6dEwgAUqk1heTtTS+0CFIv553h3HdeLfg==",
+     "shasum": "8c8c4b2572433db2b27f364180bdfd4a5dcb7e5a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBbtm/QxOlxSb5SV5Rx60Xs751WN8qnhyNsW+0zvPW/qAiEA79voYdKbEQcraqkp9nMNy55ov9HKbQArrTk6uHc0DeI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 108992
+    },
+    "gitHead": "0fa6e8119389ba6be6b2be032cc8448f08994fc0",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.6.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.6.2",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.2_1772333920005_0.13097709436030947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-Sn5A/cH5JORxPtlASy2y1x6q1PSfVu89NGPE9kWmBp0e3fPqUdMTHmH0qHaJDcXxtza3WM9NPZU+87d3u3PIIw==",
+     "shasum": "399177dbe54f7eb17cec25128dcc72c514ddad2d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCQfNmcpNedpIGrngmbk0QVceevQcFm2wR8h6gtRbRvvwIgTd/INa6Ac8sGXrdjwtlUQeB6tYhdcNvHItjv+WSdw+A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.6.2.tgz",
+     "unpackedSize": 117179
+    },
+    "gitHead": "4c38dd9eb6ebff4e5849a4fd8897744ca946edd5",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.2"
+   },
+   "0.6.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.6.3",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.3_1772334485294_0.5629393056992695"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-h4L0yHkfBC/WwH7vJLrKCG9qIqaf4yBic2eF2eeH5VI1Z534bhxdmm3G4dXCHY1QkJhLtdgGG0dFrHP5q/TP+g==",
+     "shasum": "7cde9471a6187a14c60c4ecba49cef99d551d3b9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGyj57G3LdDxgm73RK/c8clUAuRkqKq7EdJPWN72Q6ZkAiA3XCnaMjkyzlAI1BXotxmoZGhotfSjqXfPqzrvwKOPrQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.6.3.tgz",
+     "unpackedSize": 117945
+    },
+    "gitHead": "b188d4f937472fb45c794b0972465b17d0698a53",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.3"
+   },
+   "0.6.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.6.4",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.4_1772334617936_0.16203103948951125"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 21,
+     "integrity": "sha512-UCpwE+7Tcmfbwv8/el0zI08/Q6L0M3ZKVerLqk41qsjEI0v/iImfWqAMMEJvtgiZ1Y9kLUUCKwtBFrpIlcvLjQ==",
+     "shasum": "c77d96438c9458cff09c982c6d5988416b1eb850",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDAwFm22/J3dQtedwaXviAso81A9JHW6e9necdHaBkxsQIgK7bzZt9QMKS9MvczR7TY+TgqwPF5MQ09g1nkUK3uzUA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.6.4.tgz",
+     "unpackedSize": 123871
+    },
+    "gitHead": "cba0eebec3c12be87c44c61de98bf6f68effab56",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.4"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.7.0",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1772555874962_0.8673168476926616"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-81lbeXxiGJ6Ki7X2finNn2HW6raTiMH/Cbv5/mlY9XWL2G7j1C8IWtlK0UAL4IHt/o2i0A8Mhzde71BghsJMIw==",
+     "shasum": "74b59798da1baafc3779f24519f93c0276766e7a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDchdyyGD+oldITXbgOYpt+4vgA2KJvJ5T5VBsOL1MckAiBmE3e5kKMh7FuYKDcOvjBOdVEFpnB7L2x6/f6mbt0qgQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 130747
+    },
+    "gitHead": "ab19def40c7e456c9b08c9b1faf3511689aeda52",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.8.0",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1776171474819_0.4340643646804112"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-c379dTsnSo5RRoKohVyWHe8BQPzYELhZpbedm3a9bhky014EsS3OhuEGcYfi2apnyjQQvqxAlpmQKkSmHyiGTw==",
+     "shasum": "c1fdd5172b802d29fb1027354f599666ec82a883",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDti9s+5ITwpd/xs/wbar0BUgIQPisWiPR/hXfUx84vXwIgcGm0CxSXY1ygXzqD1/42o8i0OubCpOrCrCJvQ9ave88="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 130747
+    },
+    "gitHead": "ab19def40c7e456c9b08c9b1faf3511689aeda52",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.8.1",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.1_1778982291635_0.8798603231637969"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 22,
+     "integrity": "sha512-mMQhT2bt3jX1ibxniURZt0bdd3rL+81SmN3brgGj+P75/qFOm4ETPtBap1yPpCv5GLXx0BGfulH+qfDeSi9Wvg==",
+     "shasum": "b44d2db57eb441f42711de348e6ec03d9a2dbe0f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDsd+n92+iBHYzqGdVsd+dYvCff+SrkAbeaBNsSb7hifAIgfAln738v0795/vrwvHxIX9fUVLo0FK1xvaAISTg0lWg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.8.1.tgz",
+     "unpackedSize": 130755
+    },
+    "gitHead": "8e427cbbd2dc0d9e1a3539f636144533e9e45300",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.1"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@0.9.0",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1779040278652_0.1443522886684061"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-RpuDHpSQkJ1Yrl0SPI/O+KpFfr5miud8J6h6yJR4N5Kjq+XB+w3EkW8yaQXOUrM6nOCs2UdKy5+ClqWrzyL6kA==",
+     "shasum": "2b90e73d78c9eec606929929127bf602edd2cf41",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC7Nc6oYV3dmsQ7UH75hRwwVjzUqjV0abiBlSTTOM2wvgIgW+xBFsyxP/nAOXSxdQ3y00xuGDAULEWZP3gxrBK/g8U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 118402
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "237eec8baa70f82c1901de729d2c41f5dd198e75",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.9.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.0",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.0_1779060483174_0.1823104306175929"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-PNUcrJzw1Y33EPOwWp/jYYG1RrXA6erMobt2zQO71RkUSVnsDfLzTHu/gy0luePnh89Bo/+E2UOboaSaIbB/oA==",
+     "shasum": "debb6d1e79f9633bbcbdd659d7e11b3f9aa2af83",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFDUZwfnBOkTl4bEPWrJrv8e8x9WO2rp3TdLZqGUQuEbAiBdEnzkbNvjxkcERNrTNz+L50bik5R6xEn1wrBcl+ZBtg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.0.tgz",
+     "unpackedSize": 123862
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "51b367651242c41fb820473bfb9a342699c8be78",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.0"
+   },
+   "1.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.2",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.2_1779369859602_0.6300457485182327"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-eE4yrHBu/8GvZsLPW0YTvSLE7VA8CQGRiEMJdzzaTAs01koW8RGpWtQYNSQ037qqy/RpP3/gbHDLOWxtxyiOTw==",
+     "shasum": "0bd147b0bdcd5310e3a15d9fb73941f14911304d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCojBepshed7yRq6zXfbZJCeqsU+y3FPhWZgJDN5zb+ugIgX3jtxfWmbDOjQ3kDU/ikOt+JRq0oMQt2OS8L2Fp6LrY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.2.tgz",
+     "unpackedSize": 129203
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "e7b9773889ce5d9e52bf9775ad51651b0e59f443",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.2"
+   },
+   "1.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.3",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.3_1781212357582_0.29901072422694264"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-WN3Yj7oJ1Zp4/9VrriBKq1okmGjSGC+CzXsXUMMbSWSeBV80HLU+6SN+9oH5Tzr+C9zl7wRfez+QoVGiLt5RVg==",
+     "shasum": "9efa363b649ba4392cbf7e94b72cf7eff9a811ec",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA9pIuxO3mA9d3a++WLY5LEsojqpYLkKqyKbVMnbS/X0AiBYvkfk5bf2jKuHV8Wa2INzm2mpd0quzc/aICee5VuSWw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.3.tgz",
+     "unpackedSize": 131583
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "689240e4ab136c309d449634c892731c71f5c0cd",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.3"
+   },
+   "1.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.4",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.4_1781236692376_0.5346723729900293"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-qkiEbOJuoWfVWpmPG0nvaC9nu6rU7fjaO2sHtWDwcugI32az2JZ8KGMJr5qfSTJ0Jr+QuZfx6XokA1bgXNYXaw==",
+     "shasum": "23ce3e0b64702da97f9359303d3e7c4c2d1371b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDaCK42taN788TbpYWxmpZ+6Rj6R1M4iF4ogMPwCkK+8gIhAIiN4ns5gpgwt6q/FQ6qAM+fMGOQOeAqcphC/qC67BIE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.4.tgz",
+     "unpackedSize": 140724
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "e503f7aa491209287ae982519fd8d836dffb7b47",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.4"
+   },
+   "1.0.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.5",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.5_1781287795515_0.2929326999546391"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-0qkTlL40Z4tVp7XU2KlcN2a6NqYUt2f0uRjjgle2oELwbW1m/eKLmJxwEmcIS/8msElG1+j4vlEX3Ajhvpr6hg==",
+     "shasum": "4ea4fae708bb02d36cf12d7c60410e2d0ad3598d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHdB5pXTZBFG3o83if2dSa/lsj36gYB2VK3t46rPftciAiBqWcA6QMVa/3Uk8PkAod2OmUtV5hxER/+HlClNICccsA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.5.tgz",
+     "unpackedSize": 143220
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "d162529c04e4e88e74eda2d44a9894e33f01780e",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.5"
+   },
+   "1.0.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.6",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.6_1781296399074_0.7902880300764685"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-+iPyP7wVv5bvfN+LY1FCZfTXXvwFY9GJbhZoMEmmbzGf6BdZ9anpAziCYfKqMxBImEOIov/pDuAamWgeCh3jSQ==",
+     "shasum": "93634a9f7beb4837516b427b35fec564d11eeb21",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFA++EfDPE8cBXY8aHhqag3m8Jf3P3S/MyTArdIqVqLnAiEAzU80iNnVDYa5eSWbw7Sp773ynRcR/90RYS35gwl1IxY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.6.tgz",
+     "unpackedSize": 146074
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "1039c1a3f13e4598d58f6c8a9af81faa01785997",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.6"
+   },
+   "1.0.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.7",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.7_1781297927769_0.23490302135895913"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-zA1QPxo0hBqpKzDy5PcWbxjSIY3vuQsoGtQMEax+VCVms3vbK0EbbtQFyJp44BbuZegR0NY9oMy27hpCXaz5IA==",
+     "shasum": "53a21e9ed1447d536d1f0cbf86346bd9a5f2db5a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5T1XB7jGys+SaTV0TNY3in9Hg9u1lIdd8rKP+xHEluwIhALoIM9tllvBCtm1lfF/9h/+FRa6cxgZeysiHZlo1exxb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.7.tgz",
+     "unpackedSize": 146820
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "6047981df9f3b46d4c5f8de999f16542741ba9cd",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.7"
+   },
+   "1.0.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.0.8",
+    "_nodeVersion": "25.6.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.0.8_1781298640832_0.4998686241052337"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^0.5.0",
+     "node-fetch": "^3.3.2"
+    },
+    "description": "MCP server for LiveAuth - PoW and Lightning authentication for AI agents",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-dZCw93xqdunxeBDQSZdp5nvi3JdUPYMFe2hAlKL5AHN2/L0ClxzCxJAeYuyyFwdzzUpkT8PrcHeyt3qgDuWUtg==",
+     "shasum": "6c817ef41619c90a570fc5eb1e421a86c7862ffb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFNgHWklYdgrRfhvNVjFJ/JA+jqh9ItQLYHXaX1Zyja6AiBSIsxAF/QbJKIYylYiB3A1roymqKdIs9EuWND0hoGK3Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.0.8.tgz",
+     "unpackedSize": 146870
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "67d56e192f0eaeb604dafea1a8898493c46cafe8",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.8"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.1.0",
+    "_nodeVersion": "26.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.0_1787161490738_0.05965450932618377"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2",
+     "qrcode": "^1.5.4"
+    },
+    "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@types/qrcode": "^1.5.6",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 51,
+     "integrity": "sha512-bKCvZ8mwblZ2dZHRjKpXQybMirzzOv3rD5BfH9peG8XFRk8mYOMal8qLhQSLf7CipFcCytHqnvImrktIKkPhYQ==",
+     "shasum": "cd1f4e8fef9d8eb359f226f43b5a1498fb362689",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICBw6bQ/XUyzJdw8W3vcl9UsDpjwGnTKfseBer9243iqAiEAw7AmyhgCEw/u/kTY0S2GfGjA3oJ6pWX0cxmAaAR4kfo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.1.0.tgz",
+     "unpackedSize": 172172
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "07ab9c6ba08f1cbe62b9890c00f879ce9fa8274e",
+    "homepage": "https://liveauth.app/integrations/goose",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.1.0"
+   },
+   "1.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.1.1",
+    "_nodeVersion": "26.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.1_1787322394465_0.5549116393830293"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2",
+     "qrcode": "^1.5.4"
+    },
+    "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@types/qrcode": "^1.5.6",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 47,
+     "integrity": "sha512-gv1wEhKOIhCkEsJOkTtNlGwCjmwu1Tg24AXc6JOAsUouLPYmBsei56hCNQuNXDCETHJkSHF4bgHnF35cO+Esmw==",
+     "shasum": "5a3219f16f8419a00f50b447cf4138b342c567ff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEw9CFD5dJjBAlObYqYpn/odj/gFJnCqVcruSFLvxbqVAiBGsBwt5gNjlK7LWMYqESlMd0SLjs/CAHQG3lJOj19qSA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.1.1.tgz",
+     "unpackedSize": 143478
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "f9054761655d081a53d1605d1c2b987473c05fa2",
+    "homepage": "https://liveauth.app/integrations/goose",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.1.1"
+   },
+   "1.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.1.2",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.1.2_1788632057135_0.048858495971771276"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2",
+     "qrcode": "^1.5.4"
+    },
+    "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@types/qrcode": "^1.5.6",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 47,
+     "integrity": "sha512-RHAjbSA3sHsrWxY9oyqfgISGsikUJqGWyQ8WmJRSxoBOApzrh913BLOx97YqD/WDmmncLBR26ikBSQ/3DQrNNQ==",
+     "shasum": "82c3c4b1e7536ee2b213275f20da2b7d20781a90",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDZ3d/0cNCBhCI5pOxNTRJrFQ00sAYKZQUUPL+j/d+NbAiBfXb/iomRxzIlQE028HylKifB+ACElXBZcs4gOjPpJRg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.1.2.tgz",
+     "unpackedSize": 144358
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "3828a297bc3aaf99ed88f52dd4f764522d3b1697",
+    "homepage": "https://liveauth.app/integrations/goose",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.1.2"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.2.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.2.0_1788666458045_0.3862156611520484"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2",
+     "qrcode": "^1.5.4"
+    },
+    "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@types/qrcode": "^1.5.6",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 47,
+     "integrity": "sha512-ZyAuSPrjJd1tXSFGVDyLCmY68HFxfksvCRAL3JcGNSJT8O9IMY0M66wFGcx+WCA3O5H2c3g4LUKRpH6TkAmN5Q==",
+     "shasum": "d40d0b794b56abac577641c1e6fef85d4f6e7632",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID0Q1j1xjTqTqBsiK9foGRovPiRowNN1t12djqwEHgUGAiEAoV8+soBbpayVr4Xyg/SUxslnJgnGEOGDQLTjhU+dXuc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.2.0.tgz",
+     "unpackedSize": 154694
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "70c85bea7b861c290f6a386b977cb2ff03832151",
+    "homepage": "https://liveauth.app/integrations/goose",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.2.0"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@liveauth-labs/mcp-server@1.3.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_1.3.0_1789100257124_0.9336359868539463"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:92bc934077fc]",
+     "name": "dulzuradev"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "LiveAuth"
+    },
+    "bin": {
+     "liveauth-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/dulzuradev/liveauth-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "node-fetch": "^3.3.2",
+     "qrcode": "^1.5.4"
+    },
+    "description": "LiveAuth MCP server for runtime PoW, Lightning, L402, metering, and paid tool access",
+    "devDependencies": {
+     "@types/node": "^20.10.0",
+     "@types/qrcode": "^1.5.6",
+     "@vitest/coverage-v8": "^1.2.0",
+     "typescript": "^5.3.0",
+     "vitest": "^1.2.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-pLN7GNe5n8b5K95YX/0iZPKa+xKn5r5qUHO+vxFR7rVzFHvVj5znt0p+U9QYiCOEr3Cj9cGqoKHIl8YCaPBvbg==",
+     "shasum": "ce588cc89d4d0c4dd2697708b0beef99312b81cd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFV10axYhN66fuKGk9Bw75LnJBMo+XDgHt9f++/YufQoAiEAn8YVnSoWsyze4viVPpb1j71tUMTRG7W8pMFYwWA2/ks="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@liveauth-labs/mcp-server/-/mcp-server-1.3.0.tgz",
+     "unpackedSize": 187545
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./client": {
+      "default": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+     },
+     "./pow": {
+      "default": "./dist/pow.js",
+      "types": "./dist/pow.d.ts"
+     },
+     "./server": {
+      "default": "./dist/server-gate.js",
+      "types": "./dist/server-gate.d.ts"
+     }
+    },
+    "gitHead": "0711c18ffcb55db5644d1b9adc017092a1a46b1e",
+    "homepage": "https://liveauth.app/integrations/goose",
+    "keywords": [
+     "mcp",
+     "authentication",
+     "proof-of-work",
+     "lightning",
+     "bitcoin",
+     "ai-agents"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:92bc934077fc]",
+      "name": "dulzuradev"
+     }
+    ],
+    "mcpName": "io.github.dulzuradev/liveauth-mcp",
+    "name": "@liveauth-labs/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/dulzuradev/liveauth-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.3.0"
+   }
+  }
+ },
+ "name": "@liveauth-labs/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@liveauth-labs%2Fmcp-server"
+}

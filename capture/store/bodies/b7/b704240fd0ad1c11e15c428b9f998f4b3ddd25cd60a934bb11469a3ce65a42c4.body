@@ -1,0 +1,778 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.0.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.0",
+   "0.2.0",
+   "0.3.0",
+   "0.4.0",
+   "1.0.0",
+   "1.0.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-unifi-protect",
+  "_rev": "6-2abd273d0c420971e9bc892bfb5ba428",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+  },
+  "description": "Model Context Protocol server for UniFi Protect",
+  "dist-tags": {
+   "latest": "1.0.1"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "unifi-protect"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-unifi-protect",
+  "readme": "# @mgcrea/mcp-unifi-protect\n\nModel Context Protocol server for a self-hosted **UniFi Protect** console \u2014 cameras, recorded\nevents and smart detections, snapshots, footage export, and the lights, sensors, viewers and\nchimes attached to it. Read-only by default: the tools that change anything are not registered\nat all unless you ask for them.\n\n## Features\n\n- **Search recorded events over any time range** \u2014 motion, person / vehicle / animal / package /\n  licence-plate detections, doorbell rings \u2014 with each result already carrying its camera's\n  **name**, not just an id.\n- **Snapshots and footage** \u2014 capture a frame now, pull an event's thumbnail, export an MP4.\n  All written to disk by default, so a still frame does not silently cost you a context window.\n- **Devices** \u2014 cameras, lights, sensors (with their temperature, humidity and light readings),\n  viewers, chimes, live views and users.\n- **Shaped responses.** A console camera record is 8-15 KB of JSON; a list of ten is over 100 KB.\n  List tools return the fifteen fields anyone actually asks about. `get_*` returns everything.\n- **Stays up with no credentials**, reporting what to configure through `unifi_protect_auth_status`\n  rather than exiting and showing in your client as a bare `Connection closed`.\n\n## Two ways to connect\n\n|                       | `local` (default)                                | `cloud`                                 |\n| --------------------- | ------------------------------------------------ | --------------------------------------- |\n| Reaches the console   | directly on your LAN                             | via `api.ui.com` Site Manager connector |\n| Credentials           | host + username + password                       | API key + console id                    |\n| Auth mechanism        | UniFi OS login \u2192 session cookie + CSRF token     | `X-API-KEY` header                      |\n| TLS                   | console's self-signed cert \u2014 pinned on first use | a real certificate, nothing to do       |\n| Works off-LAN         | no                                               | yes                                     |\n| Session state on disk | yes, mode `600`                                  | none                                    |\n\n**Both modes expose exactly the same tools**, because both speak the same private\nProtect API \u2014 the connector forwards the whole `/proxy/protect/...` tree, the private\nAPI included. That is not obvious and is worth stating plainly: Ubiquiti's _official_\nIntegration API has no historical query capability whatsoever, so if the connector only\ncarried that, cloud mode could not answer a single question about the past. It carries\nthe private API too, verified against a live console \u2014 `bootstrap`, `events`, `cameras`\nand binary snapshots all answer `200`.\n\nSo cloud mode is a full alternative, not a reduced one, and it removes the local\naccount, the password, the session file, the CSRF handshake and the self-signed\ncertificate problem in one go.\n\n```bash\n# cloud \u2014 no local account at all\nUNIFI_PROTECT_API_KEY=\u2026        # unifi.ui.com \u2192 Settings \u2192 API Keys\nUNIFI_PROTECT_CONSOLE_ID=\u2026     # curl -H \"X-API-KEY: $KEY\" https://api.ui.com/v1/hosts\n\n# local \u2014 on the LAN\nUNIFI_PROTECT_HOST=192.168.1.1\nUNIFI_PROTECT_USERNAME=mcp\nUNIFI_PROTECT_PASSWORD=\u2026\n# TLS needs nothing: the console's certificate is pinned on the first request.\n```\n\n`UNIFI_PROTECT_MODE` is inferred as `cloud` when an API key and a console id are both\nset, so it usually needs no setting. `console`/`unifios`/`lan` and\n`remote`/`site-manager`/`connector` are accepted as synonyms, and an unrecognised value\nis reported through `unifi_protect_auth_status` rather than killing the server.\n\n**Two traps in cloud mode.** A key that works for `/v1/hosts` can still return\n`403 user cannot access host in the organization` for a console outside the\norganization it was issued in \u2014 valid key, wrong org, and the message reads nothing like\na credentials problem. And API keys are **per-console**: a key created on your Network\ngateway or a UNAS does not authenticate against the NVR running Protect, and the NVR\nrejects it exactly as it rejects a made-up key.\n\n### Why local mode needs a username and password\n\nAn API key looks like it ought to work here, and it is the obvious thing to reach for.\nIt does not, and the reason is worth writing down so nobody spends an afternoon on it.\n\nA key created **on the console itself** (UniFi OS \u2192 Control Plane \u2192 Integrations) is\nrecognised \u2014 but only by Ubiquiti's _official_ Integration API. It is refused by the\nprivate API this server depends on. Tested against a UNVR on Protect 7.2.105 with a key\nissued on that console:\n\n| Endpoint                                  | With a console API key |\n| ----------------------------------------- | ---------------------- |\n| `/proxy/protect/integration/v1/meta/info` | `200`                  |\n| `/proxy/protect/integration/v1/cameras`   | `200`                  |\n| `/proxy/protect/integration/v1/nvrs`      | `200`                  |\n| `/proxy/protect/api/nvr`                  | **`401`**              |\n| `/proxy/protect/api/cameras`              | **`401`**              |\n| `/proxy/protect/api/events`               | **`401`**              |\n| `/proxy/protect/api/bootstrap`            | **`500`**              |\n\nA fabricated key returns `401` on the official API too, so the `200`s above confirm the\nkey really was valid \u2014 the private API simply does not accept key auth.\n\nPutting all three paths together:\n\n| Path                          | Authenticates with    | Private API (event history, snapshots) |\n| ----------------------------- | --------------------- | -------------------------------------- |\n| `local` + username / password | session cookie + CSRF | \u2705                                     |\n| `local` + API key             | `X-API-KEY`           | \u274c `401`                               |\n| `cloud` + API key             | `X-API-KEY`           | \u2705                                     |\n\nThe asymmetry is not arbitrary. Over the connector, `api.ui.com` authenticates _you_ by\nkey and then reaches the console over its own trusted channel, so the console is never\nasked to accept a key on a private path. On the LAN there is no such intermediary, and\nthe private API only knows the session the web app itself uses.\n\n**So a local-only deployment needs a username and password.** That is a property of\nProtect, not a shortcut taken here. Use a dedicated Local-Access-Only account with\nView Only rights, as described below, and the credential's blast radius stays small.\n\nThe one thing a console API key _would_ unlock is the PTZ move commands\n(`ptz/goto`, `ptz/patrol/start`, `ptz/patrol/stop`), which exist only on the official\nIntegration API \u2014 see [Not implemented](#not-implemented).\n\n## Security\n\n**Supply chain.** Three runtime dependencies: the MCP SDK, zod, and\n[`@mgcrea/unifi-protect`](https://github.com/mgcrea/unifi-protect-client) \u2014 the console client,\nwhich is ours and whose own dependencies are `undici`, `ws` and zod. There is no HTTP client\nwrapper, no logger, no crypto library. That client used to be a copy inside this repo; the copy\nand the original had already begun to drift, which is a bad way to hold knowledge about an\nundocumented API. Published from CI with provenance via OIDC trusted publishing; the container\nimage is multi-arch, carries an SBOM, and is signed with cosign.\n\n**Your credentials.** The username and password come from the environment or a config file, and\nnever leave this process except in the login request to your console. The resulting session\ncookie is cached at `~/.config/unifi-protect/session.json` with mode `600`.\n\n**Certificate verification is ON by default, and now needs no setup.** The console's certificate\nis _pinned_: on the first request the server reads it, records its SHA-256 fingerprint and PEM in\n`~/.config/unifi-protect/trust.json` (mode `600`), and every connection afterwards verifies against\nthat one certificate as its own anchor. The host name check is replaced \u2014 not skipped \u2014 by a\nfingerprint comparison, so addressing the console by IP is fine and a swapped certificate fails\nhard.\n\nThis is what changed. The certificate is issued to `unifi.local` with **no IP SAN**, so reached by\nan IP address, host name verification could never pass however the certificate was trusted; the\nold advice was to set `NODE_EXTRA_CA_CERTS` _and_ address the console by a resolvable name, or\ngive up and disable verification. Pinning removes both requirements.\n\nPinning is trust-on-first-use, and it is only as good as that first moment. The fingerprint is\nlogged when it is learned and reported by `unifi_protect_auth_status`; set\n`UNIFI_PROTECT_FINGERPRINT` to make the trust explicit instead, and a console that presents\nanything else is then refused rather than adopted. If the console legitimately reissues its\ncertificate, delete the trust file.\n\n`UNIFI_PROTECT_VERIFY_TLS=false` still turns checking off entirely, scoped to this server's own\nrequests through an undici dispatcher \u2014 it is not `NODE_TLS_REJECT_UNAUTHORIZED`, so nothing else\nin the process is affected. There should no longer be a reason to use it; the startup banner\nprints `tls=UNVERIFIED` on every run when you do.\n\n**Blast radius.** With the defaults, the worst an agent can do is read your cameras and write\nimage files into the snapshot directory. With `UNIFI_PROTECT_ALLOW_WRITES=1` it can additionally\nreconfigure devices, stop a camera recording, and reboot a camera or the whole console. Use a\nLocal-Access-Only account with View Only rights, and leave writes off unless you need them.\n\n## Configure\n\n| Variable                           | Required | Default                                | What it does                                                    |\n| ---------------------------------- | -------- | -------------------------------------- | --------------------------------------------------------------- |\n| `UNIFI_PROTECT_HOST`               | yes      | \u2014                                      | Console IP or hostname. `https://` assumed, `:port` preserved   |\n| `UNIFI_PROTECT_USERNAME`           | yes      | \u2014                                      | Console login                                                   |\n| `UNIFI_PROTECT_PASSWORD`           | yes      | \u2014                                      | Its password                                                    |\n| `UNIFI_PROTECT_TOTP`               | no       | \u2014                                      | 2FA code. Expires in ~30s \u2014 prefer `unifi_protect_auth_login`   |\n| `UNIFI_PROTECT_VERIFY_TLS`         | no       | `true`                                 | Verify the console's certificate. Off disables pinning entirely |\n| `UNIFI_PROTECT_FINGERPRINT`        | no       | \u2014                                      | Pin this SHA-256 up front instead of learning it on first use   |\n| `UNIFI_PROTECT_TRUST_FILE`         | no       | `~/.config/unifi-protect/trust.json`   | Where the pinned certificate is remembered, mode 600            |\n| `UNIFI_PROTECT_ALLOW_WRITES`       | no       | `false`                                | Register the 12 mutating tools                                  |\n| `UNIFI_PROTECT_SESSION_FILE`       | no       | `~/.config/unifi-protect/session.json` | Cached session, mode 600                                        |\n| `UNIFI_PROTECT_SNAPSHOT_DIR`       | no       | `~/.cache/unifi-protect`               | Where images and exports are written                            |\n| `UNIFI_PROTECT_CONFIG`             | no       | `~/.config/unifi-protect/config.json`  | Config file location                                            |\n| `UNIFI_PROTECT_MAX_RETRIES`        | no       | `3`                                    | Retries on 401 / 429 / 5xx                                      |\n| `UNIFI_PROTECT_MAX_DOWNLOAD_BYTES` | no       | `200000000`                            | Refuse a download larger than this                              |\n| `UNIFI_PROTECT_DEVICE_CACHE_TTL`   | no       | `60`                                   | Camera id\u2192name cache lifetime, seconds                          |\n| `UNIFI_PROTECT_DEBUG`              | no       | \u2014                                      | Verbose request logging to stderr                               |\n\nThe config file mirrors these as camelCase JSON (`host`, `username`, `verifyTls`, \u2026). It is\nstrict: an unknown key is an error rather than a silent no-op. **Environment variables win over\nthe file, field by field**, so a one-off `UNIFI_PROTECT_ALLOW_WRITES=0` still beats a file that\nsays `true`.\n\n### Create an account for it\n\nUniFi OS \u2192 **Settings \u2192 Admins & Users \u2192 Add User \u2192 Local Access Only**, with Protect\npermissions and **View Only** unless you plan to enable writes.\n\nUse a local account rather than your Ubiquiti (SSO) one. Cloud accounts frequently cannot log in\nlocally at all, and a scoped local account keeps this server away from the rest of the console.\n\n## Quick start\n\n**A. npx**\n\n```bash\nUNIFI_PROTECT_HOST=192.168.1.1 UNIFI_PROTECT_USERNAME=mcp UNIFI_PROTECT_PASSWORD=\u2026 \\\n  npx -y @mgcrea/mcp-unifi-protect\n```\n\n**B. Docker (stdio)**\n\n```bash\ndocker run --rm -i \\\n  -e UNIFI_PROTECT_HOST=192.168.1.1 \\\n  -e UNIFI_PROTECT_USERNAME=mcp \\\n  -e UNIFI_PROTECT_PASSWORD=\u2026 \\\n  ghcr.io/mgcrea/mcp-unifi-protect\n```\n\n**C. From source**\n\n```bash\npnpm install && pnpm build\nnode dist/cli.js\n```\n\n### Inspect the tools\n\n```bash\nprintf '%s\\n' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"cli\",\"version\":\"0\"}}}' \\\n  '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' \\\n  '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' \\\n| node dist/cli.js 2>/dev/null | jq -r '.result.tools[]?.name'\n```\n\n## Tools\n\n22 read tools, plus 10 more when writes are enabled.\n\n| Tool                                      | What it does                                                                                        | Writes                 |\n| ----------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------- |\n| `unifi_protect_auth_status`               | Log in and make a real call, reporting whether the console is reachable and on what Protect version | \u2014                      |\n| `unifi_protect_auth_login`                | Force a fresh login; the only way to supply a 2FA code                                              | \u2014                      |\n| `unifi_protect_auth_logout`               | Drop the cached session and delete the session file                                                 | confirm                |\n| `unifi_protect_get_system_info`           | Console model, Protect version, storage, device counts                                              | \u2014                      |\n| `unifi_protect_list_cameras`              | Every camera, summarized                                                                            | \u2014                      |\n| `unifi_protect_get_camera`                | One camera's complete record (large)                                                                | \u2014                      |\n| `unifi_protect_get_camera_snapshot`       | Capture a frame now, to a file or inline                                                            | \u2014                      |\n| `unifi_protect_list_ptz_presets`          | A PTZ camera's saved preset slots                                                                   | \u2014                      |\n| `unifi_protect_list_ptz_patrols`          | A PTZ camera's saved patrol routes                                                                  | \u2014                      |\n| `unifi_protect_check_settings`            | **Audit every camera for inconsistent or self-defeating settings**                                  | \u2014                      |\n| `unifi_protect_list_events`               | **Search recorded events over any time range**                                                      | \u2014                      |\n| `unifi_protect_get_event`                 | One event's full detection metadata                                                                 | \u2014                      |\n| `unifi_protect_get_event_thumbnail`       | The frame that triggered a detection                                                                | \u2014                      |\n| `unifi_protect_get_event_thumbnails`      | Up to 6 frames at once, inline \u2014 how you tell a person from a branch                                | \u2014                      |\n| `unifi_protect_export_video`              | Export footage as an MP4 on disk                                                                    | \u2014                      |\n| `unifi_protect_list_lights`               | Floodlights, with state and brightness                                                              | \u2014                      |\n| `unifi_protect_list_sensors`              | Sensors, with temperature / humidity / light readings                                               | \u2014                      |\n| `unifi_protect_list_viewers`              | Viewport devices and what each displays                                                             | \u2014                      |\n| `unifi_protect_list_chimes`               | Chimes, volume, paired doorbells                                                                    | \u2014                      |\n| `unifi_protect_list_liveviews`            | Saved camera grid layouts                                                                           | \u2014                      |\n| `unifi_protect_list_users`                | Who can sign in to Protect                                                                          | \u2014                      |\n| `unifi_protect_request`                   | Escape hatch: call any private endpoint directly                                                    | GET only unless writes |\n| `unifi_protect_update_camera`             | Name, mic, status LED, OSD overlays                                                                 | \u2705                     |\n| `unifi_protect_set_camera_detections`     | Which objects and sounds a camera detects \u2014 the gate below                                          | \u2705                     |\n| `unifi_protect_set_camera_recording_mode` | `always` / `never` / `detections` / `schedule`                                                      | \u2705                     |\n| `unifi_protect_reboot_camera`             | Reboot one camera                                                                                   | \u2705 confirm             |\n| `unifi_protect_update_light`              | Brightness, on/off, PIR sensitivity                                                                 | \u2705                     |\n| `unifi_protect_update_sensor`             | Name, which capabilities report                                                                     | \u2705                     |\n| `unifi_protect_update_viewer`             | Put a live view on a screen                                                                         | \u2705                     |\n| `unifi_protect_update_chime`              | Volume, name                                                                                        | \u2705                     |\n| `unifi_protect_update_nvr_settings`       | Console name, timezone, global recording                                                            | \u2705                     |\n| `unifi_protect_reboot_nvr`                | Reboot the console                                                                                  | \u2705 confirm             |\n\n## Resources and prompts\n\nThree resources carry the standing facts a question needs before a tool is chosen, so a client\ncan attach them once instead of spending a call per question:\n\n| Resource                    | Why it exists                                                                            |\n| --------------------------- | ---------------------------------------------------------------------------------------- |\n| `unifi-protect://console`   | The console's **time zone**, so \"1am\" is read as the local clock rather than UTC         |\n| `unifi-protect://cameras`   | What each camera will **actually** detect, what its zones ask for, and where they differ |\n| `unifi-protect://locations` | Named groups of cameras, so a question about a _place_ resolves to ids                   |\n\nTwo prompts carry the procedure, which is the part a tool list cannot express:\n\n- **`check_camera_settings`** \u2014 run the audit and interpret it, changing nothing. Several\n  findings have two valid opposite fixes, and which is right depends on what the camera is for.\n- **`who_passed`** \u2014 find who was present in a window, and **fall back to motion frames on any\n  camera whose detector is off** rather than reporting a zero count as an absence. It takes the\n  question as one free-text argument, so **quote it**: slash-command arguments are split\n  shell-style and mapped positionally, so `who_passed in front of the house last night?` arrives\n  as just `\"in\"`, while `who_passed \"in front of the house last night?\"` arrives whole. A\n  single-word question is treated as that truncation and refused rather than answered.\n\n## Worked example: what happened at the front door last night\n\n```jsonc\n// 1. Which cameras are there?\n{\"name\": \"unifi_protect_list_cameras\", \"arguments\": {}}\n// \u2192 [{ \"id\": \"661a\u2026\", \"name\": \"Front Door\", \"hasSmartDetect\": true,\n//      \"smartDetectTypes\": [\"person\",\"package\"], \"recordingMode\": \"detections\", \u2026 }]\n\n// 2. People seen overnight. Note the camera NAME comes back resolved.\n{\"name\": \"unifi_protect_list_events\", \"arguments\": {\n   \"start\": \"2026-08-29T22:00:00Z\", \"end\": \"2026-08-30T07:00:00Z\",\n   \"types\": [\"smartDetectZone\"], \"smartDetectTypes\": [\"person\"]}}\n// \u2192 { \"count\": 3, \"events\": [\n//     { \"id\": \"9f3c1a02-\u2026\", \"start\": \"2026-08-30T02:14:07.000Z\", \"camera\": \"Front Door\",\n//       \"smartDetectTypes\": [\"person\"], \"score\": 94, \"hasThumbnail\": true }, \u2026 ] }\n\n// 3. Look at the one at 02:14 \u2014 pass the event's own id.\n{\"name\": \"unifi_protect_get_event_thumbnail\",\n \"arguments\": {\"eventId\": \"9f3c1a02-\u2026\", \"output\": \"image\"}}\n\n// 4. Pull the footage around it.\n{\"name\": \"unifi_protect_export_video\", \"arguments\": {\n   \"cameraId\": \"661a\u2026\", \"start\": \"2026-08-30T02:13:30Z\", \"end\": \"2026-08-30T02:15:00Z\"}}\n// \u2192 { \"path\": \"/Users/you/.cache/unifi-protect/front-door-\u2026.mp4\", \"bytes\": 18432000 }\n```\n\n## Traps worth knowing\n\n**This wraps Protect's private API, not the official one.** Ubiquiti publishes an Integration\nAPI at `/proxy/protect/integration/v1` with an OpenAPI spec and an `X-API-KEY` header. It is not\nused here, because it has **no historical query capability at all** \u2014 the only query parameters\nin its entire spec are `channel`, `highQuality` and `qualities`, and events exist solely as a\nlive WebSocket. \"What happened last night\" is unanswerable through it. The private API answers\nthat, at the cost of being undocumented and liable to change between Protect releases. This was\nbuilt and verified end-to-end against a live **UNVR running Protect 7.2.105**.\n`unifi_protect_get_system_info` reports the version you are actually running, and\n`unifi_protect_request` reaches any endpoint that moves.\n\nTwo shapes already changed between 6.x and 7.x, both found by running this against a real\nconsole, and both now handled in either form:\n\n- **Storage moved.** 6.x had `nvr.storageInfo` with `totalSize` / `totalSpaceUsed`. By 7.2 that\n  key is gone; the numbers live under `nvr.systemInfo.storage` and `nvr.storageStats`, with\n  per-disk health in `systemInfo.ustorage.disks`.\n- **A camera has no `ledLevel`.** The 0-6 brightness that looks like it belongs there is a\n  _floodlight_ field; a camera's LED is the on/off `ledSettings.isEnabled`. Sub-objects also\n  deep-merge on PATCH, so setting one OSD overlay preserves the others \u2014 verified by writing to\n  a live camera and reading it back.\n- **An event's `thumbnail` field is not a thumbnail id you can use here.** It reads `e-<eventId>`\n  and belongs to the `thumbnails/<id>` endpoint; `events/<eventId>/thumbnail` \u2014 the one this\n  server calls \u2014 wants the bare event id. Passing the console's own value returns 404. So list\n  results report `hasThumbnail: true` rather than an id, and `unifi_protect_get_event_thumbnail`\n  takes the event's `id` (though it tolerates an `e-\u2026` value too).\n\n**Smart detection is gated in two places, and only one of them is obvious.**\n`smartDetectSettings.objectTypes` on the device is the master switch;\n`smartDetectZones[].objectTypes` says what each zone asks for. A zone can ask for `person` while\nthe device list omits it, and the console then reports nothing at all \u2014 no error, no warning,\njust an empty result forever. On the console this was built against, a doorbell had\n`zone: [person, vehicle, animal]` against `device: [animal]`, so a person search returned zero\nacross seven days while people walked past nightly.\n\nZero results are therefore never reported bare. `unifi_protect_list_events` cross-checks the\nrequested detection types against each camera's device list and returns a `warnings` array\nsaying the detector was off \u2014 the difference between \"nobody was there\" and \"nothing was\nlooking\". `unifi_protect_check_settings` finds the same misconfiguration across the whole\nsystem, and `unifi_protect_set_camera_detections` fixes it, keeping the zones in step.\n\nOne limit worth knowing: the check reflects the camera's setting **now**, so a historical search\nover a period when the detector was off but has since been enabled gets no warning.\n\n**Some settings are reported on read but refused on write.** `smartDetectSettings.audioTypes`\ncomes back containing `smoke_cmonx`, and a PATCH containing it fails with\n`400 The smart detection feature is not enabled for: smoke_cmonx`. Any read-modify-write that\nechoes the list back therefore breaks. `unifi_protect_set_camera_detections` filters against\n`featureFlags.smartDetectAudioTypes` and reports what it dropped.\n\n**Camera filtering happens on the console, and the parameter must be repeated.** `/events`\naccepts `cameras=<id>`, repeated once per camera. A comma-separated list is accepted and\nsilently matches nothing. This mattered more than it looks: filtering client-side instead\nfetches the newest `limit` events across _all_ cameras and discards the rest, so a quiet camera\nover a long window came back empty while reporting a successful search.\n\n**Times are milliseconds, and getting it wrong fails silently.** The console takes JavaScript\nmillisecond timestamps. A Unix _seconds_ value is not rejected \u2014 it is read as a moment in 1970,\nso the query succeeds and returns an empty list, which reads as \"nothing happened\". Every time\nargument here accepts ISO 8601, a relative expression (`\"2h ago\"`, `\"30m\"`, `\"7d\"`) or `\"now\"`,\nand a ten-digit number is refused with the corrected value in the error.\n\nLocal forms are also accepted \u2014 `\"1am\"`, `\"01:30\"`, `\"2026-08-30 01:00\"` \u2014 and read in the\n**console's own time zone**, because a question about last night is a question about the clock\nwhere the cameras are. A bare time of day resolves to its most recent occurrence, and `start`\nanchors to the window's end, so \"1am to 6am\" stays one coherent night however late it is asked.\n\n**Event search is always filtered by type.** Omitting `types` entirely triggers a pagination bug\nin Protect where the console ignores the window and returns the wrong slice. `unifi_protect_list_events`\nalways sends an explicit list, defaulting to motion, smart detections and rings.\n\n**Footage only exists if the camera was recording.** An empty event search may mean the camera's\nrecording mode is `never`, not that nothing happened. `unifi_protect_list_cameras` shows the mode.\n\n**Snapshots are forced.** Without that the console can return a cached frame minutes old, which\nis indistinguishable from a current one.\n\n**A cloud account may not work.** Ubiquiti SSO accounts frequently cannot log in locally. Create\na Local Access Only user.\n\n## Troubleshooting\n\n**The server does not appear, or shows `Connection closed`.** It should never exit on missing\ncredentials \u2014 run it by hand with the same environment and read stderr. Everything it logs goes\nto stderr, because stdout is the protocol channel.\n\n**Only `unifi_protect_auth_status` is listed.** No console is configured. Call that tool; it\nreturns the setup steps as data.\n\n**A tool I expected is missing.** The write tools are not registered unless\n`UNIFI_PROTECT_ALLOW_WRITES=1`. That is the design, not a bug \u2014 an absent tool cannot be called,\nwhereas a refused one invites an agent to keep trying.\n\n**`self-signed certificate` errors.** These should no longer happen: the certificate is pinned on the first request, which works against an IP address. If one appears, the console is presenting a _different_ certificate than the one pinned \u2014 delete `~/.config/unifi-protect/trust.json` if it was legitimately reissued, and investigate if it was not\nunless you have installed a trusted certificate on the console.\n\n**Cloud mode returns 403 `user cannot access host in the organization`.** The key is\nvalid but was issued in an organization that does not contain that console. Check the\nconsole appears in `curl -H \"X-API-KEY: $KEY\" https://api.ui.com/v1/hosts`; if the web\ndashboard shows it but that call does not, they are different organizations.\n\n**I set an API key for local mode and everything returns 401.** Local mode cannot use an\nAPI key \u2014 see [Why local mode needs a username and password](#why-local-mode-needs-a-username-and-password).\nSet `UNIFI_PROTECT_USERNAME` and `UNIFI_PROTECT_PASSWORD`, or switch to `cloud` mode,\nwhere a key is all you need.\n\n**A local API key returns 401 on everything.** API keys are per-console. A key created\non your Network gateway is not valid on the NVR running Protect \u2014 and the NVR rejects an\nunknown key with exactly the same `401` it gives a fabricated one, so the message cannot\ndistinguish \"wrong console\" from \"wrong key\". Create the key on the console you are\naddressing, or use cloud mode.\n\n**Everything returns 401.** Check the account is a local one, and that it has Protect\npermissions. `unifi_protect_auth_status` distinguishes \"cannot log in\" from \"logged in but\nforbidden\".\n\n**A tool that used to work now returns 404.** Compare the Protect version from\n`unifi_protect_get_system_info` against 7.2.105 above; an upgrade may have moved the endpoint.\n`unifi_protect_request` is the workaround while it is fixed \u2014 it reaches any path under\n`/proxy/protect/api` directly, which is how both of the 6.x\u21927.x changes above were pinned down.\n\n**Storage shows as nearly full.** That is normal on an NVR: `isRecycling: true` means the\nconsole continuously overwrites the oldest footage rather than stopping. `get_system_info` says\nso inline so it does not read as a fault.\n\n## What has been verified against real hardware\n\n**Cloud mode** was verified end-to-end against a live console over the Site Manager\nconnector: `auth_status` reachable, camera list, and event search returning real\ndetections with their camera names resolved \u2014 all authenticated by an API key alone,\nwith no local account anywhere in the picture.\n\n**Local mode** was built and exercised end-to-end against a live **UNVR4 on Protect 7.2.105** with 12 cameras, one\nfloodlight and one chime. Every read tool was run; the write tools were exercised with _no-op_\nwrites \u2014 each value set to the value it already held \u2014 and the device state read back unchanged\nafterwards. That run is also what caught three bugs this README's earlier drafts described\nwrongly: the storage layout, the event-thumbnail id, and two camera fields that do not exist.\n\n**Certificate pinning** was verified against that same console on 2026-08-31, addressed by IP\n(`192.168.6.3`) with verification ON \u2014 the case that was impossible before. Confirmed in one run:\nthe certificate is captured and its fingerprint logged on first contact; the trust file is written\nmode `600`; a restart reuses the pin without re-capturing; a correct `UNIFI_PROTECT_FINGERPRINT`\n(colons and all) is accepted; and a wrong one is refused with a message naming both fingerprints,\nsurfacing as a failed tool call rather than a server that never starts. `auth_status` reported\n`reachable: true` on Protect 7.2.105 throughout, and a session cached by the previous release was\nrestored unchanged \u2014 the on-disk format did not move.\n\nTwo tools remain **unverified for want of hardware**, and are marked here rather than left to look\ntested:\n\n- `unifi_protect_update_sensor` \u2014 no UP Sense device on the test console (`sensors` is empty).\n  Note that a Protect **floodlight has its own built-in PIR**, reported as `isPirMotionDetected`\n  and tuned via `pirSensitivity`; that is part of the light, so it is `unifi_protect_update_light`\n  that controls it, not this tool. A garden lamp is not a sensor device.\n- `unifi_protect_update_viewer` \u2014 no Viewport device on the test console.\n\nBoth follow the same PATCH shape as the tools that were verified, so they are likely correct, but\n\"likely\" is the honest word until someone runs them.\n\n## Not implemented\n\nThe realtime WebSocket at `/proxy/protect/ws/updates` is not wired up here, though\n`@mgcrea/unifi-protect` now implements it \u2014 `connectEventStream` and `ProtectStore` are a\ndecoded frame stream and a live device cache, and this server deliberately uses neither.\n\nThe reason is that they are the wrong shape for an MCP server. Both want a long-lived process\nthat bootstraps at start-up and stays subscribed; this server must start with no credentials and\nno connectivity at all, answering `unifi_protect_auth_status` until it is configured. It would\nalso gain little: because this wraps the private API, event _history_ is already available over\nREST through `unifi_protect_list_events`, which is what a subscription would have been for.\nAdopting it would mean deferring the bootstrap until credentials appear \u2014 worth doing if a tool\never needs push rather than poll, and not before.\n\n## Develop\n\n```bash\npnpm install\npnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build\n```\n\nPublish:\n\n```bash\npnpm release minor             # bump, commit, tag (patch|minor|major)\ngit push --follow-tags         # CI publishes to npm + GHCR from the tag\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+  },
+  "time": {
+   "0.0.0": "2026-08-30T08:21:09.773Z",
+   "0.2.0": "2026-08-30T08:24:09.136Z",
+   "0.3.0": "2026-08-30T13:20:17.351Z",
+   "0.4.0": "2026-08-30T19:32:59.156Z",
+   "1.0.0": "2026-08-31T21:55:06.534Z",
+   "1.0.1": "2026-09-01T14:12:44.180Z",
+   "created": "2026-08-30T08:21:09.287Z",
+   "modified": "2026-09-01T14:12:44.479Z"
+  },
+  "versions": {
+   "0.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@0.0.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_0.0.0_1788078069639_0.5739882808831489"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-Sc/LqyKld1ae4wmra3mWeMpqY1Glep1dW3NI0IYliXyO2aIBAlt4bB/tCUvgs+564oZraDFhC4wNu2qBsLJqiA==",
+     "shasum": "2afa892dc42219be8f2a64acccc9e897204719f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCEK7Php7DRDAL7PGIctQHc6foQB0Ee2Tg1mDwcYX2sIAIgeEzorK0MZzh9whzSeVec3Bqh5VXa2FYaOMQdQ/1L2sA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-0.0.0.tgz",
+     "unpackedSize": 286417
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b7fe70ac796d95cac6e43c8f20615f4f67a6ca1b",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.0.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@0.2.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_0.2.0_1788078248988_0.9318150200241562"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-gD/ikH9vAIZ70R3v4sryys4l8TOZvFZidBL1BKjqh1Azhpd0x8ehjrBidfIOxADp5D+kcJRgHFSLrpOLuWyGdw==",
+     "shasum": "6809441f7505b011fd436d4f53bc53a96f32d64f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDMqrAcN5xMGRshOazy4bU7pEG6t/8AtVY9pj7Q6vTLxgIgIf1U7DBhk8OZMvCvCcYaiOgAa92GIqS0uSbnyftT8rw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-0.2.0.tgz",
+     "unpackedSize": 286418
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e314041657cfd4091938d4dc487f1d1670463cc5",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@0.3.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_0.3.0_1788096017190_0.05456123878350305"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:073d5073-67e5-4460-9cf1-9296db9a3ae1"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-protect@0.3.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-1yovt0hCHF3XiF4mVKgVT+7cgQBvvWKoX1qqTgQuvQLpDqN5ocV298wTGp261RZT7wQ+RDTS8NueFaBSy6iLlQ==",
+     "shasum": "aa7b4b626f6528270b42bc23123cc22a690bd957",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDy1L6NnE6B8rKOH8O9if+izsCixTvKbaEXtoMZcl2MnAIgeRXlLzhKmNXMRB10HN4a2mIYHjR0uAGZQrxhaBYt5HA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-0.3.0.tgz",
+     "unpackedSize": 425311
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b29aa8bb478becb794a31405a31fab0cc22fc1c2",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "npm version --message \"release: cut the v%s release\"",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@0.4.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_0.4.0_1788118378963_0.381067189306308"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:073d5073-67e5-4460-9cf1-9296db9a3ae1"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "undici": "^8.10.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-protect@0.4.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-RmWyfpRqsL0WqohqbMBgt/sIhPokM7fcoZFiOclePqNRYRg1niH+cwk9hizRsKeQ3rQ3LLMuidER+9BvjaQu5g==",
+     "shasum": "61f0fd2d24b49c1423ef529518918724fa7e14b6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDBz2jpgwySzsgusd9PxTUDCjHpc3kiT39XSL1p1jtUdwIhALL4isdyYPTovzAxSgeilCRm5MNWHkgVjfVrpQGPBK3X"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-0.4.0.tgz",
+     "unpackedSize": 435623
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b8d2fd6f5719e5976d23f04c9d21a949f8527322",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "npm version --message \"release: cut the v%s release\"",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@1.0.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_1.0.0_1788213306375_0.9943180054249388"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:073d5073-67e5-4460-9cf1-9296db9a3ae1"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@mgcrea/unifi-protect": "^0.2.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-protect@1.0.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-vHfijBfsZQ4Xv0L1r7cK1BUIQx51mw0bcCmlOF1m1vatuGUMVPfSgGfZPwT+OEJ9SB9Mv4WViB8vR44KhwJD3w==",
+     "shasum": "68332762687e8240b57f1abcf8e4d9adc5a3bcb2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBVfv4ykl6fiyTuLT9UeAFb9G7Q1IB2nrVrFt+cyAmdlAiAILGeslBASE1X6+BoQrSlgVkzJ2JWAz9pQv8KPQAQVRQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-1.0.0.tgz",
+     "unpackedSize": 404830
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "74b02ecc5c7b9ff447a6177643b637a116f76745",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "check:deps": "node -e \"const d=require('./package.json').dependencies;const bad=Object.entries(d).filter(([,v])=>/^(link|file|workspace):/.test(v));if(bad.length){console.error('Refusing to publish: '+bad.map(([k,v])=>k+'@'+v).join(', ')+' resolves to a local path and would not install for anyone else.');process.exit(1)}\"",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm run check:deps && pnpm build",
+     "release": "npm version --message \"release: cut the v%s release\"",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-unifi-protect@1.0.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-unifi-protect_1.0.1_1788271964046_0.06835725046771368"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:073d5073-67e5-4460-9cf1-9296db9a3ae1"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "unifi-protect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-unifi-protect/issues"
+    },
+    "dependencies": {
+     "@mgcrea/unifi-protect": "^0.2.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for UniFi Protect",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-unifi-protect@1.0.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-t570i+Q/3yrdxS11LaLRocb1gq6NbyfJBk8RF6vrrue+tCTRecMZ/erR5ZSS2xzjxcDjO75IFVxgt9F2/Pr1VQ==",
+     "shasum": "618d1aa82aeaf0c043d90d951f4a966d05cc1f89",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGPm0g1Epm+UxOaF4ZaXW8UqHc2j2V1/2uY98mFR3xMxAiEAlSPbo5PQXCE0d4Io9EKeuobKSvfOIaUf/aXLJOOtNv4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-unifi-protect/-/mcp-unifi-protect-1.0.1.tgz",
+     "unpackedSize": 405344
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5981033eec79e62d828fb9d5e2a81953078fe1f3",
+    "homepage": "https://github.com/mgcrea/mcp-unifi-protect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "unifi-protect"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-unifi-protect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-unifi-protect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "check:deps": "node -e \"const d=require('./package.json').dependencies;const bad=Object.entries(d).filter(([,v])=>/^(link|file|workspace):/.test(v));if(bad.length){console.error('Refusing to publish: '+bad.map(([k,v])=>k+'@'+v).join(', ')+' resolves to a local path and would not install for anyone else.');process.exit(1)}\"",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-unifi-protect:latest && docker push mgcrea/mcp-unifi-protect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm run check:deps && pnpm build",
+     "release": "npm version --message \"release: cut the v%s release\"",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "1.0.1"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-unifi-protect",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-unifi-protect"
+}

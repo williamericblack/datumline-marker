@@ -1,0 +1,3763 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.24.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.13.1",
+   "0.14.0",
+   "0.14.1",
+   "0.15.0",
+   "0.16.0",
+   "0.17.0",
+   "0.18.0",
+   "0.19.0",
+   "0.2.0",
+   "0.2.2",
+   "0.20.0",
+   "0.21.0",
+   "0.22.0",
+   "0.22.1",
+   "0.22.2",
+   "0.22.3",
+   "0.22.4",
+   "0.23.0",
+   "0.24.0",
+   "0.24.1",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.1",
+   "0.8.0",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-appstore-connect",
+  "_rev": "30-59843adf2a88a83e0c1196a39b74e4eb",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+  },
+  "description": "Model Context Protocol server for the Apple App Store Connect API",
+  "dist-tags": {
+   "latest": "0.24.1"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+  "keywords": [
+   "app-store-connect",
+   "apple",
+   "appstore",
+   "ios",
+   "mcp",
+   "model-context-protocol",
+   "testflight"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-appstore-connect",
+  "readme": "# @mgcrea/mcp-appstore-connect\n\n[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-appstore-connect.svg?style=for-the-badge)](https://www.npmjs.com/package/@mgcrea/mcp-appstore-connect)\n[![GHCR](https://img.shields.io/badge/ghcr.io-container_image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/mgcrea/mcp-appstore-connect/pkgs/container/mcp-appstore-connect)\n\nModel Context Protocol server for the Apple [App Store Connect API](https://developer.apple.com/documentation/appstoreconnectapi) \u2014 inspect your apps, versions, builds, TestFlight, sales and users, and (opt-in) edit metadata and manage testers, straight from an MCP client like Claude.\n\n> **Unofficial.** Not affiliated with or endorsed by Apple. It talks to Apple's public App Store Connect REST API using an API key you generate yourself.\n\n## Features\n\n- **Broad coverage** \u2014 apps, App Store versions & localizations, builds, TestFlight groups/testers/feedback, sales & finance reports, analytics, users, bundle ids & capabilities, devices.\n- **Listing round-trip** \u2014 export the whole store listing to a git-committable metadata tree, edit it locally, apply it back with digest-based conflict detection.\n- **Read by default, writes opt-in** \u2014 mutating tools are not registered at all unless you ask for them. See [Security](#security).\n- **Typed & tested** \u2014 ESM, built with tsdown, linted/formatted with oxc, tested with vitest. Tests run fully offline.\n\n## Security\n\nYou are pointing an AI agent at the account that ships your apps, so the honest details matter more than reassurance.\n\n### Supply chain\n\n**Two direct dependencies:** `@modelcontextprotocol/sdk` and `zod`. Nothing else is chosen by us.\n\nBeing straight about what that actually costs: those two pull in **~94 packages** transitively \u2014 the number `npm install` prints, and every one of them arrives via the official MCP SDK. That's the honest figure, not \"two dependencies\". Two things keep the real exposure much smaller than 94:\n\n- **Nothing runs at install time.** Not one package in the tree declares a `preinstall`, `install` or `postinstall` script, so `npm install` executes no third-party code \u2014 the most common supply-chain attack path simply isn't open.\n- **Only 5 are reachable when the server runs:** the SDK, `zod`, `ajv`, `ajv-formats` and `zod-to-json-schema`. This server speaks **stdio only**, so the SDK's HTTP/SSE/OAuth stack (`express`, `hono`, `jose`, `cors`, `pkce-challenge`, `eventsource`) sits in the tree but is never imported.\n\nCheck all of it yourself:\n\n```sh\nnpm view @mgcrea/mcp-appstore-connect dependencies       # the two\nnpm ls --omit=dev --all                                  # the ~94\ngrep -hoE '^import[^;]*from \"[^\"]+\"' node_modules/@mgcrea/mcp-appstore-connect/dist/*.js\n```\n\nThat last command prints everything the shipped bundle imports \u2014 the SDK's stdio entrypoints, `zod`, and Node builtins. Nothing else.\n\n### Verified builds\n\nNeither artifact is published from a laptop:\n\n- **npm** \u2014 published by CI through [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so there is no long-lived `NPM_TOKEN` in existence to leak, plus a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements).\n- **Container** \u2014 build provenance, an SBOM, and a [cosign](https://github.com/sigstore/cosign) keyless signature.\n\nBoth trace back to the exact commit and CI run that produced them. The commands to check are in [Verify](#verify) \u2014 please run them rather than take this section's word for it.\n\n### Your credentials\n\n**The `.p8` never leaves your machine, and never goes over the wire.** Tokens are minted locally: the server signs short-lived ES256 JWTs (20-minute cap, re-signed just before expiry) using Node's built-in `node:crypto`. There is no `jsonwebtoken` or `jose` in the signing path \u2014 one less dependency between your private key and the network. Under Docker the key is mounted read-only and is never baked into the image.\n\n**The server writes to disk only where you explicitly point it.** There is no path it picks for itself and no cache: a file is written when, and only when, you pass a `savePath`, and that path must be absolute \u2014 a relative one is refused rather than resolved against whatever directory the server happens to be running in. `export_listing` is deliberately not part of that: it hands back `{path, content}` pairs for your agent to write, so applying a listing stays under your own MCP client's permission prompt.\n\n### Blast radius\n\nThree independent limits, smallest first:\n\n1. **Writes are off by default.** Mutating tools aren't merely refused when `APP_STORE_CONNECT_ALLOW_WRITES=1` is unset \u2014 they are never registered, so they don't appear in the tool list and a confused agent cannot call them. The default install is read-only.\n2. **Destructive tools need `confirm: true`.** Deleting a screenshot, removing a tester, or submitting a version to Apple takes an explicit acknowledgement argument, so it can't happen as a side effect of some broader request. Submitting is the one that leaves your account \u2014 it is gated the same way, and refuses outright unless the version is in a submittable state with a build attached.\n3. **Your API key's role is the real ceiling**, and this server can't raise it. A read-only role is enough for every list/get tool; issue one of those and no bug here can write anything. Scope the key to the narrowest role that does your job.\n\nApplying a listing has its own rails \u2014 digest-based conflict detection, an `allowClear` gate before any field is emptied, and a whole-apply abort if any field is over Apple's limit. See [Listing round-trip](#listing-round-trip).\n\n## Configure\n\nCreate a key in App Store Connect \u2192 **Users and Access \u2192 Integrations \u2192 Keys \u2192 App Store Connect API**. Apple gives you an **Issuer ID**, a **Key ID**, and a one-time **`.p8`** download. Then set:\n\n| Variable                          | Required | Notes                                                          |\n| --------------------------------- | -------- | -------------------------------------------------------------- |\n| `APP_STORE_CONNECT_KEY_ID`        | yes      | The 10-char Key ID.                                            |\n| `APP_STORE_CONNECT_ISSUER_ID`     | yes      | The Issuer ID (a UUID).                                        |\n| `APP_STORE_CONNECT_P8_PATH`       | one of   | Path to the `AuthKey_XXXX.p8` file.                            |\n| `APP_STORE_CONNECT_P8`            | one of   | Inline PEM contents (for Docker/CI); set this **or** the path. |\n| `APP_STORE_CONNECT_VENDOR_NUMBER` | reports  | Needed by the sales/finance reports only, not by analytics.    |\n| `APP_STORE_CONNECT_ALLOW_WRITES`  | no       | `1` to register the write tools. Off by default.               |\n| `APP_STORE_CONNECT_MAX_RETRIES`   | no       | Retry budget for 401/429/5xx. Defaults to 3.                   |\n| `APP_STORE_CONNECT_METADATA_ROOT` | no       | Where the listing tree lives. Defaults to `fastlane/metadata`. |\n| `APP_STORE_CONNECT_DEBUG`         | no       | `1` to log to stderr.                                          |\n\nSee [.env.example](./.env.example) for the annotated list.\n\n### Config file\n\nIf you'd rather not put credentials in your shell profile or in every MCP client config, the server reads a config file instead:\n\n```jsonc\n// ~/.config/appstore-connect/config.json   (chmod 600)\n{\n  \"keyId\": \"XXXXXXXXXX\",\n  \"issuerId\": \"00000000-0000-0000-0000-000000000000\",\n  \"p8Path\": \"~/path/to/AuthKey_XXXXXXXXXX.p8\",\n  \"allowWrites\": true,\n  \"vendorNumber\": \"80000123\",\n  \"contact\": {\n    \"firstName\": \"Ada\",\n    \"lastName\": \"Lovelace\",\n    \"email\": \"[redacted-email:b5fc85e55755]\",\n    \"phone\": \"+33 1 23 45 67 89\",\n  },\n}\n```\n\n```sh\nmkdir -p ~/.config/appstore-connect\n$EDITOR ~/.config/appstore-connect/config.json\nchmod 600 ~/.config/appstore-connect/config.json\n```\n\nWith this in place an MCP client needs no `env` block at all \u2014 just `npx -y @mgcrea/mcp-appstore-connect`.\n\n- **The environment wins, field by field.** A config file supplies whatever the environment doesn't, so Docker and CI keep working exactly as before, and a one-off `APP_STORE_CONNECT_ALLOW_WRITES=0` still overrides a file that says `true`.\n- Keys are camelCase (`keyId`, not `APP_STORE_CONNECT_KEY_ID`), `~` is expanded in `p8Path`, and `p8` takes an inline PEM as the alternative to `p8Path`.\n- `vendorNumber` is the better home for it than an MCP client config: it isn't a credential (it does nothing without your API key), but it is an account identifier, and `.mcp.json` files are usually tracked by git. Run `get_vendor_number` to see which layer a running server picked it up from.\n- `contact` is the App Review contact \u2014 the person Apple phones or emails during review. It is the same person for every app and every version, so `set_app_store_review_detail` fills any contact field you omit from it. It only ever fills a **gap**: a value already on the record is left alone and reported back as `contactDrift`, so editing `notes` never silently rewrites a contact set in the web UI. Pass a contact field explicitly to override config for that call.\n- `metadataRoot` sets where this machine's repos keep their listing tree \u2014 useful if you prefer `\"AppStore\"` to the fastlane default. It must be repo-relative; use `\".\"` for the repo root.\n- **Unknown keys are an error**, not ignored \u2014 a typo'd `keyID` tells you so instead of silently falling back to the environment.\n- Location: `$APP_STORE_CONNECT_CONFIG`, else `$XDG_CONFIG_HOME/appstore-connect/config.json`, else `~/.config/appstore-connect/config.json`. An absent file is fine; a malformed one is reported with its path.\n- The server warns on stderr if the file is readable by other users.\n\n> The API key's **role** (set when you create it) decides what it can touch. A read-only role is enough for the list/get tools; editing metadata or managing testers needs App Manager or Admin. Team-scoped keys may require a JWT `scope` claim \u2014 if a call fails with `401 NOT_AUTHORIZED`, that's the likely cause.\n\n## Quick start\n\nPick one of the three. All talk to the same App Store Connect API \u2014 the difference is only how the server is launched. Options A and B need nothing checked out.\n\n### A. npx \u2014 recommended\n\nZero install; `npx` fetches and runs the published package. Wire it into Claude Code (or any MCP client) with your credentials:\n\n```json\n{\n  \"mcpServers\": {\n    \"appstore-connect\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@mgcrea/mcp-appstore-connect\"],\n      \"env\": {\n        \"APP_STORE_CONNECT_KEY_ID\": \"XXXXXXXXXX\",\n        \"APP_STORE_CONNECT_ISSUER_ID\": \"00000000-0000-0000-0000-000000000000\",\n        \"APP_STORE_CONNECT_P8_PATH\": \"/absolute/path/to/AuthKey_XXXXXXXXXX.p8\"\n      }\n    }\n  }\n}\n```\n\nTo try it from a shell (reads the same env, or the [config file](#config-file)):\n\n```sh\nnpx -y @mgcrea/mcp-appstore-connect\n```\n\n### B. Docker (stdio)\n\nRuns the container image published to GHCR. The `.p8` never goes into the image or the config \u2014 mount it read-only and point `APP_STORE_CONNECT_P8_PATH` at the in-container path. The `-e VAR` (no value) flags forward the key id / issuer id from the `env` block, so no secret sits in `args`:\n\n```json\n{\n  \"mcpServers\": {\n    \"appstore-connect\": {\n      \"command\": \"docker\",\n      \"args\": [\n        \"run\",\n        \"-i\",\n        \"--rm\",\n        \"-e\",\n        \"APP_STORE_CONNECT_KEY_ID\",\n        \"-e\",\n        \"APP_STORE_CONNECT_ISSUER_ID\",\n        \"-e\",\n        \"APP_STORE_CONNECT_P8_PATH=/keys/key.p8\",\n        \"-v\",\n        \"/absolute/path/to/AuthKey_XXXXXXXXXX.p8:/keys/key.p8:ro\",\n        \"ghcr.io/mgcrea/mcp-appstore-connect:latest\"\n      ],\n      \"env\": {\n        \"APP_STORE_CONNECT_KEY_ID\": \"XXXXXXXXXX\",\n        \"APP_STORE_CONNECT_ISSUER_ID\": \"00000000-0000-0000-0000-000000000000\"\n      }\n    }\n  }\n}\n```\n\n`-i` keeps stdin open, which the stdio transport needs \u2014 don't drop it. The left side of `-v` is the host path to your `.p8`; the container only ever sees `/keys/key.p8`. GHCR is the only registry CI publishes to \u2014 it's what carries the provenance/SBOM/cosign signature described in **Verify** below.\n\n### C. From source (development)\n\n```sh\ngit clone https://github.com/mgcrea/mcp-appstore-connect.git\ncd mcp-appstore-connect\npnpm install\npnpm build\nnode dist/cli.js        # credentials from the env or the config file\n```\n\nOr wire the built entry directly: `\"command\": \"node\"`, `\"args\": [\"/absolute/path/to/mcp-appstore-connect/dist/cli.js\"]`.\n\n### Inspect the tools\n\n```sh\nnpx @modelcontextprotocol/inspector npx -y @mgcrea/mcp-appstore-connect\n```\n\n## Tools\n\n**Apps** \u2014 `list_apps`, `get_app`, _`update_app`_\\* \u2014 `update_app` carries `contentRightsDeclaration`, one of the gates below. Neither read says which binary an app ships: pass `includeLiveVersion` to `get_app`, or use `list_live_versions` for the whole account.\n\n**Portfolio** \u2014 `list_live_versions` \u2014 for every app on the account (or a subset), the version customers can download **right now** and the binary it ships: build number, `minOsVersion`, `uploadedDate`. One call and `1 + N` requests, against `list_versions` \u2192 `get_version` per app. **Apple never moves a superseded version out of `READY_FOR_SALE`** \u2014 every version an app has ever shipped keeps that state forever, so filtering on it returns the whole release history with nothing marking which one is current (one Mac app answered with eleven, the oldest declaring `minOsVersion` 15.5 against a current 26.0). `live` holds the newest per platform; the rest are counted in `supersededVersions`. The live build is the one _attached_ to the `READY_FOR_SALE` version, which is usually **not** the newest `VALID` build \u2014 that one is a TestFlight or in-review binary, and reading an OS floor off it is wrong in the direction that looks right. Apps that fail are reported in `errors` and named in `note` rather than dropped, and an app with nothing live keeps its row with `live: []`. `list_builds`, `list_beta_groups` and `list_review_submissions` also take an array of app ids, since Apple serves those three in one request; every row carries the `appId` it belongs to.\n\n**Submission prerequisites** \u2014 what a **first** submission trips over. None of these lives on the version, so nothing in the version's own state hints at them, and `submit_version_for_review` fails with one error per missing item and no id to chase. Each is set once and outlives every release:\n\n| Missing        | Apple's error                             | Fix with                                                                |\n| -------------- | ----------------------------------------- | ----------------------------------------------------------------------- |\n| Category       | `RELATIONSHIP.REQUIRED` on `/v1/appInfos` | `list_app_categories`, _`set_app_categories`_\\*                         |\n| Content rights | `ATTRIBUTE.REQUIRED` on `/v1/apps`        | _`update_app`_\\*                                                        |\n| App price      | `STATE_ERROR.APP_PRICING_REQUIRED`        | `list_app_price_points`, `get_app_price_schedule`, _`set_app_price`_\\*\u2020 |\n| Review contact | `appStoreReviewDetail \u2026 was not found`    | `get_app_store_review_detail`, _`set_app_store_review_detail`_\\*        |\n\nA **free** app still needs a price: \"free\" is a price point, not the absence of one, so an app nobody ever charged for stays blocked until `set_app_price` points at the 0 price point.\n\n`set_app_store_review_detail` creates or updates as needed: PATCH against a version with no detail 404s and POST against one that has it 409s, so the verb is a property of server state rather than of what you meant. Absence also arrives two ways \u2014 a 404, and a **200 with `data: null`** \u2014 and only handling the first sends a PATCH to a nonexistent id.\n\n> **App Privacy has no public API, and is the fifth gate.** A version is refused with `STATE_ERROR.APP_DATA_USAGES_REQUIRED` until the data-collection questionnaire is answered _and published_, and there is no route to do it. Tools for it were written against Apple's documented resource names, then removed when every endpoint 404'd. The evidence, so nobody has to establish it twice:\n>\n> - `appDataUsages`, `appDataUsageCategories`, `appDataUsagePurposes`, `appDataUsageDataProtections` and `appDataUsageGroupings` all answer `PATH_ERROR \u2014 The resource 'v1/\u2026' does not exist`, and `appDataUsages` is absent from the app resource's ~40 relationships.\n> - **`POST` fails identically to `GET`.** A route that existed but disliked the body would answer 400 or 409; the same path error on both means it is not routed at all.\n> - **Not a permissions problem** \u2014 the same key reads `/v1/users` and `/v1/apps/{id}/accessibilityDeclarations` (a comparably recent app-scoped resource) with 200.\n> - `/v2/appDataUsages` and `appDataUsagesV2` are undefined types, so it is not a version-prefix issue. Note `PATH_ERROR` is a _different_ code from the `NOT_FOUND \u2014 path does not match a defined resource type` an invented name returns: Apple's gateway appears to know these names while not exposing them, which is why the docs describe resources you cannot call.\n>\n> Do it in the web UI: **App Privacy \u2192 Get Started**, answer, then **Publish** \u2014 saved-but-unpublished is refused exactly as unanswered is. The answers are app-scoped rather than version-scoped, so it is once per app, not once per release.\n\n> **An app's first non-consumable IAP has no API path either**, and this one is worse because nothing fails until it is too late. Apple requires it to travel _inside_ the version's review submission (`STATE_ERROR.FIRST_NON_CONSUMABLE_MUST_BE_SUBMITTED_ON_VERSION`), and no route puts it there: `reviewSubmissionItems` rejects `inAppPurchase` and `inAppPurchaseV2` with `RELATIONSHIP.UNKNOWN`, `appStoreVersions` has no `inAppPurchases` relationship, and the IAP has no `appStoreVersion` relationship.\n>\n> **`submit_version_for_review` succeeds and silently leaves the IAP behind.** The version goes to review alone, the IAP stays `READY_TO_SUBMIT`, and the app ships with a paywall selling a product Apple never approved. So after submitting a release that introduces one, re-read `list_in_app_purchases`: a first IAP still reading `READY_TO_SUBMIT` means it was left out. Recovering means cancelling the submission \u2014 which returns the version to `DEVELOPER_REJECTED`, still submittable \u2014 and using the version page's **Add for Review** panel, which lists the IAP beside the version. Second and later IAPs go through `submit_in_app_purchase_for_review` normally.\n\n> **`dryRun` stages the version, and that is the point.** Apple only adjudicates readiness when the version is added to a submission: `POST /v1/reviewSubmissionItems` answers an unready one with every missing item under `meta.associatedErrors`, and there is no cheaper way to ask. So a dry run goes that far and stops before `{\"submitted\": true}` \u2014 it is a preflight, not a no-op.\n>\n> The cost is that staging moves the version from `PREPARE_FOR_SUBMISSION` to `READY_FOR_REVIEW`, which is not a submittable state. `submit_version_for_review` therefore **resumes**: when a version is already sitting on this app's own un-submitted draft, it skips creating and adding and goes straight to submitting, reporting `resumedDraft: true`. Without that, the tool's own preflight locked it out of finishing \u2014 the draft sat with `submittedDate: null` and nothing in this server could send it, because no tool submits a submission by id.\n>\n> Resuming is only half of it, because the other thing `READY_FOR_REVIEW` freezes is the **build**. `set_version_build` refuses that state for attach and detach alike, so \"preflight, then decide to rebuild first\" had no way forward: `cancel_review_submission` cannot help either, since a draft has never been with Apple and Apple answers the PATCH `409 STATE_ERROR.ENTITY_STATE_INVALID`, _\"Resource is not in cancellable state\"_. **`remove_version_from_submission`** is the way back out \u2014 it `DELETE`s the draft's `reviewSubmissionItem` for that version, which drops it to `PREPARE_FOR_SUBMISSION` and unblocks `set_version_build`. It touches drafts only; a submission already with Apple is refused and redirected to `cancel_review_submission`.\n>\n> On the rejection branch a dry run writes **nothing at all** \u2014 no item is resolved and nothing goes back to Apple \u2014 since staging buys no diagnostic there and the next PATCH is the irreversible one.\n\n> **After a rejection, resubmit the same submission \u2014 never cancel it.** Apple hands a rejected submission back as `UNRESOLVED_ISSUES`, which reads like a state that is still with Apple and is not: it is yours to edit again. `submit_version_for_review` detects it, `PATCH`es each `REJECTED` item with `{\"resolved\": true}` (the web UI's **Update review**), then `PATCH`es the submission with `{\"submitted\": true}` (**Resubmit to App Review**). The submission keeps its queue position, and every item that was _not_ rejected goes back untouched \u2014 which matters most for a first non-consumable IAP riding inside it, since that one is often already `IN_REVIEW` while the version was being rejected.\n>\n> Cancelling instead is unrecoverable in a way that costs real days: the queue position is gone, and the IAP is dragged back out of review to start over. The failure to recognise looks like this \u2014 attempting to open a _new_ submission alongside the returned one 409s, and the error blames the version while never mentioning the submission that actually holds it:\n>\n> ```\n> STATE_ERROR.ENTITY_STATE_INVALID: appStoreVersions with id '\u2026' is not in valid state.\n> STATE_ERROR: Version is not ready to be submitted yet, please try again later.\n> ```\n>\n> \"Try again later\" is misdirection: waiting never clears it, because nothing is in progress.\n\n**Listing round-trip** \u2014 `export_listing`, _`apply_listing`_\\* \u2014 pull the whole listing into a git-committable metadata tree, edit it locally, push it back. See [Listing round-trip](#listing-round-trip).\n\n**Versions & metadata** \u2014 `list_versions`, `get_version` (resolves the attached build \u2014 which binary the version would actually ship, and when it was uploaded), `list_version_localizations`, `get_version_localization`, _`create_version`_\\*, _`update_version`_\\* (release type \u2014 auto on approval, manual, or scheduled), _`update_version_localization`_\\* (description, keywords, what's-new, promo text)\n\n**Review submissions** \u2014 `list_review_submissions`, _`submit_version_for_review`_\\*\u2020, _`cancel_review_submission`_\\*\u2020, _`remove_version_from_submission`_\\*\u2020 \u2014 hand a finished version to Apple for review, withdraw one already with Apple, or take a version back off an un-submitted draft so its build can be changed again\n\n**Release** \u2014 _`release_version`_\\*\u2020 \u2014 release an approved version sitting in `PENDING_DEVELOPER_RELEASE` (the manual \"Release This Version\" button)\n\n**App info** \u2014 `list_app_infos`, `list_app_info_localizations`, `get_app_info_localization`, _`update_app_info_localization`_\\* (name, subtitle, privacy policy \u2014 the fields that outlive a version)\n\n**Age rating** \u2014 `get_age_rating_declaration`, _`update_age_rating_declaration`_\\* \u2014 the questionnaire answers behind the rating, one per appInfo rather than per version. `socialMedia` must be answered from September 2026 before Apple accepts a new version, an update, or a notarization request.\n\n**In-app purchases** \u2014 `list_in_app_purchases`, `get_in_app_purchase`, `list_iap_price_points`, `get_iap_price_schedule`, _`set_in_app_purchase_price`_\\*\u2020, _`update_in_app_purchase`_\\* \u2014 read the price-point catalogue for a territory, then price the IAP against one. `update_in_app_purchase` carries the reference name, the review note and `familySharable`. One-time purchases only; auto-renewable subscriptions are not covered.\n\n**In-app purchase metadata** \u2014 `list_iap_localizations`, `get_iap_review_screenshot`, `get_iap_availability`, _`create_iap_localization`_\\*, _`update_iap_localization`_\\*, _`delete_iap_localization`_\\*\u2020, _`upload_iap_review_screenshot`_\\*\u2020, _`set_iap_availability`_\\*, _`submit_in_app_purchase_for_review`_\\*\u2020 \u2014 an IAP sits at `MISSING_METADATA`, and cannot be submitted, until **four** things exist: a per-locale display name, a description, a review screenshot, and territory availability. Availability is the one people miss, because the App Store Connect UI fills it in silently and the API does not \u2014 `set_iap_availability` defaults to every territory Apple offers. These are the customer-facing strings on the purchase sheet, not the app's own listing, and the limits are much tighter \u2014 **30** characters for the name and **45** for the description, checked locally because Apple answers an over-length value with a 409 that names neither the field nor the limit. `submit_in_app_purchase_for_review` refuses anything not already `READY_TO_SUBMIT` rather than forwarding a rejection.\n\n**Screenshots** \u2014 `list_screenshot_sets`, `list_screenshots`, `get_screenshot`, _`upload_screenshot`_\\*, _`delete_screenshot`_\\*\u2020, _`delete_screenshot_set`_\\*\u2020, _`reorder_screenshots`_\\*\u2020\n\n**Builds** \u2014 `list_builds` \u2014 every binary uploaded for an app, with its `minOsVersion`. **`VALID` means Apple finished processing it, not that it is on the App Store.** The newest `VALID` build is normally a TestFlight or in-review binary, so an OS floor or deployment target read off it is wrong in the direction that looks right \u2014 it describes what you are about to ship, not what customers are running. The live binary is the one _attached_ to the `READY_FOR_SALE` version, often several builds older; `get_version` resolves it.\n\n**TestFlight** \u2014 `list_beta_groups`, `list_beta_testers`, `list_beta_feedback`, _`create_beta_group`_\\*, _`invite_beta_tester`_\\*, _`add_tester_to_group`_\\*, _`remove_tester_from_group`_\\*\u2020 \u2014 an app with no group has nowhere to send a build, so `create_beta_group` is the first step of setting TestFlight up; every other tool here needs the group id it returns. Internal groups take testers who are already Users on the account and skip Beta App Review, so `hasAccessToAllBuilds` is the quickest way to make builds you have already uploaded installable.\n\n**Sales & finance reports** \u2014 `get_vendor_number`, `download_sales_report`, `download_finance_report` \u2014 the Sales and Trends TSVs: units, proceeds, installs by territory and install type. Needs a vendor number; `get_vendor_number` reports the configured one, which layer it came from, and whether Apple accepts it. The sales report is account-wide and Apple offers no per-app filter, so pass `appleIdentifier` or `sku` to have the server apply one after download \u2014 it runs before `maxLines`, so truncation counts the app you asked about rather than an arbitrary slice of the portfolio, and the dropped row count comes back with it. **An in-app purchase row does not carry its app's Apple Identifier** \u2014 it carries the IAP's own, and names the app only in `Parent Identifier`, as the SKU. Filtering on the app id alone therefore returns a clean, plausible report showing no in-app revenue at all, so the server matches those rows through `Parent Identifier` too and says how many it found; `includeInAppPurchases: false` opts out and reports what that cost. **`download_finance_report` takes a _fiscal_ period, not a calendar one:** Apple's fiscal year opens in late September and its months are 4-4-5 weeks, so `2026-07` is fiscal month 7 of FY2026 \u2014 roughly late March to early May. Getting this wrong is silent, because a well-formed report comes back either way, so the response carries a `coverage` block with the start and end dates the report actually covers. Check it before quoting any figure.\n\n**Analytics** \u2014 `get_analytics_report`, `get_analytics_status`, `list_analytics_report_requests`, `list_analytics_reports`, `list_analytics_report_instances`, `list_analytics_report_segments`, `download_analytics_report_segment`, _`create_analytics_report_request`_\\* \u2014 App Analytics proper: impressions, product page views, conversion rate, installs, deletions, sessions, retention. `get_analytics_report` walks the whole chain and returns the numbers, picking the report and instance itself and saying which in `selection`; its `coverage` block is read from the data's own `Date` column, because an instance's `processingDate` is when Apple _generated_ it and says nothing about what is inside. `get_analytics_status` answers the cheaper question \"is there any data yet, and how far back does it go\" \u2014 reach for it just after enabling analytics, since reports exist as soon as Apple registers them but hold nothing until instances appear a day or two later. See [Reading analytics](#reading-analytics).\n\n**Customer reviews** \u2014 `list_customer_reviews` \u2014 star rating, title, body, territory and date, newest first; filter by rating to read just the complaints. These are **written** reviews only. Most people rate without writing, and Apple exposes no aggregate star average here, so a distribution computed from these is directional \u2014 it is not the App Store rating.\n\n**Users** \u2014 `list_users`\n\n**Bundle IDs** \u2014 `list_bundle_ids`, `get_bundle_id`, `list_capabilities`, _`create_bundle_id`_\\*, _`enable_capability`_\\*, _`disable_capability`_\\*\u2020 \u2014 **only the capabilities that predate the App Services page can be enabled through the API.** Apple's `capabilityType` enum never grew past them, so WeatherKit, Family Controls, Group Activities and everything newer answer a 409 that lists the values it does take and says nothing about where the rest live \u2014 which reads as a misspelling rather than as impossible. `enable_capability` names the portal page to tick instead. The read side is not restricted: `list_capabilities` reports a portal-ticked capability like `WEATHERKIT` normally, so a manual step can still be verified from here, and it is where `disable_capability`'s capability id comes from.\n\n**Devices** \u2014 `list_devices`, _`register_device`_\\*\n\n**Every list read says when its page is a subset.** Apple caps `data` at `limit` and puts the real count in `meta.paging.total`, and nothing in the rows themselves says they are partial \u2014 so a full page reads as the whole collection, and something that fell off the end reads as absent. A partial response carries an `incomplete` block with `returned`, `total` and `missing`. Its absence is the claim that the list is complete.\n\n_Italic\\*_ tools are writes, hidden unless `APP_STORE_CONNECT_ALLOW_WRITES=1`. \u2020 additionally requires `confirm: true`.\n\nTool names are prefixed `app_store_connect_` (omitted above for brevity).\n\n### Response field deprecations\n\n| Field                         | Replaced by       | Status                                                                                                                                            |\n| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `rows` (report envelope)      | `lines`           | **Removed in 0.23.** Header-inclusive, while `dataRows` is not \u2014 two counts one apart is a transcription trap, and `lines` matches `saved.lines`. |\n| `note` (report envelope)      | `inlineNote`      | **Removed in 0.23.**                                                                                                                              |\n| `savedTo` (certificate tools) | `saved.path`      | Deprecated, removed in 0.24.                                                                                                                      |\n| `truncated` (report envelope) | `inlineTruncated` | **Kept indefinitely.**                                                                                                                            |\n\n`truncated` is the deliberate exception. Losing `rows`, `note` or `savedTo` fails loudly \u2014 a `KeyError`, an `undefined`, a failed assertion. Losing `truncated` fails _silently_ in the one direction that costs money: a reader that refuses to total a partial report sees `undefined`, treats it as false, and publishes a floor as a total. So it stays, with exactly its old value.\n\nA Claude Code skill that drives these tools through a full release ships alongside the server \u2014\nsee [Release-prep plugin](#release-prep-plugin).\n\n## Listing round-trip\n\n`export_listing` returns the complete listing \u2014 name, subtitle, description, keywords,\nwhat's-new, promotional text and URLs, across every locale \u2014 as a set of files to write\ninto your repo:\n\n```\nfastlane/metadata/\n  .listing.json          # ids + baseline digests. Commit it; never hand-edit it.\n  en-US/\n    name.txt  subtitle.txt  description.txt  keywords.txt\n    release_notes.txt  promotional_text.txt\n    marketing_url.txt  support_url.txt  privacy_url.txt\n  fr-FR/\n    ...\n```\n\nThis is the layout `fastlane deliver` already uses, so the tree interops with it. One\nfile per field means the file content _is_ the value, byte for byte \u2014 a description\ncontaining `## Keywords`, a `---` rule or a fenced code block is just text, and `git\ndiff` shows you the field that changed rather than a line number in a wall of copy.\n\n**The location is a default, not a requirement.** Keep the tree wherever you like \u2014 set\n`APP_STORE_CONNECT_METADATA_ROOT` (or `metadataRoot` in the config file) to change it for\nevery repo on the machine, or pass `metadataRoot` to a single `export_listing` call. The\nfastlane path is the default only because it's the one other tools already read.\n`apply_listing` needs no such setting: it finds the tree from wherever you pass\n`.listing.json`, so a tree you move later keeps working.\n\nThe server writes to disk only where you point it. `export_listing` hands back\n`{path, content}` pairs and your agent writes them, so listing writes stay under your own\npermission prompt. **Every read tool takes an optional `savePath`**, because the\nalternative \u2014 an agent retyping values out of a tool result \u2014 loses them silently, and a\nreport missing a row still totals to a plausible number. The three report downloads write\nthe raw TSV/CSV and `download_certificate` writes DER bytes; every other read writes its\nJSON result, pretty-printed. A saved report always holds the file in full; `maxLines` then\nonly trims the copy inlined in the response. Under Docker the path must resolve inside the\ncontainer, so mount the folder and pass the container path.\n\nEditing and pushing back:\n\n```\nexport_listing { appId }                       # version defaults to \"latest\"\n# ...edit the .txt files, commit, review...\napply_listing  { files: [...] }                # dry run by default\napply_listing  { files: [...], dryRun: false, confirm: true }\n```\n\n- `version` accepts `\"latest\"` (the one you're preparing), `\"live\"` (on sale) or an exact\n  `\"1.4.0\"`. Versions are ordered numerically, so `1.10.0` beats `1.9.0`.\n- Pass **only the files you changed**, plus `.listing.json` \u2014 it carries the localization\n  ids and the per-field digests recorded at export, and its directory is what tells the\n  server where the tree lives. Every file you pass must sit under that same directory;\n  mixing two trees is an error rather than a silent push against the wrong ids.\n- Those digests make apply a three-way merge. A field edited in App Store Connect's web UI\n  since your export is reported as a **conflict** and skipped, rather than silently\n  overwritten; re-export and merge, or pass `force: true`.\n- **An absent file leaves a field alone; an empty file clears it** \u2014 but clearing needs\n  `allowClear: true`, so a file truncated by accident is reported as `blocked` rather than\n  wiping live copy.\n- Any field over Apple's limit aborts the whole apply before the first write \u2014 a\n  half-applied listing is worse than an untouched one.\n- `format: \"review\"` renders a read-only markdown summary with character counts, for when\n  you just want to read the listing. Nothing parses it back.\n- If the metadata tree already exists, diff before overwriting it.\n\n## Reading analytics\n\nApp Analytics is not a single endpoint. Apple generates the reports asynchronously and\nfiles them behind four nested resources, so reaching an actual number is a walk:\n\n```\nanalyticsReportRequest   one per app, created once, then reused forever\n  \u2514\u2500 report              a named dataset, e.g. \"App Store Installation and Deletion\"\n       \u2514\u2500 instance       one per granularity (DAILY/WEEKLY/MONTHLY) and processing date\n            \u2514\u2500 segment   the gzipped CSV that holds the rows\n```\n\nTwo tools collapse that walk, and between them cover almost every question:\n\n- **`get_analytics_report`** goes all the way to the numbers in one call. It picks the\n  report and instance itself and reports both in `selection`, alongside the alternatives it\n  passed over, and returns `coverage` read from the data's own `Date` column \u2014 the only\n  honest answer to which period you actually got, since an instance's `processingDate` is\n  when Apple _generated_ it and a fresh snapshot reports today while holding a year of\n  history. It downloads every segment by default and checks their total compressed size\n  before fetching anything. It will not create the report request: that is a write, and\n  creating only `ONGOING` forfeits the app's history permanently.\n- **`get_analytics_status`** answers \"is there any data yet\" \u2014 request, report and instance\n  counts plus the earliest instance date \u2014 and is the right first move just after enabling\n  analytics.\n\nThe four hops below remain for anything those two do not cover.\n\nOne tool per hop, in order:\n\n1. `create_analytics_report_request` \u2014 **once per app**, and only if there isn't one\n   already. Apple rejects a second `ONGOING` request, so run\n   `list_analytics_report_requests` first and reuse the id it returns. **Create both access\n   types.** `ONE_TIME_SNAPSHOT` is the only way to obtain history \u2014 it covers roughly the\n   last 52 weeks as of when it is created, and that window rolls forward, so history no\n   snapshot captured is gone permanently and no later request can recover it. `ONGOING`\n   collects from now on and backfills nothing. Creating only `ONGOING` therefore forfeits\n   the app's entire past, and the loss is invisible: next month looks healthy because it has\n   data, while the year before it no longer exists.\n2. `list_analytics_reports` \u2014 filter by `category`: `APP_STORE_ENGAGEMENT` for impressions,\n   product page views and conversion rate; `APP_USAGE` for installs, deletions, sessions and\n   retention; `COMMERCE` for sales and proceeds.\n3. `list_analytics_report_instances` \u2014 filter by `granularity`, then pick a `processingDate`.\n   There is one instance per date, so an unfiltered list is mostly noise.\n4. `download_analytics_report_segment` \u2014 returns the rows as text, truncated to `maxLines`.\n\nNotes worth knowing before the first run:\n\n- **Nothing exists for a day or two after the request.** An empty report list is the\n  expected answer immediately after `create_analytics_report_request`, not a failure.\n- **The download resolves its own segment URL.** Those URLs are signed, off the API host,\n  and expire within minutes, so `download_analytics_report_segment` takes an `instanceId`\n  and re-lists the segments itself. Nothing has to carry a URL between calls.\n- **A big instance is refused, not streamed.** The segment is decompressed in the server\n  process, so anything over 25 MiB compressed fails with its size; raise `maxBytes` to\n  override, or pick a `DAILY` instance instead of `MONTHLY`.\n- **Segments are plural.** A large report splits across several; `list_analytics_report_segments`\n  shows how many, and `segmentIndex` selects one.\n\nThis is a different pipeline from `download_sales_report` \u2014 that one is Sales and Trends,\nkeyed by vendor number and date rather than by report request, and it is the better source\nfor units and proceeds. Analytics is where the funnel metrics live.\n\n## Release-prep plugin\n\nThis repo doubles as a [Claude Code](https://claude.com/claude-code) plugin marketplace. The\n`appstore-toolkit` plugin bundles the **`appstore-release-prep`** skill, which drives the\nround-trip above: it audits what shipped since the last release, writes the CHANGELOG entry\nand every store field within Apple's limits, and pushes the result back through\n`apply_listing`.\n\n```text\n/plugin marketplace add mgcrea/mcp-appstore-connect\n/plugin install appstore-toolkit@mgcrea-appstore\n```\n\nThe plugin ships the skills only \u2014 it does not bundle the MCP server. Install the server\nyourself with any of the options under [Quick start](#quick-start); the skills call it by\ntool name and do not care how it was launched. The plugin stores **no credentials of its\nown** \u2014 set up the [config file](#config-file) once and the server finds them wherever you\nwork.\n\n`apply_listing` is a write tool, so it stays hidden until writes are enabled\n(`\"allowWrites\": true` in the config file, or `APP_STORE_CONNECT_ALLOW_WRITES=1`). That is\ndeliberate: installing a plugin should not silently grant it permission to overwrite a live\nApp Store listing.\n\nThe skill also ships an offline auditor (`scripts/audit_release.py`, stdlib Python, no network\ncalls) that measures every field against its limit and exits non-zero when one is over or\nmissing, so it can gate a release from CI.\n\n## Notes\n\n- **Tokens are minted locally.** Each request carries a fresh-enough ES256 JWT (`aud: appstoreconnect-v1`), cached and re-signed shortly before Apple's 20-minute cap. The `.p8` never leaves your machine.\n- **Reports are TSV, not JSON.** `download_sales_report` / `download_finance_report` gunzip Apple's report and return the text (truncated to `maxLines`). Reports lag ~24\u201348h and are keyed by date/frequency.\n- **A vendor number cannot be looked up over the API.** There is no vendor resource anywhere in the App Store Connect API, so `get_vendor_number` verifies the configured value rather than discovering one. Find yours under Payments and Financial Reports in App Store Connect, or read it out of the middle field of a report you already downloaded \u2014 Apple names them `S_<frequency>_<vendorNumber>_<date>.txt`. Apple also has no \"unknown vendor\" error: a number this key cannot read comes back as a bare HTTP 500, which is why a wrong one looks like an outage. Analytics reports need no vendor number at all.\n- **Finance reports are keyed by fiscal month, not calendar month.** Apple's fiscal year opens in late September and its months run 4-4-5 weeks, so `reportDate: \"2026-07\"` returns fiscal month 7 of FY2026 \u2014 roughly 29 March to 2 May 2026. Nothing rejects a calendar month, because every well-formed period is a valid request, so the mistake surfaces as a plausible report for a period you did not choose. `download_finance_report` returns a `coverage` block with the real start and end dates read out of the report body; read it before quoting a number. Sales reports are unaffected \u2014 those are keyed by ordinary calendar dates.\n- **Analytics is asynchronous and nested.** Create the report request once, wait a day or two for Apple to generate it, then walk request \u2192 report \u2192 instance \u2192 segment to reach the rows \u2014 or call `get_analytics_status` to check whether there is anything to walk. See [Reading analytics](#reading-analytics).\n- **`upload_screenshot` reads the file server-side.** Pass an absolute `filePath` the server can reach. Under Docker that means a path _inside_ the container \u2014 mount the folder (`-v /host/screenshots:/screenshots`) and pass the container path, or send small images inline as base64 via `fileData`.\n- **Screenshots validate after upload.** Apple checks pixel dimensions asynchronously, so a wrongly-sized image fails during processing rather than at upload; the tool waits (`waitSeconds`, default 60) and reports Apple's exact reason. Timing out is not a failure \u2014 the upload already succeeded, so poll `get_screenshot` instead of retrying. The version must be editable (`PREPARE_FOR_SUBMISSION` or `DEVELOPER_REJECTED`), and a set holds at most 10 screenshots.\n- **Screenshot order is explicit.** `reorder_screenshots` replaces a set's full contents, so pass every id you want to keep \u2014 an omitted one is removed from the set.\n\n## Develop\n\n```sh\npnpm dev            # tsdown --watch\npnpm test           # vitest (offline; no real credentials needed)\npnpm typecheck      # tsc --noEmit\npnpm lint           # oxlint\npnpm format         # oxfmt --write .\n```\n\nTests run entirely offline: JWT signing is verified against a throwaway P-256 key, and the tools are driven over an in-memory MCP transport with a mocked `fetch`.\n\n### Publish\n\nOptions A (npx) and B (Docker) resolve only once a release is out. Pushing a `v*.*.*` tag triggers CI to:\n\n- publish to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC \u2014 no `NPM_TOKEN` stored anywhere) with a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements), and\n- build, sign, and push the multi-arch image to `ghcr.io/mgcrea/mcp-appstore-connect`, with build provenance, an SBOM, and a [cosign](https://github.com/sigstore/cosign) keyless signature.\n\nBoth artifacts are cryptographically traceable back to the exact commit and CI run that produced them \u2014 see **Verify** below. Until a release exists, use Option C from source.\n\n### Verify\n\nBefore trusting an artifact from Option A or B, you can check it was actually built by this repo's CI rather than published from someone's laptop:\n\n```sh\n# npm \u2014 provenance attestation (also shown as a badge on the npmjs.com package page)\nnpm audit signatures\n\n# Docker \u2014 cosign keyless signature, tied to this repo's GitHub Actions identity\ncosign verify \\\n  --certificate-identity-regexp 'https://github.com/mgcrea/mcp-appstore-connect/.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\\n  ghcr.io/mgcrea/mcp-appstore-connect:latest\n```\n\n## License\n\nMIT \u2014 Olivier Louvignes\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+  },
+  "time": {
+   "0.10.0": "2026-07-19T19:52:38.453Z",
+   "0.11.0": "2026-08-03T14:22:54.887Z",
+   "0.12.0": "2026-08-09T05:50:34.413Z",
+   "0.13.0": "2026-08-09T20:42:22.502Z",
+   "0.13.1": "2026-08-09T21:28:54.363Z",
+   "0.14.0": "2026-08-10T19:37:41.003Z",
+   "0.14.1": "2026-08-11T12:47:17.277Z",
+   "0.15.0": "2026-08-11T15:30:06.559Z",
+   "0.16.0": "2026-08-18T20:48:45.018Z",
+   "0.17.0": "2026-08-19T08:00:01.122Z",
+   "0.18.0": "2026-08-19T09:09:16.175Z",
+   "0.19.0": "2026-08-20T20:25:19.102Z",
+   "0.2.0": "2026-07-17T17:48:14.886Z",
+   "0.2.2": "2026-07-19T08:27:25.521Z",
+   "0.20.0": "2026-08-27T22:20:12.561Z",
+   "0.21.0": "2026-08-28T22:44:17.575Z",
+   "0.22.0": "2026-08-30T19:32:35.520Z",
+   "0.22.1": "2026-08-31T12:26:01.032Z",
+   "0.22.2": "2026-08-31T15:34:37.434Z",
+   "0.22.3": "2026-09-01T14:12:38.722Z",
+   "0.22.4": "2026-09-04T10:39:41.375Z",
+   "0.23.0": "2026-09-06T12:10:34.210Z",
+   "0.24.0": "2026-09-07T12:45:41.673Z",
+   "0.24.1": "2026-09-07T12:51:57.381Z",
+   "0.3.0": "2026-07-19T09:00:17.350Z",
+   "0.4.0": "2026-07-19T10:25:55.699Z",
+   "0.5.0": "2026-07-19T10:42:08.550Z",
+   "0.6.1": "2026-07-19T11:11:19.950Z",
+   "0.8.0": "2026-07-19T13:01:35.988Z",
+   "0.9.0": "2026-07-19T13:27:48.746Z",
+   "created": "2026-07-17T17:48:14.561Z",
+   "modified": "2026-09-07T12:51:57.752Z"
+  },
+  "versions": {
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.10.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.10.0_1784490758324_0.18934528904144532"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.10.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-jm7NuNHC3Oz7DXxJEyTleCndp4hLXYG8MKloJbezBluJxdrf/ws7EetmpiBK/zkWJ1midGjOJsMLHpICp+OH/g==",
+     "shasum": "ef869a6e3a8d1b760571fedbedd8533c2e8833e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA5iaXlmkn3kk2QkRfgLzR92ZZHVzJSy/o2YzV25s37pAiEAuvSY9S0Tj9jbr5M08lQq1F6HAER8F39W8MLgV3GvIWw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.10.0.tgz",
+     "unpackedSize": 409380
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b0aa7245263bb27d6eb328f32c28b357e1a40461",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.11.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.11.0_1785766974706_0.548564552432339"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.11.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-Pcrnz8iby1oK5TFdaQkSeU4+dmmdb/6eSLEA5An7ptUd1/DPCift6zk16nDCTboUCEOlFE1nchNwxnsRoTPsXQ==",
+     "shasum": "a1a4afe1d3b1884df927e6d6d9c115f76ca58306",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQClz5Kk8dvlbb+h0uRuzFA7mevPWIDoiAnw6iufjRLXwgIgWo/bj1yy5W76fN9IjPDNicWmBBfJw3HAbfnYngvpNt8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.11.0.tgz",
+     "unpackedSize": 422676
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5402b27a168100dbf3c9a275ecba78236d28133a",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.12.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.12.0_1786254634271_0.2059602694620868"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.12.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-Yb8O6/LPrKLaDGo/4tUExcnhUA5DlRnk6oZBo2UsvjVZqHRfFdMKv4KxBtS0f5e//Mreas61nRfNaolB2qtvJw==",
+     "shasum": "5127560167651049a404c8c2626c1177a962acbc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDkZClc28xCZ3U3TruRIO+IaF2XKY1fjXPEFul86Omp+AIgXUW3IkaRQn9ylwnJk3Egmu0BB7E3Qf3SIxMRY7XHm4o="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.12.0.tgz",
+     "unpackedSize": 478305
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "23d41c9ace6fb49a6e4c542db0e972cf93c3bf2a",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.13.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.13.0_1786308142363_0.6692369803212912"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.13.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-O6LVB0Pm825YJy41GAJi8fsEXnSbEfq3nUJkFD2PN+9iLl1UiuQnFRcMsuemmQkjA1FYDMjTkOQjHbkVjIv/Bw==",
+     "shasum": "b96be25e3cbdba2d1d4cf92a66df2c36e59f90e7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICULY812bXKWuDmpBTdE4c5uMsz0cfznTo7XZUfOuVclAiEA7ARG19fnVX75plUuOv2QXs5ABZKr9u44uTW96t+F4ok="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.13.0.tgz",
+     "unpackedSize": 564875
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3587fba67c31a505fb75d3f8ffdb48a1475ee9fb",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.13.0"
+   },
+   "0.13.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.13.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.13.1_1786310934239_0.3535051999544756"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.13.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-d5XgJ8ulXylGFhCZ7DWYK/hIfD7v9zBypL6EvRtumejQPv0SQ89F+4eMyQsaUWxxD0jMtj5/IsFxgG4b08cJ0A==",
+     "shasum": "830921c18b971a2182f01dcf703138420d1daeac",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCM3PXLOYYtNnU5/AoEPWbqD8Rh3YDjhN/CiRFmuNIeNgIgeMTGGdE7Do2ycGigobKQMZ9nJN90vDnRZm8cP35Ytjc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.13.1.tgz",
+     "unpackedSize": 569142
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "93ff148541509d314a3eb763140256de2d40e3f5",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.13.1"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.14.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.14.0_1786390660855_0.4707224682873574"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.14.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-mYdaqrtLxuuToLoSYuVrsQkuUMlJtuCJzDSZ6ZD5UtQew93fqljEiuuX0XXTV8zGkaGxtIS/GFeV7xtdECsmDA==",
+     "shasum": "2ce22e88779f8d3078597bb5eaa19b000b731961",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH0cFwuVvcxyuDBm1+7BH5DAdTHku3JPDH13FQMj1J9CAiEAiZQ/1wZh4QnFxEAODZ1SkszsNR8pvN/jZsTHvplrE/k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.14.0.tgz",
+     "unpackedSize": 636904
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "798301292376cdf90e0e8cbc9413f83bcd0ed894",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.14.0"
+   },
+   "0.14.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.14.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.14.1_1786452437100_0.09314550708301916"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.14.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-FG4ZblEfEDPEsJU9DlSw24H5+Q4TarKJoSSIMlDRWBxNbvFpgyeKSGmdSjzl9L6XDViolxivCUgpQh5nq9tToQ==",
+     "shasum": "03c9c649b7d8968afd4ffe6f4ed7d1fe954eeff0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC1Q+u3KxdK4Meiywz6y4ZML3ugN4jG9toBlUhbUADVGAiEAsonMZ1i7xcjlnWK+WNijjhnE4GICMeulKGcOrdBcZXQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.14.1.tgz",
+     "unpackedSize": 636904
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b9ad5a61fd93cc365309a61bbf850744f327b258",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.14.1"
+   },
+   "0.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.15.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.15.0_1786462206385_0.4326376524814066"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.15.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-/U/4J/xtBQL+pYdx0nACVZO7A2HOXVsmc2TTyTmeMTDXNL5j1sKtZObBVxP+MFET5UlROomiTZEa2Yn/5cwNEw==",
+     "shasum": "857f0433c87c88bc45d9f282b4a6a49127e21bf3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAuI9Og2xHU9xM+fte3nvur53zViCRRwnIrnftv446veAiEA5bLlbPRPbaaLlWCDB+bLbPumk1PbkajPfBs1qjLFw7w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.15.0.tgz",
+     "unpackedSize": 668726
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "88c05c8d383cea22c22a8d820e7ae86366974d90",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.15.0"
+   },
+   "0.16.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.16.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.16.0_1787086124879_0.13430995649405753"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.16.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-Up5Dq8y7WpqKM9axU8sk6wmnqNctKUg1GrZiPskBCbG2KPqzg/kcAiTlBp9AP4/Jhn45a7qDlvQ6y54j4yZmbg==",
+     "shasum": "4db5412b69fe5c0fb5c5aee5bc6f3eeecb04d344",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD0KWa0sPT/ZN/smGxafMWVW7a0s2mUjL2u2N3ywV+xCQIgIAunAg3n7PCAwidybgW5lI32eemh+ub00hVWNP/5fxQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.16.0.tgz",
+     "unpackedSize": 682495
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a9bf28cb2dc4e049faa38bf8a034aad6e8949eb1",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.16.0"
+   },
+   "0.17.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.17.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.17.0_1787126400965_0.40443121365278034"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.17.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-RCQ89Tf1rQ2mXQLev3bCmx3Kl5ls6DbYEX2Tynt3GeN/pzzrcEFCQwmfTCV7Sy40ol+2PmZLwJkyfQeZBhFtrA==",
+     "shasum": "46519b393cc711fe07244a176b621fc04ad61d3b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBzrev8bkkffiYM6dWP4+1cQOSOOucTG75/mQLjWU1lbAiEA38UM8Yte4pWZcl4ffG139prC6OPeJdPxxHHyz6MtN0w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.17.0.tgz",
+     "unpackedSize": 692201
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "776efa936a618c0cee59a4f9d09d01fb60efd8b3",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.17.0"
+   },
+   "0.18.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.18.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.18.0_1787130556013_0.06817637756026063"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.18.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-a6n/fI/f3qGCEfePS3QGHHBuDPCMIIooNcqfYlJ7OO+NycbhMT6Vp07luX14EpfHQaKBgGUkL7Grktsei6mvDQ==",
+     "shasum": "6d785b664b6668e69464dd5e79c1ec4ef730acd9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDbvkY9zgT6qM3AH0iKkv5p3nnLiqPwHLlXq5DbjY0GTQIhAM5bt3Tu5MUX5k4ibcsHyCNiB5F+Klo+dgYqouzj8nkl"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.18.0.tgz",
+     "unpackedSize": 699831
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "8ada6ad2d07399cef97222534f7482324d848534",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.18.0"
+   },
+   "0.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.19.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.19.0_1787257518940_0.16238344522641546"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.19.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-mCgEHrKDxJxGzgiB1aY2uVBSC/5REUsZfuiKCQa0nMhiW4slH/gsLxNX+Tx82AHmJ9UyERcKd1ZT39tG47GONg==",
+     "shasum": "f89354e5138087dd770e1952e6ad19bcfbdc7139",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCofhpvnZYR1AQ4vM3Ik/lQbvND15BvnBdvYVHPulMJQAIgCYtCoXRQPcv9uWhqQ8zegU94QCpazH54nO7RLsJBMMo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.19.0.tgz",
+     "unpackedSize": 729959
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d8544b631c58762bd78a6b2029fb5c03002cd468",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.19.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.2.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.2.0_1784310494751_0.8729946518012452"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-Nne+rMPma8gElidFoAgo2JHe2XG+ApzXbtObOftyj7WTF9kgYiYGZs/iGQbP0oAHTQ+xS8pj1NoAANivIsPlFQ==",
+     "shasum": "d76a01b556833195555cdc209ba3a96aca299750",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCi3mhw96X3x/ibClUQ6525G28BX9GGa9XlwvOwp6694gIgDLsE7XXVFIs4GMoFdQQGLccJ8McRN1R+XfCT81cwVoE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.2.0.tgz",
+     "unpackedSize": 135145
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "42187f98ea1c593ff9429efc3563c18447e9f9fa",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.2.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.2.2_1784449645381_0.004391268672866655"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.2.2"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-xDIpk8pNR3W01vDEMchvOA/rTJiUSpiYTRLoAEypXVIHP9U+lroFdfBhwvgpsZm01vhdI7BCcpXYgktSdtfLjw==",
+     "shasum": "57c94ae1de56e0a23e4af32e88262647054cf89a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCy3HcBxHOusGqNzJF7ZuArjxTAFXQWDYPEGh+hDjI5tQIgXpyZHmmYU+fPdx0YGC7htoI6wG+csHMBuSW/e8/hFGs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.2.2.tgz",
+     "unpackedSize": 138425
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d35dc4f8edeb92d6d51e1ea7ef6faf50348dccc3",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.20.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.20.0_1787869212379_0.030376329443732697"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.20.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-58bUtn0YRoPDxvq8zeNkrWQKrHV4uiqsTN54NY6HQGCtzTVAS8iMWacUfenuTXAVppe1KnrHWBo9ZMZBznJcyQ==",
+     "shasum": "74435d0847be71fc9b12ac1160a20a2b3d850934",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG5LkGdOPv0Rbxx94h3SgSm1ydjpr7628z24NNWoH08kAiEA2YMZX+WYWoIfPFWmurdvDBU9gIA/fyja2fKUL9D1uXE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.20.0.tgz",
+     "unpackedSize": 741309
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "34d02f893ec489aad1911ae1381ef007176cb638",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.20.0"
+   },
+   "0.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.21.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.21.0_1787957057429_0.11623948328245826"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.21.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-AmJjgJe8ShyTlIz25Vp8tYy0ZwMAV3KHlHRzgrrmEKYSfFsxpINd1khZ6yH9JUphAgRdRCasq8bMnKxBdPD57A==",
+     "shasum": "77eedd4785be5d1f38b1809e9e6d4871bf34cb22",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAdmnvM4My90i0ezJopiHCyYJQsiuys8Ya4rotHGvvmuAiEA5wM4SrTTy/6iimIW7nXSB7od+jvi9DOYn8Ki0Jjws8s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.21.0.tgz",
+     "unpackedSize": 747283
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c836ce89b44880933d5fee8956d990e333cefc2f",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.21.0"
+   },
+   "0.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.22.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.22.0_1788118355377_0.34981511947504074"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.22.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-U2nOkEIyJH+07PFADQjHr6BSW/mTcxb4CbwCL8uaF1SkKMr1ScuY6/p/PXckRj7NdRIbES0l9DtvAA38JFUhHA==",
+     "shasum": "bcff4d1242e0174f9efa6b4029cbc35d76e3ea50",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFkSPVmoQhye7F0KlVIDlG4b34nn98pyIONaOMkm/50gAiEAz8lCEd9FmJgGwLHf8SAHcJbAc+nkTUJRakKEPFMM5vE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.22.0.tgz",
+     "unpackedSize": 768823
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cb8160b1e606cff7ed3050bf69c21b439e659d02",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.0"
+   },
+   "0.22.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.22.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.22.1_1788179160871_0.006433613463694199"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.22.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-ZfWSic4JOewGpGqc9zI0J7EBlJGQtUrU2SaOJiD+02eI5o3uFRqTAZy3S0HxRpEEs8r0fwQj7Tmzb0G+/dOixg==",
+     "shasum": "40891d956195db50c44ee08f65db94c3113886a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDLvU9KzwkEZO/C7OGoN+R4DauF8906ayEI9XFW1FxQlwIgOWFQFkWaB1axVE4IkZtOtsBFip1Rcsfl45zDKR35LLg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.22.1.tgz",
+     "unpackedSize": 768823
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "74f0fdc60b05fd9347ce32bd3b988f904a8c3f07",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.1"
+   },
+   "0.22.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.22.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.22.2_1788190477265_0.43772124269857704"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.22.2"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-1n0/0d/GPFMWIYB31kySK5vJrP0CvuSDnZS7+olsUohaY9Ehc++mQj0/O6Q+/e5aHNY45z5DKkXR+duj0VHr6g==",
+     "shasum": "f89c3ae6fcb548b3143fe582d514c4535124abb8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHMXDP6OO1VybBZRXgUrhjfYW5J6Ffx8T9Ir98IPmGQcAiBA5q1AzZDvycSZY90YC08OGa9DP7fTJm7jAX7y0CgrkQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.22.2.tgz",
+     "unpackedSize": 768935
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1871bd0e875ab34093ca75ccb37100d34a58132e",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.2"
+   },
+   "0.22.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.22.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.22.3_1788271958548_0.993312951208579"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.22.3"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-AUNTE7/Zqa1aLrhNTS9bTQM1329FSmGZc4lIImug0npySIrntECvSzyHh3YJgg+cLgEFKv5apVYb71rEjCP+RQ==",
+     "shasum": "57479acf634b441ac94a3ecce28877bee8a8544e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHtHU9E+iy9hudgLaebNF7fdddXcxCvCvZDCdQwg2rrpAiEAuzIwZzPjqPp4p6ZGFuPOmf5BdOVKTs20Xd3DlyBm4gI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.22.3.tgz",
+     "unpackedSize": 769506
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "789180f6396310ecb07206ffd4ea3b298dac9a52",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.3"
+   },
+   "0.22.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.22.4",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.22.4_1788518381263_0.5659114962629244"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.22.4"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-JIvfXPDy71OAUlI1w8f3tSEZMyZaDRUjFiJzaiepk82LtjCduskxf1KW8415m0zNb52aP8mTjFu1RqOIVkKSMA==",
+     "shasum": "d68020ab7ae70e4be269300aba635b2f7da20a62",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHphx49BGa7vUn/qEsQS1n9LYdeQ0SYzL04wJPfMudu1AiBLGFspRJXox5v7xNif5SEXzSz1LBdRkNc1UbPd/i0syQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBTNgkg7GoJsX3BLpmYf5Vc8DcEJITntIy3h5FD1ID0+AiEAwJS6s0hWwp4/NfqrkgdgIxJZvbViMRLKf1pOMMWhKEQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.22.4.tgz",
+     "unpackedSize": 770586
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a1e96872eaa2e9f2d4231e689a780a0840ed1de4",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.22.4"
+   },
+   "0.23.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.23.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.23.0_1788696634096_0.6347554473634525"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.23.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-3noMNgEzP9Y8naK+Hpxb4ti8/ktR04m30Up9uFxeii1ucQGP9EkATrU4cFe28CJZrCoK+GMiiPp9OHwNcFP5yg==",
+     "shasum": "47516331bf27c15702941237eea6da20321926c2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDNm262j1+ipW3YgdfqJbjT1u7b5raj7vJcx9h4EQ7OwgIgfLVGewW2/yBVkXgC/SjUGdJp2n5ZfFwIKuipBdBMsZ4="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDPVQ6xp+39hZ01YFbiwcfhxxTSQxsPnK2ilYLQ2inb1QIhAMI4Jfu7GBG+F5xkGmpa+zpzk9lPSrc81ebeZdEXney1"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.23.0.tgz",
+     "unpackedSize": 925623
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "28bc518b668c39d632f84fd4564b0cd8c3b0766a",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.23.0"
+   },
+   "0.24.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.24.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.24.0_1788785141564_0.6812122045614064"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.24.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-I1ieoj9K11xsur1QZNCtH2NCWrItGB7IjVEm/lgi3yOybORTQVtSj+Td5aN+ZlKJ7GdfJ+UZbpt1EH7Y6VcZFA==",
+     "shasum": "53b39d1952b533c28d878ad734a4946dedd4f1cc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICm5QK0kEBtcz0ckl0K+mr7uqoaDfw6ndRfAGUJdI7hbAiEAkTZi9OMfpsmXKtOrCQ513owKzmEINCL0lgexz1OohXU="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICtmOEidjbZx3HgYVu9c7v60gUMCqcjKIYH1h5ienMvEAiEA+OdUmIlf8yNbKekNpaVknG5RQhsGqSGFs7/FeNGfsns="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.24.0.tgz",
+     "unpackedSize": 937284
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "017dc2604e00d82e353d63603247c2750b8ee6c3",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.24.0"
+   },
+   "0.24.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.24.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.24.1_1788785517223_0.47894187729804005"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:68d0f816-0e3f-4c4f-ae71-dbc719a08825"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.24.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-oILgSSTDAlcHYcsaTW5YdoTKzD98F7pxxC3huTRtcP4A5kOHr6cSnwSUgypqeHukGhVAZZblx5RggeP39zN5ig==",
+     "shasum": "8a41fdc375074651c3baa4b0f28f0faa034784a4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFOgkPbTLvh4tf4tZXNoNYgOwLHT8cvV0Gy3T5H+2I2+AiEAijL+GKQFD1ThlvUPKh3GrTF7cmPhyn/dbp1bQGaakRM="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHMuHiGWfqqi2JMpLOEJRrls+Y2gIKFfs2CA4I6KzbduAiAMzvM2y+oyXU0oYkKqev2GiqFEsb+TiB1NYqao0pVNZg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.24.1.tgz",
+     "unpackedSize": 937498
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1f6a6e5f192e45e3a4a9f0de7624f9901f64097d",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.24.1"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.3.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.3.0_1784451617209_0.6843024960706425"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.3.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-6XEg+HlTspRN4dWQWHiaGVRNHFxmVm2qZUXlEc0rD3H+UzH5MDvjO3K8vZbZDjAuzDFJ9v/2XsDkns40QEgF/w==",
+     "shasum": "11174b235fb222c903ed67cf394103b301b51090",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCDE1j3zCRgVsOHRp52L82sd1SGVRpEb9GJAa+pgZUCZQIhAIvZAgId4WZ55yRk/if/IIk9fmmxdsSXypNsptPX7in6"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.3.0.tgz",
+     "unpackedSize": 191527
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "654da73bfd08c0e739e12f9fa3fa49b71ba2db43",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.4.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.4.0_1784456755556_0.34429677942480486"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.4.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-1XltDkL+ueOCtSGu35gNalbzus+kTq0Es9FKrMeiU5rEogvW0kmHJNEET7x7Z6Qc8m51T4tUpTnn/B9Ky+2SOg==",
+     "shasum": "64e689c95fa503b9a5fcd7d84fcf2ce5b948f008",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGNZH1ldH2vw5h6yrQvuWFfh4feesasfW4XBU6Ja8LwqAiAstDPYrOp7Fuzg2Ffwel8fusNKjdfYPjSwKRCnlfHTVw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.4.0.tgz",
+     "unpackedSize": 316974
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5dc0d1ce627d59b482fdca8ea2fd223b1a61b658",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.5.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.5.0_1784457728415_0.0699836376650731"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.5.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-7LF5Xakic878g0bi8PZJPRUtAMW2vXpK4xhj3q4WBNsXopszxrP7KjBSolFFaZ2ioRIT5ZJOHg2PYIPQmR04lw==",
+     "shasum": "0ee61200a8c21a5cb4c8b35c0f063f0c98e2c0d2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBLn0GOpihs9/6cZk3t6I2m4I8cTC10ZPb/wV8bKnYTHAiBQbnCLA1JIrkjGV1hHireTf/PLGzOualPPJnIiccihlg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.5.0.tgz",
+     "unpackedSize": 331067
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "99b5788d9cd8f0e27116ebed7de1a60b7595e43d",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.6.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.6.1_1784459479822_0.5010734119410556"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.6.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-5z70/NyO57xwNyRKQlz6NSALQTPzoDINYprijh0zwtDomqi4Kdl28wigy6ylqKnUgXBvxJvp6oWt/7mYBacSdg==",
+     "shasum": "b2039c2caae49ab3a87b3663ccf2145411e02fd3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHj2lqDr1AISuVYapjtsF8x4c7tXqgr5xsOnv3CMF58wAiEA7M6TzrundDL3GlQVsTJToAhNWCqpBIOc63Wmp2CDOtk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.6.1.tgz",
+     "unpackedSize": 346738
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "a7e43a4153447f578df55e3a788ae4d75bea52d8",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.8.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.8.0_1784466095817_0.5043290804441489"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.8.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-jQkjW9VP8ZfCehPbpPdB9azfOskhNQJBeYexV6GAVlAAnxsrhpjN4SWXHTMAPRXt623Lr4Rq09Sj8XNkC8VsJg==",
+     "shasum": "3daf1bdf76e23f5e9d34075728b58f9a6b93fd9a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCaYf+5RQHHCV2HtUZTLjcy3FWamTWadXlFinDABdfFKQIgCJ/yLpGyUxd8aZ+JBSP71mvWrPU76rtsAEtnlhHHE7A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.8.0.tgz",
+     "unpackedSize": 380989
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4285894e97a568550bc63470db8ccf1785fbe1c0",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-appstore-connect@0.9.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-appstore-connect_0.9.0_1784467668613_0.07841714436630287"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:bf9a44b5-a5ef-4963-8e32-a5259898e2c4"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "appstore-connect-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-appstore-connect/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Apple App Store Connect API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-appstore-connect@0.9.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-UHshIAgge0DGPEKBbVUzoK1w8mWb58Di+O9xr9T91aCowRBPscgW5bPqLUx9BkKl1dkm73T6HQMNE+ocs9M7IQ==",
+     "shasum": "a5faf003aa191d0bc42bcd303fc0d3c16f951f7c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID3bZ37dANK6/J9SonfA79ImsNY84zT5QE/dWhXgE5zuAiEAh/3JdrafNzi4C75jQyZoZgI7eTSEKRZBHT5AuXLw/FE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-appstore-connect/-/mcp-appstore-connect-0.9.0.tgz",
+     "unpackedSize": 402982
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "ea629f5d8af4d151218b6b7d8e0a0db979e5c3f1",
+    "homepage": "https://github.com/mgcrea/mcp-appstore-connect#readme",
+    "keywords": [
+     "app-store-connect",
+     "apple",
+     "appstore",
+     "ios",
+     "mcp",
+     "model-context-protocol",
+     "testflight"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-appstore-connect",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-appstore-connect.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-appstore-connect:latest && docker push mgcrea/mcp-appstore-connect:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-appstore-connect",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-appstore-connect"
+}

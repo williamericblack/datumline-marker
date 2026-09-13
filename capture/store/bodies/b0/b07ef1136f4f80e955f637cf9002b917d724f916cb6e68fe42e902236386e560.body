@@ -1,0 +1,993 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.6.31",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5261b94b66f8]",
+    "name": "dominikrapacki"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.3.0",
+   "0.6.0",
+   "0.6.2",
+   "0.6.25",
+   "0.6.29",
+   "0.6.3",
+   "0.6.31",
+   "0.6.4",
+   "0.6.5"
+  ]
+ },
+ "manifest": {
+  "_id": "@meetergo/mcp-server",
+  "_rev": "12-988ea461ceebe66109f3b09a901853b2",
+  "bugs": {
+   "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+  },
+  "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+  "dist-tags": {
+   "latest": "0.6.31"
+  },
+  "homepage": "https://meetergo.com/mcp",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "scheduling",
+   "calendar",
+   "meetergo"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5261b94b66f8]",
+    "name": "dominikrapacki"
+   }
+  ],
+  "name": "@meetergo/mcp-server",
+  "readme": "# meetergo MCP server\n\nLets an AI agent actually run a calendar: find slots, book, reschedule, cancel,\nreview what is coming up, and keep the contact record straight.\n\nNot to be confused with the **docs** MCP server at\n`https://developer.meetergo.com/mcp`, which searches documentation and cannot\nchange anything. Both are useful and they do different jobs:\n\n| | Docs MCP | This server |\n|---|---|---|\n| Endpoint | `developer.meetergo.com/mcp` | `mcp.meetergo.com/mcp`, or `npx` over stdio |\n| Tools | `SearchMeetergo` | 57 scheduling, CRM, Mira and config tools |\n| Can it book? | No | **Yes** |\n| Use it to | write an integration | be the integration |\n\n## Setup\n\nCreate a Personal Access Token at\n[my.meetergo.com/integrations](https://my.meetergo.com/integrations) \u2014 it looks\nlike `rgo-\u2026` \u2014 then either point your client at the hosted server or run this\npackage locally over stdio. The token works on every plan, including Free.\n\n### Hosted\n\n```\nhttps://mcp.meetergo.com/mcp\n```\n\nStreamable HTTP, authenticated with `Authorization: Bearer rgo-\u2026`. The path\nmatters: `mcp.meetergo.com` alone is not the endpoint. For clients that take a\nremote URL and headers:\n\n```json\n{\n  \"mcpServers\": {\n    \"meetergo\": {\n      \"url\": \"https://mcp.meetergo.com/mcp\",\n      \"headers\": { \"Authorization\": \"Bearer rgo-your_token_here\" }\n    }\n  }\n}\n```\n\n### Local (npx)\n\n```json\n{\n  \"mcpServers\": {\n    \"meetergo\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@meetergo/mcp-server\"],\n      \"env\": { \"MEETERGO_TOKEN\": \"rgo-your_token_here\" }\n    }\n  }\n}\n```\n\nWorks with Claude Desktop, Claude Code, Cursor, or anything else that speaks\nMCP.\n\n### Scope the token\n\nWhen you create the token you can limit it to the capabilities the agent\nactually needs (scheduling, contacts and deals, Mira, forms, account). A limited\ntoken is refused on everything outside those groups, including reads, so give it\nevery group whose tools you intend to use \u2014 a Mira-only token cannot book, and a\nscheduling-only token cannot read your knowledge base.\n\n### Signing in instead of pasting a token\n\nOAuth sign-in is live on the hosted endpoint. Discovery is published at\n`/.well-known/oauth-protected-resource` (RFC 9728), so a capable client can\nstart the flow from the MCP URL. Clients are pre-registered rather than created\nthrough dynamic client registration. For a Claude custom connector, enter the\npublic client id `mcp-claude` under Advanced settings and leave the client secret\nblank. The directory clients for Claude and ChatGPT are configured with their\nrespective providers.\n\nA Personal Access Token works in every MCP client, on every plan including Free.\nThat is what the rest of this page assumes.\n\n### Acting for another user\n\nA Personal Access Token always acts as its owner. To run an agent across a whole\ncompany \u2014 an assistant booking on behalf of several colleagues \u2014 use a **Platform\nAPI Key** (`ak_live:<uuid>:<secret>`) and name the target user:\n\n```json\n\"env\": {\n  \"MEETERGO_TOKEN\": \"ak_live:...\",\n  \"MEETERGO_USER_ID\": \"the-user-uuid\"\n}\n```\n\nThe two token types have opposite requirements, and the server checks both at\nstartup rather than letting you find out mid-booking:\n\n- a Platform API Key **must** have `MEETERGO_USER_ID` \u2014 the API demands an\n  acting user on nearly every route;\n- a Personal Access Token **must not** \u2014 it always acts as its owner, and the\n  API rejects the header outright.\n\nAgainst the hosted endpoint the acting user travels as the\n`X-Meetergo-Api-User-Id` request header instead of an environment variable; the\nsame two rules apply, and sending it with a Personal Access Token is refused.\n\n### Environment\n\nThe stdio entry (`meetergo-mcp`, what `npx` runs):\n\n| Variable | Required | Purpose |\n|---|---|---|\n| `MEETERGO_TOKEN` | **yes** | `rgo-\u2026` Personal Access Token or `ak_live:\u2026` Platform API Key |\n| `MEETERGO_USER_ID` | with a Platform API Key | The user to act as |\n| `MEETERGO_API_URL` | | API base override, default `https://api.meetergo.com/v4` |\n| `MEETERGO_NEXT_URL` | | Booking-page host rendered into widget install snippets, default `https://cal.meetergo.com` |\n| `MEETERGO_TIMEOUT_MS` | | Per-request timeout, default `30000` |\n\n### Running the hosted entry yourself\n\nThe package also ships `meetergo-mcp-http`, the Streamable HTTP entry that runs\nbehind `https://mcp.meetergo.com/mcp`. Credentials arrive per request in the\n`Authorization` header rather than from the environment, so one process serves\nany number of accounts \u2014 `MEETERGO_TOKEN` and `MEETERGO_USER_ID` are not read\nhere. It reads:\n\n| Variable | Required | Purpose |\n|---|---|---|\n| `PORT` | | Listen port, default `8080` |\n| `MEETERGO_API_URL` | | API base override, default `https://api.meetergo.com/v4` |\n| `MEETERGO_NEXT_URL` | | Booking-page host rendered into widget install snippets, default `https://cal.meetergo.com` |\n| `MEETERGO_DASHBOARD_URL` | | Dashboard host used for upgrade links in plan-limit errors, default `https://my.meetergo.com` |\n| `MCP_PUBLIC_URL` | | This server's public URL, default `http://localhost:$PORT`. Only its **origin** is used: origin + `/mcp` is the resource identifier \u2014 the `resource` field of the discovery document, and the value an OAuth token must carry in `aud`. `https://host`, `https://host/` and `https://host/mcp` are therefore the same setting. Anything that is not an absolute http(s) URL fails at startup |\n| `OAUTH_ISSUER` | all three or none | OpenID issuer of the authorization server, e.g. `https://login.meetergo.com/realms/meetergo`. Must be absolute and **https** \u2014 the exchange posts this server's client secret and the user's token to it \u2014 or the process refuses to start. A trailing slash is trimmed |\n| `OAUTH_CLIENT_ID` | all three or none | Confidential client this server exchanges tokens into (RFC 8693) |\n| `OAUTH_CLIENT_SECRET` | all three or none | That client's secret |\n\n**The three `OAUTH_*` variables are all-or-nothing.** Set all three and an\ninbound access token is validated first \u2014 issuer, `aud`, `typ: Bearer`, RS256\nsignature against the issuer's JWKS, expiry \u2014 and only then exchanged for a\nseparate token for the upstream API. The MCP spec forbids forwarding the token a\nclient handed you, so the exchange is not an optimisation; it is the only path.\n\nSet none and the process is bearer-token-only: Personal Access Tokens and\nPlatform API Keys work, both `.well-known` paths answer 404, the 401 challenge\ncarries no `resource_metadata`, and an OAuth token is refused rather than passed\nupstream.\n\nSet one or two and you get the bearer-token-only behaviour above, not a partial\nOAuth \u2014 plus a warning log, `oauth_disabled_incomplete_config`, naming the\nvariables that are missing.\n\n### Retries\n\nBoth entries behave the same here. Rate limits and transient upstream errors\n(429, 502, 503, 504) get up to three attempts in total (so two retries),\nhonouring `Retry-After` where the API sends one.\n\nRetries are **not** applied blindly. A booking or cancellation that fails\nambiguously \u2014 a timeout, a dropped connection, a 502 \u2014 may already have been\napplied by the API, and there is no idempotency key to make a second attempt\nsafe. Only reads are retried on those; writes are retried solely on a 429, the\none response that states the request was never processed.\n\n## One-prompt onboarding\n\nIf your client supports MCP prompts, run **`meetergo: onboard`**. Otherwise\npaste this:\n\n> Set up meetergo for my company. Call get_me and get_setup_status first and\n> tell me what already exists. Then analyse my website with\n> propose_conversion_setup and present the proposed setup \u2014 meeting types,\n> qualification questions, the website assistant. Build nothing until I approve.\n> After I approve: create what's missing, turn the questions into a routing form\n> with create_qualification_form, crawl my site, then PROVE it works with\n> run_test_drive and show me the verdicts. Finish by giving me the install\n> snippet, and verify with verify_widget_install after I've pasted it.\n\nThe agent audits what exists, proposes, waits for your yes, builds, and then\n**shows you scripted visitors booking through your own assistant** before\nanything goes live. A second prompt, **`meetergo: weekly-review`**, pulls last\nweek's conversations and offers to teach the assistant every answer it missed.\n\n## Plan limits\n\nEvery tool reports plan walls structurally: which limit was hit and where\nupgrading happens, so your agent explains the situation instead of failing\nvaguely. `get_me` also returns a `plan` block (tier, limits) so a good agent\nwarns you *before* starting something your plan cannot finish. Connecting the\nserver itself is never gated \u2014 a token from any plan, including Free, works.\n\n## Tools\n\n57 tools, covering scheduling end to end. **Scheduling** is the loop most agents\nlive in; the rest is there so an agent never has to fall back to raw REST.\n\n### Scheduling\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `get_me` | | Confirm the token works \u2014 start here when something looks empty |\n| `list_meeting_types` | | What can be booked |\n| `get_availability` | | Bookable slots for a meeting type |\n| `book_appointment` | **yes** | Book a slot |\n| `reschedule_appointment` | **yes** | Move an appointment |\n| `cancel_appointment` | **destructive** | Cancel, or drop one attendee |\n| `list_appointments` | | Paginated calendar with filters |\n| `get_todays_appointments` | | Today only |\n| `get_appointment` | | One appointment in full, including `attendeeId`s |\n| `add_guest` | **yes** | Add a guest email to an appointment |\n| `update_appointment_notes` | **yes** | Write call prep or an outcome back |\n| `create_one_time_booking_link` | **yes** | Send a single-use link instead of booking for someone |\n| `list_calendar_connections` | | Which calendars are attached |\n\n### Follow-up\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `send_quick_email` | **yes** | One-off email to an attendee (5 per 5 min) |\n| `update_meeting_transcription` | **yes** | Attach a transcript or summary from a notetaker |\n\n### Meeting types\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `get_meeting_type` | | Full config \u2014 read before updating |\n| `create_meeting_type` | **yes** | Create a bookable meeting type |\n| `update_meeting_type` | **yes** | Change one |\n| `delete_meeting_type` | **destructive** | Remove one; its page stops working |\n\n### Booking page\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `get_personal_page` | | Colours, header, links, meeting-type order |\n| `update_personal_page` | **yes** | Change branding |\n\n### Routing forms\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `list_routing_forms` | | All forms and funnels |\n| `get_routing_form` | | Steps, fields and routing rules |\n| `create_routing_form` | **yes** | Build a qualification form |\n| `update_routing_form` | **yes** | Change one |\n| `delete_routing_form` | **destructive** | Remove one; shared links break |\n| `send_routing_form` | **yes** | Send by email or SMS, or mint a link |\n| `list_form_recipients` | | Who got it, who answered |\n| `list_data_fields` | | Reusable fields across forms |\n| `create_data_field` | **yes** | Add one |\n\n### CRM\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `search_contacts` | | Find a contact before creating a duplicate |\n| `get_contact` | | Full record, by `contactId` or by `attendeeId` from a booking |\n| `create_contact` | **yes** | Add a contact |\n| `update_contact` | **yes** | Edit a contact |\n| `bulk_create_contacts` | **yes** | Import many at once (3 calls per min) |\n| `delete_contact` | **destructive** | Remove a contact and its form answers |\n\n### Mira, the website assistant\n\nEverything needed to take a website from \"no assistant\" to a live one that\nanswers from the company's own pages and books meetings.\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `get_setup_status` | | The launch checklist: what exists, what's missing, the next move |\n| `get_mira_settings` | | The whole assistant config \u2014 read before changing it |\n| `update_mira_settings` | **destructive** | Change it; returns the previous settings so you can put them back |\n| `restore_mira_settings` | **destructive** | Restore a snapshot taken from an earlier update |\n| `propose_conversion_setup` | | Read a crawled site and propose an assistant, qualification and booking setup |\n| `create_qualification_form` | **yes** | Turn proposed questions into a real, editable routing form |\n| `run_test_drive` | | Scripted visitors talk to the saved assistant; verdicts + transcripts back |\n| `get_mira_widget_embed` | | The public key, the embed snippet, and a preview URL |\n| `verify_widget_install` | | Fetch a page of the customer's site and confirm it serves THEIR widget |\n| `answer_visitor_question` | **yes** | Teach the assistant an answer it was missing |\n| `get_conversation_insights` | | What visitors asked and where the assistant had no answer |\n\n### Knowledge base\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `crawl_company_website` | **yes** | Ingest a website so the assistant can answer from it |\n| `get_crawl_status` | | Progress of a running crawl |\n| `list_knowledge_documents` | | What has been ingested |\n| `delete_knowledge_document` | **destructive** | Remove a document; the assistant stops citing it |\n| `search_company_knowledge` | | Retrieve the passages a question would be answered from |\n\n### Webhooks\n\n| Tool | Writes? | Purpose |\n|---|---|---|\n| `list_webhooks` | | Endpoints in use (max 6 per company) |\n| `create_webhook` | **yes** | Register an HTTPS endpoint |\n| `update_webhook` | **yes** | Change URL or events |\n| `delete_webhook` | **destructive** | Remove one; events stop immediately |\n\nWrites carry `readOnlyHint: false`, and everything marked **destructive** above\ncarries `destructiveHint: true`, so hosts can require confirmation before an\nagent removes something a human would miss.\n\n## What the tools do for you\n\nThe API asks for things a model has no way to know. Rather than describing that\nboilerplate in a docstring and hoping, the tools supply it:\n\n- **`book_appointment`** builds the nested `attendee` object, defaults\n  `receiveReminders` and the required empty `notes`, and refuses a booking with\n  no name rather than writing a blank one into the invitation.\n- **`get_availability` and `book_appointment`** resolve which hosts to compute\n  for. The API rejects both with `Expected hostIds or queueId` before it even\n  loads the meeting type, and a model only ever has a `meetingTypeId`.\n- **`create_meeting_type`** fills the six required-but-irrelevant `meetingInfo`\n  fields (`customChannelName`, `connectChannelName`, an empty\n  `confirmationButton`, \u2026) that reject the whole request when missing. Anything\n  the schema does not name goes through `advanced`.\n- **`list_appointments`** supplies the required `page` and `pageSize`, which the\n  API has no defaults for.\n\n## Development\n\n```bash\nnpm test          # vitest\nnpm run build     # tsc -> dist\n```\n\nThe tests assert the **wire format**, not just the tool list: which path each\ntool calls, and the exact body shape the API's DTOs require. That is deliberate.\n0.1.x shipped five tools that could never succeed \u2014 wrong paths, wrong query\nkeys, a flat body where `BookingDto` wants a nested `attendee` \u2014 and every test\npassed, because they only ever checked that the tools existed. Adding or\nchanging a tool means pinning its request against the route in `apps/api`.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "apps/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+  },
+  "time": {
+   "0.1.0": "2026-07-29T16:39:35.157Z",
+   "0.1.1": "2026-07-29T17:25:47.614Z",
+   "0.2.0": "2026-07-31T10:45:17.284Z",
+   "0.3.0": "2026-07-31T11:19:31.374Z",
+   "0.6.0": "2026-08-07T06:13:31.973Z",
+   "0.6.2": "2026-08-07T06:14:50.486Z",
+   "0.6.25": "2026-08-25T09:20:53.330Z",
+   "0.6.29": "2026-08-26T08:58:13.269Z",
+   "0.6.3": "2026-08-07T10:05:09.848Z",
+   "0.6.31": "2026-08-26T11:32:22.205Z",
+   "0.6.4": "2026-08-10T10:49:17.982Z",
+   "0.6.5": "2026-08-10T12:46:06.523Z",
+   "created": "2026-07-29T16:39:34.753Z",
+   "modified": "2026-08-26T11:32:22.413Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.1.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1785343174992_0.20859136211316986"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "meetergo-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://gitlab.com/webnature/meetergo/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "directories": {},
+    "dist": {
+     "fileCount": 5,
+     "integrity": "sha512-iS+/RaJOwioEi+CLXaujohFrUB0uCD3fDo7homLqgCodvPDC477EU+1KM19yy5kasTAWK4pp4VbCpPqX8xpDPw==",
+     "shasum": "c859013ca696b95bce5cf4967a6eeae4d30b0986",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBrJ3Qja8p8kcuspVPU437689xO3NrojaPVnwug2iI2AAiEAhHdTfPYxqqWnsn53Bl48XkXdG8QdB/MgG2Nh1iQMKfU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 14543
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://gitlab.com/webnature/meetergo.git"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.1.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1785345947448_0.45534481509881286"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "meetergo-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.18.0",
+     "typescript": "^5.8.3",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-zwMNGZkzx+7tIb8sa1avEPIQoFMsFY3g80Y1VWbuV+qVvVdFC8BwURNDzEDj0e6MBJZVAmLzk970qCJjZ2lzgg==",
+     "shasum": "f3b9ac8d766b53092a5cb0acd369852052465f09",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDTKT2/kp8+2/rF9HBhjR2wHx+pc4hBkTNnXR3DN2ihqAIgWAfaYvcITXgMSElfh5gHsqhP4uI4IqYapNddbFmdZus="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 15925
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "b19de224008bf95ccd5bc17e52ef9d62e925287d",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "scripts": {
+     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1785494717169_0.24445571122718568"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "meetergo-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.18.0",
+     "typescript": "^5.8.3",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-TFb03Qrl6QlY0MoFzdr93uvkNrlQGwIvrsSvkOfdxTyfLTd64ao8RpyJwe90muhnuwVyRG1klGX3XDWGV75Mpg==",
+     "shasum": "da37f2d14477cb64ec990397278c1951a685b055",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICs926val8sCbrowkNJsOJmF+K6w+2ItFvrAJSHyq+CcAiEAn5iqft18wWpN8AS0BbxUbPDTDsV425kRvUhSBBDGOik="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 40375
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "b235357e35e3a2f6de4a42dcbaee8586798c9e01",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "scripts": {
+     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.3.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1785496771243_0.21575743914292023"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "meetergo-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.18.0",
+     "typescript": "^5.8.3",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-FwQXl/VpXUTHi1YkxO+lrcNRKfvRIWsPRoflQuezdRvCKhAKqAv43czar3dr2ee1+suvHUcqsxJNTxLf2O/WHg==",
+     "shasum": "4bef43d33e2678d04a80ec7f7a36f98d51048f28",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCuN88u72Xh2y7Je6KNCRPeMCi0UDnh8AxB1qxG+jOLPwIgDNicnTjDcU+YK8DJmAWzRL/rV9y6u7orx4j4cHdgBrs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 63999
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "84dbb287a8473c73c9c8d1a1b300a23bde64cb58",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "scripts": {
+     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1786083211810_0.23681295744515451"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-ncx7NJ3lk/z3hFW6p0CX8i++qxbNRYv71mHRWUgeh33dqoQGXceGdqL/jKZi+axcd3xw7uTbxPBtceVvNpBmmQ==",
+     "shasum": "4fd519792b2087ac5210970911bd57ecfb95d2e9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIENHIDu/U36H+kRUbSMPGTd6Q1iDCxd7iXRstVbsCaO8AiEA2aIYyC4hp5ABBJRNY2RJMWDM5KyUoqO/3ktrpdmBslE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 169135
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.6.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.2_1786083290328_0.8969438577062783"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-up1f6zSjF4NSEXvGo6gfczGFPO8+3dnHVwHzR6rKxpXgYPwOMRf8TdNx7egxH3/L4IpphbV4WE/XHWBOh/WnwQ==",
+     "shasum": "35f88526730ea31d7b272af26d4e334863b9a1e5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHc2EjnRbbmvruL9DaONk5Tlvc3m9ScXT9NXYeTIdtTkAiAgloIMPQmsO4wzqu6QrgMhn7RZAU/0NIN4hNwnEZxskA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.2.tgz",
+     "unpackedSize": 169135
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.2"
+   },
+   "0.6.25": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.25",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.25_1787649653187_0.5564332292735144"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 19,
+     "integrity": "sha512-u773e2cRWKF2hzFyDr2+omuj6ABwseF9diRORCOkPDqEaK7pN/F5eeICxsSfL0bJAt+aY6M5dTbsfFuKb8sZ4w==",
+     "shasum": "ee31b95bf7f8f8531aa345a23ea99a35bfc30849",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAjyJbAIU2yxoSrj3ahgXOtTSoI1SPbEPOlR9+BMstGpAiAUU5LyWHan4N6g/tEQVbyNZwlkEdpQjre0QVlenIYSVQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.25.tgz",
+     "unpackedSize": 191469
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "d01193774bd1b3c3430d595cf54e7d98e148df55",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "mcpName": "com.meetergo/mcp-server",
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.25"
+   },
+   "0.6.29": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.29",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.29_1787734693190_0.599333296541078"
+    },
+    "_npmUser": {
+     "approver": {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     },
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "12.0.2",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-81Lp8W6XcrmoqyJO1DvXGwTqVUteWWVe2dt5KqHB1Die3Qq1MMzM8CYhgni7joB0l+lKS2RK2G72HK7ku7jaLQ==",
+     "shasum": "e39ccf2632d084ccac39abf8b3941fdd4f4adcb6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDtPLg9zP62cnDT4OgAF/4fiyqoUBYNGTEYfuXA2zxRfQIhAMmx3SkORew+BRkeCnY3ppMR89xTo68Em8LbacxHaaWu"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.29.tgz",
+     "unpackedSize": 209284
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "8599566ed8c604881e93b1bb2a66a76e666c2759",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "mcpName": "com.meetergo/mcp-server",
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.29"
+   },
+   "0.6.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.3",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.3_1786097109690_0.8791812199258415"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-/9s+AKSZGmSD5D8M00nw4uE5lhk002ttiaHqgJVRNb8za5LdRY3jYn/VrD9uaZ2w+ldgLYmYXxUSLmLVDlS8XQ==",
+     "shasum": "83359cf92ae2963ed115de66b447921366b4d8a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDaRgGbKhwNTc6tnzrFbtxRAgF29nr5FRO/qFbwqWhg0AiB2VnVvr314zbpo+OF25ZfVPN4T0G8/E8IYb/wZoypV4w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.3.tgz",
+     "unpackedSize": 181111
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.3"
+   },
+   "0.6.31": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.31",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.31_1787743942123_0.016973855138862293"
+    },
+    "_npmUser": {
+     "approver": {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     },
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "12.0.2",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 20,
+     "integrity": "sha512-FWbxudW+WZcf0kuBZsKefNh77/bKYfdlA1HjF+0rOnTEB4IAQutHPQrHhzy/15NgmyHsFPS/MHr+PbVP3s/4Gg==",
+     "shasum": "0083b7ecdebd21574537c0bf6ebbad59eb659688",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDoZK+vEQZp0jws0wDyR7/PHpxohhw9JSGIJJ1Ndg6TnAiEAy3OuDYwUUh/sBs12QH9cicl49UENh8N3umxyOFNzqPM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.31.tgz",
+     "unpackedSize": 211685
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "89d8565e883b0ec15f26b461ed9ecc4a1990a543",
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "mcpName": "com.meetergo/mcp-server",
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.31"
+   },
+   "0.6.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.4",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.4_1786358957828_0.3855328391531605"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-Sw5TphUYsm8jfxvBWl/cGy4TTUY3+CruCXgoIEJFlRF2UQcRlNyvfv0NeFFPlIcylafQuv8p/u6XQR7qaKh1jg==",
+     "shasum": "33803360efacbf03198147204ff9eaaef5fb6d26",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBLgqr1Ti/cgxl5yLuLGedBgcd2XFKhklBPJBiTL9wacAiAlffZ1YeccS/yoYbsJorgJ7+1w2+8/cNgNBsenQw9WqQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.4.tgz",
+     "unpackedSize": 181660
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.4"
+   },
+   "0.6.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@meetergo/mcp-server@0.6.5",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.5_1786365966387_0.8220165448929693"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5261b94b66f8]",
+     "name": "dominikrapacki"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server": "dist/index.js",
+     "meetergo-mcp": "dist/index.js",
+     "meetergo-mcp-http": "dist/http.js"
+    },
+    "bugs": {
+     "url": "https://github.com/meetergo/meetergo-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.20.2",
+     "zod": "^3.25.76"
+    },
+    "description": "meetergo MCP server \u2014 let AI agents book, reschedule and cancel meetings",
+    "devDependencies": {
+     "@types/node": "^22.13.1",
+     "typescript": "5.9.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-VAkShyycs/6a60S6bmRF1qXkbA1IHXKqBO+9TrPlwJ49nbdjoL8GZOLIlqi/oh1y4FqYiJjqRMwaUvlcagB8Ow==",
+     "shasum": "9fcd957f15d6b78aa75297332947a82372c88131",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDi9NBuNg2Rb6BQjX/g0XP02ZdEXuz5Hth68ACXpZ959QIhALr07PecnFJXZoocjlBjxtA6QgPv2jpw7aVgIt2z0lEY"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@meetergo/mcp-server/-/mcp-server-0.6.5.tgz",
+     "unpackedSize": 181703
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "homepage": "https://meetergo.com/mcp",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "scheduling",
+     "calendar",
+     "meetergo"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5261b94b66f8]",
+      "name": "dominikrapacki"
+     }
+    ],
+    "mcpName": "com.meetergo/mcp-server",
+    "name": "@meetergo/mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "apps/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/meetergo/meetergo-mcp-server.git"
+    },
+    "type": "module",
+    "version": "0.6.5"
+   }
+  }
+ },
+ "name": "@meetergo/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@meetergo%2Fmcp-server"
+}

@@ -1,0 +1,1917 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.9.21",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e4aab33381ef]",
+    "name": "amerarab"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.4.0",
+   "0.4.1",
+   "0.4.2",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0",
+   "0.9.0",
+   "0.9.1",
+   "0.9.11",
+   "0.9.12",
+   "0.9.18",
+   "0.9.19",
+   "0.9.2",
+   "0.9.20",
+   "0.9.21",
+   "0.9.3",
+   "0.9.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@clearlist/mcp-server",
+  "_rev": "18-8311d6e931fe0acd86f77752e2f786a5",
+  "bugs": {
+   "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+  },
+  "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+  "dist-tags": {
+   "latest": "0.9.21"
+  },
+  "homepage": "https://clearlist.me/developers",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "ai",
+   "agents",
+   "cli",
+   "clearlist"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e4aab33381ef]",
+    "name": "amerarab"
+   }
+  ],
+  "name": "@clearlist/mcp-server",
+  "readme": "# ClearList MCP Server\n\n[![smithery badge](https://smithery.ai/badge/clearlist/clearlist)](https://smithery.ai/servers/clearlist/clearlist)\n\nAI agent interface to ClearList, an AI resale manager. Any MCP-compatible agent (Claude today on any plan, plus Codex CLI, Google Antigravity, and custom agents) can create listings, publish sale pages, and manage reservations \u2014 all through the same API routes the web UI uses. ChatGPT reaches the same API today through agent mode, which needs no connector; what is pending its app directory review is the one-click listing that would make that seamless and open it to Free accounts.\n\n**Users never need to visit clearlist.me.** The agent handles account creation, photo processing, listing generation, and publishing entirely through conversation.\n\n## Quick Start\n\n```bash\ncd mcp-server\nnpm install\nnpm run build\n```\n\n## CLI\n\nThe package also ships a `clearlist` command-line tool for scripting seller\nactions directly against the REST API \u2014 no MCP host required:\n\n```bash\nnpm install -g @clearlist/mcp-server\n\nclearlist login [redacted-email:53e6cdc30765]        # send a 6-digit sign-in code\nclearlist verify [redacted-email:53e6cdc30765] 123456  # store the API key in ~/.clearlist/config.json\nclearlist items                        # list your listings\nclearlist publish --city \"Austin\"      # publish the sale page, get the URL\nclearlist reservations                 # who reserved what\nclearlist reply <conversationId> \"Yes, still available\"\nclearlist picked-up <itemId>           # mark an item sold\nclearlist status                       # plan, capacity, expiry\n```\n\nEvery command prints JSON (pipe to `jq` for scripting). `CLEARLIST_API_KEY`\noverrides the stored key; `CLEARLIST_API_URL` overrides the default\n`https://clearlist.me`. Run `clearlist help` for the full reference.\n\n## MCP Apps (interactive UI)\n\n`get_listings`, `publish_page`, and `get_reservations` declare an\n[MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) view\n(`ui://clearlist/app.html`) via `_meta.ui.resourceUri`. Hosts that render MCP\nApps (ChatGPT, Claude.ai) show a listings gallery, a publish success card, or\na reservations summary inline; hosts without UI support ignore the metadata\nand get the same JSON as before. View sources live in `src/ui/views/` and are\nbundled into `src/ui/generated-views.ts` with `npm run build:ui`.\n\n## Two Ways to Connect\n\n### Option A: New user (no account yet)\n\nNo API key needed. The agent creates the account through conversation:\n\n```json\n{\n  \"mcpServers\": {\n    \"clearlist\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/mcp-server/dist/index.js\"],\n      \"env\": {\n        \"CLEARLIST_API_URL\": \"https://clearlist.me\"\n      }\n    }\n  }\n}\n```\n\nThe agent uses `send_verification_code` + `verify_code` to authenticate. An API key is generated automatically and stored in memory for the session.\n\n### Option B: Returning user (has API key)\n\nIf the agent already has a key from a previous session:\n\n```json\n{\n  \"mcpServers\": {\n    \"clearlist\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/mcp-server/dist/index.js\"],\n      \"env\": {\n        \"CLEARLIST_API_URL\": \"https://clearlist.me\",\n        \"CLEARLIST_API_KEY\": \"cl_your_api_key_here\"\n      }\n    }\n  }\n}\n```\n\nAll tools work immediately \u2014 no onboarding needed.\n\n## How It Works (The Grandma Flow)\n\n```\nGrandma \u2192 ChatGPT: \"I'm moving, help me sell my stuff\"\nChatGPT: \"Sure! What's your email?\"\nGrandma: \"[redacted-email:b2d359cb05ae]\"\n\n    [agent calls send_verification_code({ email: \"[redacted-email:b2d359cb05ae]\" })]\n\nChatGPT: \"I sent you a 6-digit code. Check your email.\"\nGrandma: \"482019\"\n\n    [agent calls verify_code({ email: \"[redacted-email:b2d359cb05ae]\", code: \"482019\" })]\n    \u2192 account created, API key returned, all tools unlocked\n\nChatGPT: \"Account created! Now send me photos of everything you want to sell.\"\nGrandma: [sends 20 photos]\n\n    [agent calls bulk_create_listings({ photos: [...20 photos] })]\n    \u2192 AI groups by item, generates listings, suggests prices, validates\n\nChatGPT: \"I found 12 items. Here's what I got:\n          1. IKEA Kallax Shelf \u2014 $45 (Good condition)\n          2. KitchenAid Mixer \u2014 $120 (Like New)\n          ...\n          Want me to publish your sale page?\"\n\nGrandma: \"Yes! I'm in Austin.\"\n\n    [agent calls publish_page({ city: \"Austin\", state: \"TX\" })]\n\nChatGPT: \"Done! Your sale page is live at clearlist.me/grandmas-sale\n          Share this link on Facebook or Nextdoor.\"\n```\n\n**Grandma never visited a website. Never generated an API key. Never created an account manually.**\n\n## Available Tools (28)\n\n### Onboarding Tools (2) \u2014 No API key required\n\n| Tool | Description |\n|------|-------------|\n| `send_verification_code` | Send a 6-digit code to an email address |\n| `verify_code` | Verify the code, create account if new, get API key |\n\n### Seller Tools (23)\n\n| Tool | Description |\n|------|-------------|\n| `create_listing` | Send 1-5 photos \u2192 AI generates listing \u2192 saves to account |\n| `bulk_create_listings` | Send up to 50 photos \u2192 AI groups, generates, prices, QA-checks \u2192 saves them. Read the response: prohibited items are refused and some may save hidden |\n| `create_upload_session` | Mint a phone-upload link; pass its session_id to `bulk_create_listings` |\n| `edit_listing` | Update title, description, price, condition, category, status or transport_notes |\n| `delete_listing` | Delete a listing \u2014 undoable for 7 days via `restore_listing` |\n| `publish_page` | Publish sale page (city, plus state in the US/CA/AU), get shareable URL |\n| `unpublish_page` | Take sale page offline |\n| `extend_sale_page` | Extend an expiring sale page |\n| `restore_listing` | Undo a delete within the 7-day window |\n| `get_listings` | List all items with status, price, queue count |\n| `get_reservations` | See buyer reservations, messages, timer status |\n| `get_conversation` | Get full message thread with a specific buyer |\n| `reply_to_buyer` | Send message to a buyer |\n| `mark_picked_up` | Mark item sold when no reservation currently holds it (walk-up sale). Refuses a reserved item |\n| `confirm_pickup` | Close out a reservation the buyer collected (or mark a no-show) |\n| `get_page_stats` | Page views, item count, reservation stats |\n| `prepare_crosspost` | Generate cross-posting content for Craigslist/Facebook |\n| `set_availability` | Configure pickup scheduling windows |\n| `get_profile` | Get account profile and tier info |\n| `check_tier_status` | Check the seller's plan, remaining slots and expiry. Plans are one-time passes, not subscriptions |\n| `generate_payment_link` | Generate Stripe payment link for upgrades |\n| `share_address` | Step 1 of 2. Name who would receive the pickup address, get a confirmation token. Discloses nothing to the buyer |\n| `confirm_address_share` | Step 2 of 2. Send the address the token froze, once the seller has agreed. Irreversible; the seller is emailed a record |\n\n### Discovery Tools (3) \u2014 Phase 14\n\n| Tool | Description |\n|------|-------------|\n| `search_items` | Search items across all sales by keyword, city, category, price |\n| `get_sales_near` | Find active sales near a location |\n| `get_city_sales` | Browse all sales in a city |\n\n## Architecture\n\n```\nUser (via any AI agent)\n  \u2502\n  \u25bc\nAgent (Claude, Codex CLI, Antigravity, etc.)\n  \u2502\n  \u25bc\nClearList MCP Server (this package)\n  \u2502  stdio transport\n  \u2502\n  \u25bc\nClearList API Routes (/api/*)\n  \u2502  HTTP + X-ClearList-API-Key header\n  \u2502\n  \u25bc\nFirebase (Firestore, Auth, Storage) + vision AI\n```\n\nThe MCP server is a thin protocol adapter. Zero business logic \u2014 everything lives in the API routes.\n\n## Authentication Flow\n\n```\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502   Agent starts (no API key)      \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                  \u2502\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25bc\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502  send_verification_code          \u2502\n                    \u2502  POST /api/auth/send-code        \u2502\n                    \u2502  { email: \"[redacted-email:0925f997eb0d]\" }     \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                  \u2502  \u2190 email sent with 6-digit code\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25bc\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502  verify_code                     \u2502\n                    \u2502  POST /api/auth/verify-code      \u2502\n                    \u2502  { email, code, agent: true }    \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                                  \u2502  \u2190 creates account + returns API key\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25bc\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502  API key stored in memory        \u2502\n                    \u2502  All subsequent calls use it     \u2502\n                    \u2502  X-ClearList-API-Key: cl_xxx     \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n## Development\n\n```bash\n# Type-check\nnpm run type-check\n\n# Build\nnpm run build\n\n# Run directly (for testing)\nCLEARLIST_API_URL=http://localhost:3000 npm run dev\n```\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+  },
+  "time": {
+   "0.4.0": "2026-07-28T20:30:17.327Z",
+   "0.4.1": "2026-07-28T21:35:10.438Z",
+   "0.4.2": "2026-07-29T02:03:36.401Z",
+   "0.5.0": "2026-07-31T02:44:40.478Z",
+   "0.6.0": "2026-08-03T04:43:17.372Z",
+   "0.6.1": "2026-08-05T03:27:52.987Z",
+   "0.7.0": "2026-08-07T16:41:55.066Z",
+   "0.9.0": "2026-08-08T01:20:32.570Z",
+   "0.9.1": "2026-08-08T01:41:41.413Z",
+   "0.9.11": "2026-08-20T21:54:08.559Z",
+   "0.9.12": "2026-08-21T02:12:01.645Z",
+   "0.9.18": "2026-08-26T22:20:04.937Z",
+   "0.9.19": "2026-08-28T12:25:45.154Z",
+   "0.9.2": "2026-08-12T02:40:58.049Z",
+   "0.9.20": "2026-09-03T04:19:18.838Z",
+   "0.9.21": "2026-09-03T14:55:59.588Z",
+   "0.9.3": "2026-08-12T04:08:36.031Z",
+   "0.9.4": "2026-08-15T22:53:37.347Z",
+   "created": "2026-07-28T20:30:17.019Z",
+   "modified": "2026-09-03T14:55:59.798Z"
+  },
+  "versions": {
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.4.0",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1785270617186_0.3887961565475575"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e4aab33381ef]",
+     "name": "amerarab"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.4",
+     "@types/node": "^26.1.1",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-1GulzYoRATUoXrhK45A/H4VWb3RHi/tbbom8qnTOx1teI2DpsgtkPahN4Sxei3i/RVlUOzzc3MjAeVPxRgcpcQ==",
+     "shasum": "8d26b91dd0406ed8354866c631b8653edddcba8f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDGg/k4Dq+ZBMwBhNyb3HegrsdInvQUpGI5ERkvwvNGNAIhAJPLuxuyFjQ2PrVD8szRn9i/gLEcLd7nM3PEcu/7FyuD"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 616488
+    },
+    "gitHead": "94d9b1c8b74f1ee512ae952937dfca2ddbd60b6c",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.4.1",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.1_1785274510226_0.4341876720966895"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e4aab33381ef]",
+     "name": "amerarab"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.4",
+     "@types/node": "^26.1.1",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-ez7zTzKj64S5FPwsL3DzPRL0ddOlVyZxO/kH4HSGiIy02Dz/ecp4e6ubLB7w6jlkc6Cs9R1YR1Jm9jYdUuck7g==",
+     "shasum": "e3200fa4f8d297042756bb43f87047707db4ddb4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBdDWvZMQbDWsN3xrOVs8Jbdy/6+1sdEF2CaIzV8UbJcAiBCeHEjivo0Lmzd3Hjn9m43TX2BQGOM79ZaU34cV5t7DA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.4.1.tgz",
+     "unpackedSize": 616483
+    },
+    "gitHead": "f987dfb9bcb71ece8098ff13a4c07317e0ae7f3e",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.1"
+   },
+   "0.4.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.4.2",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.2_1785290616181_0.3710179583901947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e4aab33381ef]",
+     "name": "amerarab"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.4",
+     "@types/node": "^26.1.1",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-k1AP3cb/ldVI7uRZ0C5oBf0GHvh4PkfkvSJWfBrqXzYnym0ctlgBRfsfCp4Oa3D/7yLDIEQXI73iQCaljT914Q==",
+     "shasum": "0b9a2386737982d37eab01f8c27fd342992a6c2b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCG6XbN4HCsbTiUxAg/AIcDbQHBBlwKcPH7TWvWcne5EwIgE8WFLdLPP4VaA3GR/r3l1Xd5eid6Hv2xlw6B/mAjV6M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.4.2.tgz",
+     "unpackedSize": 1043221
+    },
+    "gitHead": "5c6ef95b28862cbd081b8edb454d7bbf082eebce",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.2"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.5.0",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.5.0_1785465880326_0.5900967865572999"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e4aab33381ef]",
+     "name": "amerarab"
+    },
+    "_npmVersion": "10.9.2",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.4",
+     "@types/node": "^26.1.1",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-7ef/YUlwUfvjPRJwc4gYDlYv4e7ExTdzAXKhnp6OLbab8KO8zl+IAqIMVGEFCuXB29EKfW83IXMHUhr/xxdo4w==",
+     "shasum": "bcc76f26f4aaa4bba4536bebee7f4c18ae3708f3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBjiKVDYRRB3sFvm0UUD6Jfi9sle3G34x5Oy2fM/wexAAiBtTwmKS28wyZedOi8MLWmOnp8FD8XQNqoIrM3iD/ZyVQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.5.0.tgz",
+     "unpackedSize": 1068396
+    },
+    "gitHead": "8d4353006d681199d5902b3d88ac0affcf4bdbfe",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "type-check": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.6.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.0_1785732197221_0.36227255719626705"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.4",
+     "@types/node": "^26.1.1",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-CjXfOWo14wTeHtBfX0UD04T20SNL/idBe9rIWneGZjoesysprYTQVTOgIyglKkeeMLZ0mty8ysiH2xpt2uJYAQ==",
+     "shasum": "7aecdc85d2b732c5d4115df132ddc93a0757e35c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEGc92FFq5wbIk8Nl5o9LS7q5rE9j7sXkLvyA59t2e+zAiAKkbfbvvTIqlm2zRc81tsUZdIDbESojWz4fwniX/gp/Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.6.0.tgz",
+     "unpackedSize": 649173
+    },
+    "gitHead": "16e386eaea235f46cf273b4a1bb4e7b1d2fb557d",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.6.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.6.1_1785900472738_0.10469655278327417"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-xm8jzIDDuhh8Xsfnbqlk5Tve9Gr2p8WLeX9ep/tiQvv0u4ajkcsako5pQ3YNKDT3kQ8UFb9jnP/nIl/th4kwIQ==",
+     "shasum": "1d6e5988c898109aa807df6fdcadedb293c49c4f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCEO56P48/0Vl2LbRIbUErASslWYIb8IyhDlCZbPL6lLwIgUNhSYLtCAODiBExhG+n68qsi/ugeK+cVZKYr9YdLyp8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.6.1.tgz",
+     "unpackedSize": 656852
+    },
+    "gitHead": "043a941cef4d5c4551946666479d1b57d8b9f9a1",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.7.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.7.0_1786120914912_0.02084528819260667"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-kBlBlxzDjb3BeCuPtuV/e7Pyuk5g8BTIjEl9CIQHHvK4fXu9Cg+Sjk1sOvIPhV5wqWHk+fa7besC8gGathZB5w==",
+     "shasum": "11d1ca4cb3ea54ee986bb64f4f28c884b222e4a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDGZcCfk3m/jrkcj77rQUrMoZ3+Tn7xy60QaF39+7THbwIhAJiBm4ACESLlLH7YiTAFNwc6ZBO5OigAYDDN6TIHDjvy"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.7.0.tgz",
+     "unpackedSize": 694065
+    },
+    "gitHead": "07c130a5416b95c306ef59ecc569422c2d970c5a",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1786152032409_0.10486310743642457"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-ppVOyF8a/2ROgdgP1fsFEOoi7ZcBp2GF34Owwh0koqP0vU/dR44hSdUisfv3uUKGUfxcpyftfJzmYyrzgE4v3g==",
+     "shasum": "8f69d09161fa6603722afd1476f8b1cd250a3315",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD4ujnoGCk2C1htlbcaqLKcuPev/FO1042Oq2qH6BoMBQIgR5I5oNHiD81YidyHskNneFHSFDtt4uDjWFObhRDxWSQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 714235
+    },
+    "gitHead": "fbfc2aee59c600a82f183edf826341630480ca59",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.1_1786153301211_0.981988838754744"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-N9DLF+nkYONU4MNnC1Pvkl7REzSgXDJf3DlWR6aCn0gOwq8/gWM1PHhL9tkgVN3UnIfX1h1DE1/SDimcfSolOA==",
+     "shasum": "216a9ee3cdb40df082c3e72cd081051f699451fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAn+ofD5uoWm3155BNPtJ7miDPhyv91aIebwbandaYSTAiEA8HB/kMPelQYbTxHQbaxL0SKpSW+dCAH//kQLeOKsVgY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.1.tgz",
+     "unpackedSize": 714270
+    },
+    "gitHead": "00b425149bd4b00481c3a68dce493f6412cd9a88",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.1"
+   },
+   "0.9.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.11",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.11_1787262848395_0.47249416146252377"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-1lmIlhap1OIGr+F/ZlE1eowCmhRyztcI5BREaIPjlT3dkSaky3tWFSVKQCNJkkIsf3foPLsYkfqroSNZhVMnGQ==",
+     "shasum": "8e71970250e1a8db4fad9b59e6cf59f1ee18814c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIESk5pAd2Al6K7nXFSFJ4XF0DRhTiiNUNc7UMniqnRVCAiEA7T3SjAZkVI3TBaw8LyQM5yWrZSvy/ImoFNYsh49KPOY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.11.tgz",
+     "unpackedSize": 880594
+    },
+    "gitHead": "03f289bf0aa07997c1f010fce9b8a21040cf7e38",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.11"
+   },
+   "0.9.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.12",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.12_1787278321482_0.7431696077891077"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-84DbfTvVgIUHS2WwMm4dZMxPa3GykAYDbJOwgFf1xkdNvG5/jwz1owBmzTmprfrFdld2Mhpbt6UtifmobQiqjg==",
+     "shasum": "e35963f8797867a2e2f7f659df671be903cd5aee",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAOpjEzyCWO5MEGZgjYvZ40OUoA5u0fVZ6/z+/fKlHijAiEAz6NDjAzDecSinPms9YsrhWVpaz+Zr4SaRtJw8p+bIoc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.12.tgz",
+     "unpackedSize": 884184
+    },
+    "gitHead": "fbf7761523e57c6e8d0cea5041df587c395b285b",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.12"
+   },
+   "0.9.18": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.18",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.18_1787782804801_0.7424171793557752"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-ILx7ROCeCZIONvrLI8mXNkKSISuCm9jX5E2OGP4V6X8Sjr5YWPFTRe1ydulcVoAHQDCos8vvH/TEGh12sY2Gdg==",
+     "shasum": "c4ae93240ff18938708a2ee34419a8495584db11",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDoxl1DQltif6jpYVMHv5CjzVE8iKe1oC/N3lhdOoyuEQIhANj5YT2tcKqg2e+PO9O2s7m5syOgmRLp4qEaivf/CHzz"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.18.tgz",
+     "unpackedSize": 905946
+    },
+    "gitHead": "d9d0803c29377d581150d5d48613655acdb1b1ae",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.18"
+   },
+   "0.9.19": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.19",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.19_1787919945027_0.6020768330308228"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.2.0",
+     "esbuild": "0.28.2",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.12",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-mWbs2npUtxBVSDF1qpkxmkooNOrzEzTxgWs4P85tpzh8HZQjpQ3KJ2RV1SCSOhpCJkgZCnpCX2Ca4PRj36T1tA==",
+     "shasum": "044a2f8ee594c2ec4b877f84e5fa7906507891fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIC8Z/iphwBGHT4iGL0vk+nNB4ML3iCsoXdEJzPSmLv55AiEA3kX/J2TjkxzDQDnj/3KPfLadXLKkj+/cjc77/7uw+p0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.19.tgz",
+     "unpackedSize": 910563
+    },
+    "gitHead": "6af4f70f693505a57981e593a107a284fd4f38de",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.19"
+   },
+   "0.9.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.2_1786502457869_0.07718450366764595"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-6JXQ6CNrNNstmaSDFOojqT8rWXfOKlXbBschjSWm7ViNyonv2PhTbmoVma7WxERTE0FPC5YZh+xQCfB28I/8Mw==",
+     "shasum": "6e4c3c8ed658326d226dfd43f4d7c6a8a5d4a49b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDIoQbtfnqczfDLEyNjE5DPJqcevGMin1pZjWPpGJIqIAiBgA5ssluHXkVc6Oh7Recf072cpsfdFPKapjUQP6ddX1g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.2.tgz",
+     "unpackedSize": 726867
+    },
+    "gitHead": "c242f1a8ab79c4e035417c0a1c178efdd245822e",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.2"
+   },
+   "0.9.20": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.20",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.20_1788409158655_0.4311324154152856"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.2.0",
+     "esbuild": "0.28.2",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.12",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-IPHzQ7mdmgIi2hVGcz2R861lNbnSaG5bLUI2aA+3KMVw3Mhv5gwG1//V+Plrd6We331UGYLyQkeMKaj9HQrFag==",
+     "shasum": "5febc4b40f2f877016684d11123b2de6df653cd5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCg++UjYeiY+LPN74rmPAIUEk6+jlMfi5PQ4p1OpebT2AIgPv1CYRGW7rkG21+d9cZYUcbjtK3aK3/EngRtXLx8VEw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.20.tgz",
+     "unpackedSize": 911718
+    },
+    "gitHead": "dbe18496fa0468190e1c295ece6fa02cac6c02e0",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.20"
+   },
+   "0.9.21": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.21",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.21_1788447359415_0.2341127249922148"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.1",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.2.0",
+     "esbuild": "0.28.2",
+     "qrcode-generator": "2.0.4",
+     "tsx": "^4.23.12",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-fDZWPgBCIDCc6tRAXCt/vD/s8so/zqsgMB+NIiatsMuhpF8hAOO5ICjcAQfEooqQ505v5/+r/QTPVfV0XvTTVQ==",
+     "shasum": "dfcbc05790f0558aab9cc00a54bef7b850c1bbf0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFezrrBJh+craLmBnIYB1bPAbx6NZSUwWNU4a4PpedRyAiEA0QatXbMDETVoPK3HMjD5ufxPAz2YFpMONYGm+gjMx9Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.21.tgz",
+     "unpackedSize": 912396
+    },
+    "gitHead": "68fbe547a76415838dc3b2899fa368fc91ee4d77",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "check:ui-fresh": "npm run build:ui && node scripts/check-ui-fresh.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run check:ui-fresh && npm run type-check && npm test && npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.views.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.21"
+   },
+   "0.9.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.3",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.3_1786507715810_0.38588668833336315"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-dfU6EOdUYvVC5vEV46w5IvAM8U+G9Q5r6uWPNrxyqoJLrC02PO4MkQboRja2iMaKv13qlleeHvfxKhAKpgYcyA==",
+     "shasum": "55214581b4cb108950550fb130e3742160b70183",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDs9KjzVHFOUl1FxIRXm/NiZjS1X4zG57dgQR3JyHGz3QIhAM20tLWu1UUuXIag2PEYKPq7hyRo0kShqG8liPDKv5YN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.3.tgz",
+     "unpackedSize": 728576
+    },
+    "gitHead": "ce12b6d61e5340b779ab3ffe5824eb294e2d391e",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.3"
+   },
+   "0.9.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@clearlist/mcp-server@0.9.4",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.4_1786834417202_0.10871274043317158"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f0a5e637-74e0-49da-87ec-786b76e238f1"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "bin": {
+     "clearlist": "dist/cli.js",
+     "clearlist-mcp-server": "dist/index.js",
+     "mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Cuneiform-LLC/clearlist-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.30.0",
+     "zod": "4.4.3"
+    },
+    "description": "ClearList MCP Server \u2014 AI agent interface to the ClearList API",
+    "devDependencies": {
+     "@modelcontextprotocol/ext-apps": "1.7.5",
+     "@types/node": "^26.1.2",
+     "esbuild": "0.28.1",
+     "tsx": "^4.23.7",
+     "typescript": "^7.0.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-Eh5/JuCWQocBh6rDQIOrwk6TyFc+4bPxUVZRiqBi21xyNYB0L6WSLYvmZ7YEbFsYX7PHJI4quRtbVsrYSGwYBA==",
+     "shasum": "259e8a1d8cdf20727ed0e1c905b76500aef75b1b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDEnGorSdZL1vS+R/OTdrbWddAGiQGDTs+v3OaZ7DwF3AiEAiK7TkKnb0NX6m00OUFC08ed5SftXiSuqZQog/J1utYc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@clearlist/mcp-server/-/mcp-server-0.9.4.tgz",
+     "unpackedSize": 768502
+    },
+    "gitHead": "90c247ec2e065e7f388294aa2f14922c76e7b933",
+    "homepage": "https://clearlist.me/developers",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "ai",
+     "agents",
+     "cli",
+     "clearlist"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e4aab33381ef]",
+      "name": "amerarab"
+     }
+    ],
+    "mcpName": "io.github.Cuneiform-LLC/clearlist",
+    "name": "@clearlist/mcp-server",
+    "overrides": {
+     "@protobufjs/utf8": ">=1.1.1",
+     "brace-expansion": ">=1.1.12 <2 || >=2.0.2 <3",
+     "fast-uri": ">=3.1.4 <4 || >=4.1.1",
+     "protobufjs": ">=7.5.8 <8",
+     "uuid": ">=11.1.1 <12",
+     "ws": ">=8.20.1"
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/Cuneiform-LLC/clearlist-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "build:ui": "node src/ui/build-ui.mjs",
+     "dev": "tsx src/index.ts",
+     "postbuild": "node -e \"try{const{chmodSync}=require('fs');chmodSync('dist/index.js',0o755);chmodSync('dist/cli.js',0o755)}catch(e){}\"",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "type-check": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.4"
+   }
+  }
+ },
+ "name": "@clearlist/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@clearlist%2Fmcp-server"
+}

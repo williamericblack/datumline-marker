@@ -1,0 +1,2639 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.27.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:250be44a4fc2]",
+    "name": "superworldsavior"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.13.0",
+   "0.14.0",
+   "0.15.0",
+   "0.15.1",
+   "0.16.0",
+   "0.16.1",
+   "0.17.0",
+   "0.17.1",
+   "0.17.2",
+   "0.17.3",
+   "0.17.4",
+   "0.17.5",
+   "0.17.6",
+   "0.17.7",
+   "0.18.0",
+   "0.19.0",
+   "0.2.1",
+   "0.20.0",
+   "0.21.0",
+   "0.21.1",
+   "0.22.0",
+   "0.23.0",
+   "0.24.0",
+   "0.24.1",
+   "0.25.0",
+   "0.26.0",
+   "0.26.1",
+   "0.27.0",
+   "0.8.0",
+   "0.8.1",
+   "0.9.0",
+   "0.9.1",
+   "0.9.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@casys/mcp-server",
+  "_rev": "37-a100bafc5bf3af7012ad1b49cf033ef6",
+  "bugs": {
+   "url": "https://github.com/Casys-AI/mcp-server/issues"
+  },
+  "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+  "dist-tags": {
+   "latest": "0.27.0"
+  },
+  "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "server",
+   "middleware",
+   "oauth",
+   "observability"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:250be44a4fc2]",
+    "name": "superworldsavior"
+   }
+  ],
+  "name": "@casys/mcp-server",
+  "readme": "# @casys/mcp-server\n\n[![npm](https://img.shields.io/npm/v/@casys/mcp-server)](https://www.npmjs.com/package/@casys/mcp-server)\n[![JSR](https://jsr.io/badges/@casys/mcp-server)](https://jsr.io/@casys/mcp-server)\n[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)\n\n**The \"Hono for MCP\"** \u2014 a production-grade framework for building Model Context\nProtocol servers in TypeScript.\n\nComposable middleware, OAuth2 auth, dual transport, observability, and\neverything you need to ship reliable MCP servers. Built on the official\n[`@modelcontextprotocol/server`](https://www.npmjs.com/package/@modelcontextprotocol/server)\nand\n[`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)\npackages.\n\n```\nrate-limit \u2192 auth \u2192 custom middleware \u2192 scope-check \u2192 validation \u2192 backpressure \u2192 handler\n```\n\n---\n\n## Why @casys/mcp-server?\n\nThe official SDK gives you the protocol. This framework gives you the production\nstack.\n\n|                             | Official SDK |       @casys/mcp-server        |\n| --------------------------- | :----------: | :----------------------------: |\n| MCP protocol compliance     |     Yes      |              Yes               |\n| Concurrency control         |      --      |   3 backpressure strategies    |\n| Middleware pipeline         |      --      |     Composable onion model     |\n| OAuth2 / JWT auth           |      --      |   Built-in + 4 OIDC presets    |\n| Rate limiting               |      --      |   Sliding window, per-client   |\n| Schema validation           |      --      |       JSON Schema (ajv)        |\n| Streamable HTTP (stateless) |    Manual    |    `startHttp()` / handler     |\n| OpenTelemetry tracing       |      --      | Automatic spans per tool call  |\n| Prometheus metrics          |      --      |      `/metrics` endpoint       |\n| MCP Apps (UI resources)     |    Manual    | `registerResource()` + `ui://` |\n\n---\n\n## Install\n\n```bash\n# Deno (primary target \u2014 JSR)\ndeno add jsr:@casys/mcp-server\n\n# Node (secondary \u2014 npm, native ESM build)\nnpm install @casys/mcp-server\n```\n\n## Runtime targets\n\n`@casys/mcp-server` is **Deno-first**. The canonical deployment path is Deno 2.x\nrunning on [Deno Deploy](https://deno.com/deploy) or self-hosted Deno, with a\nNode 20+ distribution as a secondary target. The npm package contains compiled\nESM JavaScript and TypeScript declarations; its runtime selector loads the Node\nHTTP adapter without evaluating the Deno adapter.\n\n| Runtime                                       |      Status      |\n| --------------------------------------------- | :--------------: |\n| **Deno 2.x** (Deno Deploy, self-hosted)       |    \u2705 Primary    |\n| **Node.js 20+** (Express, Hono-on-Node, bare) |   \u2705 Secondary   |\n| **Cloudflare Workers / workerd**              | \u274c Not supported |\n| **Browser / WebContainer**                    | \u274c Not supported |\n\nIf you need to target Cloudflare Workers or the browser, use\n[`@modelcontextprotocol/server`](https://www.npmjs.com/package/@modelcontextprotocol/server)\ndirectly with its workerd / browser shims \u2014 that package focuses on the protocol\nand runtime portability, while `@casys/mcp-server` focuses on the production\nstack (auth, middleware, observability, multi-tenant, MCP Apps helpers) for Deno\ndeployments.\n\n---\n\n## Quick Start\n\n### STDIO Server (5 lines)\n\n```typescript\nimport { McpApp } from \"@casys/mcp-server\";\n\nconst server = new McpApp({ name: \"my-server\", version: \"1.0.0\" });\n\nserver.registerTool(\n  {\n    name: \"greet\",\n    description: \"Greet a user\",\n    inputSchema: {\n      type: \"object\",\n      properties: { name: { type: \"string\" } },\n      required: [\"name\"],\n    },\n  },\n  ({ name }) => `Hello, ${name}!`,\n);\n\nawait server.start();\n```\n\nProvider repositories that expose a native stdio CLI should test their actual\ndocumented command, transport flags, protocol eras, stdout discipline, and EOF\ncleanup. Use the\n[native stdio provider testing guide](https://github.com/Casys-AI/mcp-server/blob/main/docs/guides/native-stdio-provider-testing.md)\nas a test-only adoption kit.\n\n### HTTP Server with Auth\n\n```typescript\nimport { createGoogleAuthProvider, McpApp } from \"@casys/mcp-server\";\n\nconst server = new McpApp({\n  name: \"my-api\",\n  version: \"1.0.0\",\n  maxConcurrent: 10,\n  backpressureStrategy: \"queue\",\n  validateSchema: true,\n  rateLimit: { maxRequests: 100, windowMs: 60_000 },\n  auth: {\n    provider: createGoogleAuthProvider({\n      audience: \"https://my-mcp.example.com\",\n      resource: \"https://my-mcp.example.com\",\n    }),\n  },\n});\n\nserver.registerTool(\n  {\n    name: \"query\",\n    description: \"Query the database\",\n    inputSchema: {\n      type: \"object\",\n      properties: { sql: { type: \"string\" } },\n    },\n    requiredScopes: [\"db:read\"],\n  },\n  async ({ sql }) => ({ rows: [] }),\n);\n\nawait server.startHttp({ port: 3000 });\n// GET  /health   \u2192 { status: \"ok\" }\n// GET  /metrics  \u2192 Prometheus text format\n// POST /mcp      \u2192 JSON-RPC (tools/call, tools/list, ...)\n// GET  /mcp      \u2192 405 Method Not Allowed (stateless transport)\n```\n\nSee the\n[HTTP security guide](https://github.com/Casys-AI/mcp-server/blob/main/docs/guides/securing-your-http-server.md)\nto choose between a shared static allowlist, identity-aware static credentials,\nand OIDC/JWT.\n\n**Secure-by-default HTTP options:**\n\n```typescript\nawait server.startHttp({\n  port: 3000,\n  requireAuth: true, // fail fast if auth isn't configured\n  corsOrigins: [\"https://app.example.com\"],\n  maxBodyBytes: 1_000_000, // 1 MB\n  ipRateLimit: { maxRequests: 120, windowMs: 60_000 },\n});\n```\n\n**Notes:**\n\n- `requireAuth: true` throws if no auth provider is configured\n- `corsOrigins` defaults to `\"*\"` \u2014 use an allowlist in production\n- `maxBodyBytes` defaults to **1 MB** (set `null` to disable)\n- `ipRateLimit` keys on client IP by default\n\n---\n\n## Features\n\n### Middleware Pipeline\n\nComposable onion model \u2014 same mental model as Hono, Koa, or Express.\n\n```typescript\nimport type { Middleware } from \"@casys/mcp-server\";\n\nconst timing: Middleware = async (ctx, next) => {\n  const start = performance.now();\n  const result = await next();\n  console.log(\n    `${ctx.toolName} took ${(performance.now() - start).toFixed(0)}ms`,\n  );\n  return result;\n};\n\nserver.use(timing);\n```\n\nBuilt-in pipeline:\n`rate-limit \u2192 auth \u2192 custom \u2192 scope-check \u2192 validation \u2192 backpressure \u2192 handler`\n\n### OAuth2 / JWT Auth\n\nFour OIDC presets out of the box:\n\n```typescript\nimport {\n  createAuth0AuthProvider, // Auth0\n  createGitHubAuthProvider, // GitHub Actions OIDC\n  createGoogleAuthProvider, // Google OIDC\n  createOIDCAuthProvider, // Generic OIDC (Keycloak, Okta, etc.)\n} from \"@casys/mcp-server\";\n\nconst auth0 = createAuth0AuthProvider({\n  domain: \"my-tenant.auth0.com\",\n  audience: \"https://my-mcp.example.com\",\n  resource: \"https://my-mcp.example.com\",\n  scopesSupported: [\"read\", \"write\"],\n});\n```\n\nOr use `JwtAuthProvider` directly for custom setups:\n\n```typescript\nimport { JwtAuthProvider } from \"@casys/mcp-server\";\n\nconst provider = new JwtAuthProvider({\n  issuer: \"https://my-idp.example.com\",\n  audience: \"https://my-mcp.example.com\",\n  resource: \"https://my-mcp.example.com\",\n  authorizationServers: [\"https://my-idp.example.com\"],\n});\n```\n\nToken verification is cached (SHA-256 hash \u2192 AuthInfo, TTL = min(token expiry,\n5min)) to avoid redundant JWKS round-trips.\n\n### YAML + Env Config\n\nFor binary distribution \u2014 users configure auth without code:\n\n```yaml\n# mcp-server.yaml\nauth:\n  provider: auth0\n  audience: https://my-mcp.example.com\n  resource: https://my-mcp.example.com\n  domain: my-tenant.auth0.com\n  scopesSupported: [read, write, admin]\n```\n\nEnv vars override YAML at deploy time:\n\n```bash\nMCP_AUTH_AUDIENCE=https://prod.example.com ./my-server --http --port 3000\n```\n\nPriority: `programmatic > env vars > YAML > no auth`\n\n### MRTR requestState replay protection\n\nWhen a tool returns `resultType: \"input_required\"`, configure a signing key so\nthe framework can bind the continuation to the principal, method, arguments,\nexpiry, and a random nonce:\n\n```typescript\nconst server = new McpApp({\n  name: \"my-api\",\n  version: \"1.0.0\",\n  mrtr: {\n    signingKey: Deno.env.get(\"MCP_MRTR_SIGNING_KEY\"),\n  },\n});\n```\n\nEach verified nonce is consumed before the handler runs. With no explicit\n`replayStore`, the built-in `MemoryMrtrReplayStore` rejects a second use within\none continuously running process.\n\nMulti-instance or restart-safe deployments must inject one durable atomic store\nshared by every instance:\n\n```typescript\nimport type { MrtrReplayStore } from \"@casys/mcp-server\";\n\nconst replayStore: MrtrReplayStore = {\n  async consume(nonce, expiresAt) {\n    // Atomically reserve the nonce until its signed expiry.\n    // Redis equivalent: SET mrtr:<nonce> 1 NX EXAT <expiresAt>\n    return await reserveNonce(nonce, expiresAt);\n  },\n};\n\nconst server = new McpApp({\n  name: \"my-api\",\n  version: \"1.0.0\",\n  mrtr: {\n    signingKey: Deno.env.get(\"MCP_MRTR_SIGNING_KEY\"),\n    replayStore,\n  },\n});\n```\n\n`consume()` must return `true` only for the caller that wins the atomic\nreservation, `false` for a nonce already consumed, and throw when the store is\nunavailable. Store failures are fail-closed; the handler is not executed.\n\nThis is at-most-once admission, not exactly-once completion. If business logic\ncommits and the response is lost, replaying the same token is rejected.\nReturning the prior result safely requires a separate idempotency/result ledger,\nideally paired with idempotency support in the downstream system.\n\n### RFC 9728\n\nWhen auth is configured, the framework automatically exposes\n`GET /.well-known/oauth-protected-resource` per\n[RFC 9728](https://www.rfc-editor.org/rfc/rfc9728).\n\n### DCR Discovery Proxy (RFC 8414 + RFC 7591)\n\nIdPs without native Dynamic Client Registration (Zitadel, unconfigured Keycloak,\nOkta free tier) don't publish `registration_endpoint` in their AS metadata, so\nMCP clients like Claude.ai or Cursor can't auto-register.\n\n`createAsMetadataHandler` is a framework-agnostic Web Standard handler that\nproxies the upstream RFC 8414 metadata and injects a `registration_endpoint`\npointing to your own DCR proxy:\n\n```typescript\n// routes/.well-known/oauth-authorization-server.ts (Fresh example)\nimport { createAsMetadataHandler } from \"@casys/mcp-server\";\n\nconst handle = createAsMetadataHandler({\n  upstreamIssuer: \"https://my-tenant.zitadel.cloud\",\n  registrationEndpoint: \"https://my-app.example.com/oauth/register\",\n  // cacheTtlMs?: 24h default, stale-while-revalidate\n  // extraFields?: override scopes_supported, etc.\n});\n\nexport const handler = { GET: (ctx) => handle(ctx.req) };\n```\n\nThen point the PRM at your own host so clients hit the enriched metadata:\n\n```typescript\nauthorizationServers: [\"https://my-app.example.com\"],\n```\n\nThe DCR endpoint itself (RFC 7591 `/oauth/register`) is out of scope \u2014 mount it\nin your framework and forward to the IdP's admin API.\n\n**Path caveat**: if the MCP server lives at `/mcp`, clients may build the\ndiscovery URL as `<host>/.well-known/oauth-authorization-server/mcp`. Mount the\nhandler at the exact path your PRM advertises.\n\n### Observability\n\nEvery tool call emits an **OpenTelemetry span** with rich attributes:\n\n```\nmcp.tool.call query\n  mcp.tool.name       = \"query\"\n  mcp.server.name     = \"my-api\"\n  mcp.transport        = \"http\"\n  mcp.session.id       = \"a1b2c3...\"\n  mcp.tool.duration_ms = 42\n  mcp.tool.success     = true\n```\n\nEnable with Deno's native OTEL support:\n\n```bash\nOTEL_DENO=true deno run --unstable-otel server.ts\n```\n\nThe HTTP server exposes a **Prometheus-compatible** `/metrics` endpoint:\n\n```\nmcp_server_tool_calls_total 1024\nmcp_server_tool_calls_success_total 1018\nmcp_server_tool_calls_failed_total 6\nmcp_server_tool_call_duration_ms_bucket{le=\"50\"} 892\nmcp_server_tool_call_duration_ms_bucket{le=\"100\"} 987\nmcp_server_tool_calls_by_name{tool=\"query\",status=\"success\"} 512\nmcp_server_active_requests 3\nmcp_server_uptime_seconds 86400\n```\n\nProgrammatic access:\n\n```typescript\nserver.getServerMetrics(); // Full snapshot (counters, histograms, gauges)\nserver.getPrometheusMetrics(); // Prometheus text format string\n```\n\n### Concurrency Control\n\nThree backpressure strategies when the server is at capacity:\n\n| Strategy          | Behavior                                   |\n| ----------------- | ------------------------------------------ |\n| `sleep` (default) | Busy-wait with configurable sleep interval |\n| `queue`           | FIFO queue with ordered release            |\n| `reject`          | Fail fast with immediate error             |\n\n```typescript\nnew McpApp({\n  maxConcurrent: 10,\n  backpressureStrategy: \"queue\",\n});\n```\n\n### Rate Limiting\n\nSliding window rate limiter with per-client tracking:\n\n```typescript\nnew McpApp({\n  rateLimit: {\n    maxRequests: 100,\n    windowMs: 60_000,\n    keyExtractor: (ctx) => ctx.args.clientId as string,\n    onLimitExceeded: \"wait\", // or \"reject\"\n  },\n});\n```\n\nFor HTTP endpoints, use `startHttp({ ipRateLimit: ... })` to rate limit by\nclient IP (or custom key).\n\n### Security Best Practices (Tool Handlers)\n\nTool handlers receive **untrusted JSON input**. Treat args as hostile:\n\n- **Define strict schemas**: `additionalProperties: false`, `minLength`,\n  `pattern`, `enum`.\n- **Never pass raw args to a shell** (`Deno.Command`, `child_process.exec`). If\n  you must, use an allowlist + argv array (no shell).\n- **Validate paths & resources**: allowlisted roots, deny `..`, restrict env\n  access.\n- **Prefer safe APIs**: parameterized DB queries, SDK methods, typed clients.\n- **Log sensitive actions**: file writes, network calls, admin ops.\n\n### MCP Apps (UI Resources)\n\nRegister interactive UIs as MCP resources:\n\n```typescript\nimport { MCP_APP_MIME_TYPE, McpApp } from \"@casys/mcp-server\";\n\nserver.registerResource(\n  { uri: \"ui://my-server/viewer\", name: \"Data Viewer\" },\n  async (uri) => ({\n    uri: uri.toString(),\n    mimeType: MCP_APP_MIME_TYPE,\n    text: \"<html><body>...</body></html>\",\n  }),\n);\n```\n\nHandlers return one payload form: `text` (including HTML) **or** `blob` for\nbinary content encoded as standard padded base64. Existing text handlers remain\nvalid. The framework also checks at runtime that the response URI exactly\nmatches the requested URI and that the MIME type is non-empty, which protects\nJavaScript and unchecked TypeScript handlers as well as typed callers.\n\n```typescript\nserver.registerResource(\n  { uri: \"file://reports/latest.pdf\", name: \"Latest report\", size: 184_320 },\n  async (uri) => ({\n    uri: uri.toString(),\n    mimeType: \"application/pdf\",\n    blob: await loadReportAsCanonicalBase64(),\n  }),\n);\n```\n\n`size` is optional resource metadata shown in `resources/list`; when present it\nmust be a non-negative safe integer and is verified on every read against the\nexact UTF-8 byte length of `text` or decoded byte length of `blob`. Supplying\n`mimeType` in the resource metadata likewise binds every response to that exact\nMIME type. If it is absent, it is absent from `resources/list`; the handler\nstill declares the MIME type when it serves the bytes. Resource content may\ninclude `_meta`. Put `annotations`, `icons`, `title`, and resource `_meta` on\nthe `MCPResource` registration, where MCP defines those fields.\n\nWith `resourceCsp`, CSP injection applies only to the `text` branch of an HTML\nresource. Blobs are never decoded, transformed, or re-encoded.\n\nRegister resources before `start()` / `startHttp()` to install the resource\nhandlers and advertise `resources: { listChanged: true }`. They can then be\nadded or removed at any time through `unregisterResource(uri)`, which returns\n`true` only once. For a registry that starts empty and discovers resources\nasynchronously, construct with `expectResources: true`; that mode installs the\nsame handlers at construction time:\n\n```typescript\nconst app = new McpApp({\n  name: \"relay\",\n  version: \"1.0.0\",\n  expectResources: true,\n});\n\n// After start(): list/read/templates handlers are already installed.\napp.registerResource(resource, handler);\napp.unregisterResource(resource.uri); // true, then false if called again\n```\n\n#### Capability negotiation (clients that don't support MCP Apps)\n\nNot every MCP client renders UI resources. Clients that do advertise the\n[MCP Apps extension](https://github.com/modelcontextprotocol/ext-apps) in their\ncapabilities (per the SDK 1.29 `extensions` field). Read it from a tool handler\nto decide between rich UI and a text-only fallback:\n\n```typescript\nimport { MCP_APP_MIME_TYPE, McpApp } from \"@casys/mcp-server\";\n\nconst app = new McpApp({ name: \"weather-server\", version: \"1.0.0\" });\n\napp.registerTool(\n  {\n    name: \"get-weather\",\n    description: \"Get the weather forecast for a city\",\n    inputSchema: {\n      type: \"object\",\n      properties: { city: { type: \"string\" } },\n      required: [\"city\"],\n    },\n  },\n  async ({ city }) => {\n    const forecast = await fetchForecast(city);\n    const cap = app.getClientMcpAppsCapability();\n\n    if (cap?.mimeTypes?.includes(MCP_APP_MIME_TYPE)) {\n      // Rich UI: small text summary + interactive resource\n      return {\n        content: [{ type: \"text\", text: `Forecast for ${city} loaded` }],\n        _meta: { ui: { resourceUri: `ui://weather/${city}` } },\n      };\n    }\n\n    // Text-only fallback for clients that can't render the UI\n    return {\n      content: [{ type: \"text\", text: formatForecastAsText(forecast) }],\n    };\n  },\n);\n```\n\n`getClientMcpAppsCapability()` returns `undefined` before the client has\ncompleted its initialize handshake, when the client doesn't advertise MCP Apps\nsupport, or when the advertised capability is malformed. The standalone\n`getMcpAppsCapability(clientCapabilities)` function is also exported for use\nagainst arbitrary capability objects.\n\nThe constants `MCP_APPS_EXTENSION_ID` (`\"io.modelcontextprotocol/ui\"`) and\n`MCP_APPS_PROTOCOL_VERSION` (`\"2026-01-26\"`) are exported for agents that need\nto introspect the protocol target directly.\n\n---\n\n## API Reference\n\n### McpApp\n\n> **Note:** `ConcurrentMCPServer` and `ConcurrentServerOptions` remain exported\n> as `@deprecated` aliases for backwards compatibility and will be removed in\n> v1.0. New code should use `McpApp` / `McpAppOptions`. The aliases point to the\n> exact same class \u2014 `instanceof` checks pass on both.\n\n```typescript\nconst server = new McpApp(options: McpAppOptions);\n\n// Registration (before start, unless expectResources: true)\nserver.registerTool(tool, handler);\nserver.registerTools(tools, handlers);\nserver.registerResource(resource, handler);\nserver.registerResources(resources, handlers);\nserver.unregisterResource(resourceUri); // safe before or after start\nserver.use(middleware);\n\n// Transport\nawait server.start();                  // STDIO\nawait server.startHttp({ port: 3000 }); // HTTP + SSE\nawait server.stop();                    // Graceful shutdown\n\n// Observability\nserver.getMetrics();              // { inFlight, queued }\nserver.getServerMetrics();        // Full snapshot\nserver.getPrometheusMetrics();    // Prometheus text format\nserver.getRateLimitMetrics();     // { keys, totalRequests }\n\n// Introspection\nserver.getToolCount();\nserver.getToolNames();\nserver.getResourceCount();\nserver.getResourceUris();\n```\n\n### Standalone Components\n\nEach component works independently:\n\n```typescript\nimport { RateLimiter, RequestQueue, SchemaValidator } from \"@casys/mcp-server\";\n\n// Rate limiter\nconst limiter = new RateLimiter({ maxRequests: 10, windowMs: 1000 });\nif (limiter.checkLimit(\"client-123\")) {\n  /* proceed */\n}\n\n// Request queue\nconst queue = new RequestQueue({\n  maxConcurrent: 5,\n  strategy: \"queue\",\n  sleepMs: 10,\n});\nawait queue.acquire();\ntry {\n  /* work */\n} finally {\n  queue.release();\n}\n\n// Schema validator\nconst validator = new SchemaValidator();\nvalidator.addSchema(\"tool\", {\n  type: \"object\",\n  properties: { n: { type: \"number\" } },\n});\nvalidator.validate(\"tool\", { n: 5 }); // { valid: true, errors: [] }\n```\n\n---\n\n## HTTP Endpoints\n\nWhen running with `startHttp()`:\n\n| Method | Path                                    | Description                                                 |\n| ------ | --------------------------------------- | ----------------------------------------------------------- |\n| `POST` | `/mcp` or `/`                           | JSON-RPC endpoint (initialize, tools/call, tools/list, ...) |\n| `GET`  | `/health`                               | Health check                                                |\n| `GET`  | `/metrics`                              | Prometheus metrics                                          |\n| `GET`  | `/.well-known/oauth-protected-resource` | RFC 9728 metadata (when auth enabled)                       |\n\n---\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/Casys-AI/mcp-server.git"
+  },
+  "time": {
+   "0.10.0": "2026-03-20T08:40:10.141Z",
+   "0.11.0": "2026-03-20T08:45:59.306Z",
+   "0.12.0": "2026-03-22T03:35:51.007Z",
+   "0.13.0": "2026-04-08T02:35:36.063Z",
+   "0.14.0": "2026-04-08T02:49:45.227Z",
+   "0.15.0": "2026-04-11T08:15:47.990Z",
+   "0.15.1": "2026-04-11T09:25:07.962Z",
+   "0.16.0": "2026-04-11T11:15:56.780Z",
+   "0.16.1": "2026-04-11T11:52:36.081Z",
+   "0.17.0": "2026-04-11T12:44:29.911Z",
+   "0.17.1": "2026-04-16T02:32:20.521Z",
+   "0.17.2": "2026-04-16T05:57:18.247Z",
+   "0.17.3": "2026-04-16T08:28:52.306Z",
+   "0.17.4": "2026-04-16T11:48:35.884Z",
+   "0.17.5": "2026-04-16T11:59:49.381Z",
+   "0.17.6": "2026-06-03T09:44:59.395Z",
+   "0.17.7": "2026-06-03T10:03:54.479Z",
+   "0.18.0": "2026-06-03T10:17:24.112Z",
+   "0.19.0": "2026-06-29T06:00:57.559Z",
+   "0.2.1": "2026-02-24T01:30:44.432Z",
+   "0.20.0": "2026-06-29T15:02:16.902Z",
+   "0.21.0": "2026-06-30T03:39:03.633Z",
+   "0.21.1": "2026-07-16T03:19:32.164Z",
+   "0.22.0": "2026-07-21T03:54:30.871Z",
+   "0.23.0": "2026-07-30T08:56:49.300Z",
+   "0.24.0": "2026-07-30T14:22:59.812Z",
+   "0.24.1": "2026-07-31T02:20:34.806Z",
+   "0.25.0": "2026-08-08T04:31:17.929Z",
+   "0.26.0": "2026-08-11T11:27:07.411Z",
+   "0.26.1": "2026-08-20T16:38:32.382Z",
+   "0.27.0": "2026-08-28T03:54:48.099Z",
+   "0.8.0": "2026-02-24T01:18:40.224Z",
+   "0.8.1": "2026-02-24T01:30:39.537Z",
+   "0.9.0": "2026-02-24T02:01:55.565Z",
+   "0.9.1": "2026-03-16T07:10:04.830Z",
+   "0.9.2": "2026-03-17T06:54:52.651Z",
+   "created": "2026-02-24T01:18:39.964Z",
+   "modified": "2026-08-28T03:54:48.495Z"
+  },
+  "versions": {
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.10.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.10.0_1773996010003_0.816078612404286"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.4",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-cCdoLRSaFECriva7IYxnZRXVX1yWkP0kpk6hCiFGExiiwAry7V4rLw57D/2yUJKwJAwvQOf8dxdS+q/TOheYLw==",
+     "shasum": "b21538117370ba75b6d07dd9b69a95cc21ed63f1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC2IW38q2C7QntXCPVbr7jG9GsdzXzB/+N+aXIookx7bwIhAI/HA3PcBpP0nyj5Gfs32gG6o3F1XVlqKflk9LB/BPjp"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.10.0.tgz",
+     "unpackedSize": 202138
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "74f962fcb41ed5857a162d8082bc56fb311a4a45",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.11.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.11.0_1773996359157_0.14067991865694207"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.4",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-RxzW48429WpCv9x7HaDxij0DhqJxBZMKzuxEox086+Lj/Nrg4e03bqRpZq5W3mD9me/i0LwnaGzzG8pjUorFaw==",
+     "shasum": "b03668098bebca513cc8e15cd8e4dc57eba05939",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBVbNg9ldjAiZefraZPj8z2bCLPABi8jN9IvBNlUsXNzAiA198Tnt9RUNwjf49zQiHb9QXepFvPkchHOVVe9jbYS9Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.11.0.tgz",
+     "unpackedSize": 202138
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "88c633f92354af753054ca4b76b9149f88374cca",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.12.0",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.12.0_1774150550815_0.9473183119830444"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.4",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-CIBY8QxswEfb747jYNI56PXIEM9oK7JTjsPE4JeCP80EmXgUqyoH84H3wVAezc9O/SblCw46t3Ow/flCrEYHxw==",
+     "shasum": "6f8bdf1422105e177f34febefa26409125431930",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC3oSXk12Pxcs047B/sN14r++JtJF7cpZA/GhzIH9vxUwIgH5W2hKEG/6rTj8uc9C2EHqGEyLExvJlurSq0zjtp4rU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.12.0.tgz",
+     "unpackedSize": 208399
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "22b9bd9802cedd222468d51983a34140724c7330",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.12.0"
+   },
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.13.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.13.0_1775615735913_0.865856401277914"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-97EnnqKj4Lf8y95DqIO6x02ux9Jx3PN5pPr9ZaRz8kQ+YsAZ0B1k5FHE95u6q4wwmQRW3v2ylhw3MrXjBXr8yw==",
+     "shasum": "805456858b4c654d855280e93398dbe75145283a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDnhcqMdtDxj51obkdXE2k5ZBopPS/AUt3L21vvnWpR4AIgEYKckQUsCmh5F/KvCNs/U3/KYb1UOK8/HTmXLXmMXCI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.13.0.tgz",
+     "unpackedSize": 223888
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d17c0353faa7d4823a6b51416176d2354ad3cc9d",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.13.0"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.14.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.14.0_1775616585073_0.1037907923201038"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-dQIJKUmoMaNmWlN63IIQA32jgInZfq3ZZ4NeZpeJE2XEi4CQ5Lq0Xpv9AEaVCF0jEoCV+GOERSLxQUCV9q5Log==",
+     "shasum": "82f59a6553af967024248479671c607d1b8310e9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCF8vQ1QEzm+PuLnVn+XsXk6+0EJYihYSF7nk7rUWrRGQIgbSQZLy7AH+iBdrm3PLUFi2eUYL6bTVqFxB9aRwe4IBk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.14.0.tgz",
+     "unpackedSize": 231626
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d562b46ab3b63353d70e08e95743b0bebfccd16b",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.14.0"
+   },
+   "0.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.15.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.15.0_1775895347843_0.1399474001815817"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-ASTZ3bK6t1aQfrAPAfFn6So5XZy5I1Y/1Sxywdl06wcmA0qllAU1YOWXGGFpaIkUTcL9TqoFGwVHL4HqPgtqwA==",
+     "shasum": "607e04f0aec3936ebd60a9586388e93c40f9ba25",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIG3YKSAbWrYzxer6q1V7sPU+PNgrcVpqnYe3iciQWkpYAiBZZs+AYA2D6HAYFDRLhle1W9S7V1fb+VhASAHvBuFAaQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.15.0.tgz",
+     "unpackedSize": 238444
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2bd90dfeb84316521b198e6dd05eb3341e176d85",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.15.0"
+   },
+   "0.15.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.15.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.15.1_1775899507792_0.7345070181260647"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-fRYF2UlsLgIwtHEaDRRsBodAwCWxriCqgOxtdhKaSg7gpbmJt6Sabq+K7aOj+9bdKrEA8ZDNFIb1O49JvA9kWA==",
+     "shasum": "3481056df4b99859e2ff823a3572b8151aa8169e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBnhfnglu2ufwZlT+HLaJYCEeZW2ahpPZb18+iysNSl6AiAjfoNRjcqEnqPX4fOBG+5MIZowvfpxN6rDkWvg6V8xjw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.15.1.tgz",
+     "unpackedSize": 242118
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2dc9f1a0d8044419afa663596b159a1b6de3344a",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.15.1"
+   },
+   "0.16.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.16.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.16.0_1775906156634_0.4825293223351499"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-ulhkrJz7ISKvNGQcvQCxw6IeW6NEEqvJRcqorGxebAmLZGwMlyRD7C1/ipw0+nbT2txAdI1/4vCEw1ZaGaVUbQ==",
+     "shasum": "b42ea4db360a53dc457fbe270bed4014edb5176a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCs/6f8VO0+0QjUnto0NAPzj0zOeCh7Mr2SbKELHPXHqQIgc8tGHDOBK8fs4jmkh9pCA80dcVTh4LLGyqRGdUug0cA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.16.0.tgz",
+     "unpackedSize": 251538
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "6a3b15c7670744a851202e81445a0897a38bd9c0",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.16.0"
+   },
+   "0.16.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.16.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.16.1_1775908355935_0.305538511161338"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-mI2JDenuueOb35CfkRv1HFk7LFNKY8nbOUgFTcaQjmZLC4dKJMsVwVKgHDPPjrEs1nIavxsVsKoa0ochY81B0w==",
+     "shasum": "79cd0be9b601e3980853b8fa02887c3b98665c0a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD6zD3tG4Ho/E1czJnYW7vMO2+aRjfi1gSExUibkhA1rQIgZ0CZ5+r1KyRhWFDN5/Gl1xD/AGqMdgoRWPRuJFZ4sbY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.16.1.tgz",
+     "unpackedSize": 252223
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "5ad201540067905b35e3da6b68c42b86b87b0d42",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.16.1"
+   },
+   "0.17.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.0_1775911469765_0.9290000874147646"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-EoDuDrYcnrkbo/oyi6rcd3uv+kjrSqw+CBaA+/eB3x+QjbiPW97PtZKwGJtkRLhtdn38nGwS8qHvRZjMVBEeEg==",
+     "shasum": "117afaa5c8183b350681223de036a9d3279aaefb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHzrjo0BZa1Nq4PcRKErJsCaeltZ2M5qNZBld+6Oh0dhAiAS5ToKFf0sAAy4MsgSkMOWlnG32AE1ianw219NfRkINA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.0.tgz",
+     "unpackedSize": 262325
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "eb9cad46029735f63c80c35cabd53dfaf33284f5",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.0"
+   },
+   "0.17.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.1_1776306740351_0.15989267039672428"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-bo11Ep9OdZjAZhSPLbrubmLS6a47nPanTBUMrUIaLONtT9MswsSMB/waKiWSszSQTwhzwDXR1OIEDGjZMAFBNA==",
+     "shasum": "7a237d24b46e227fae981cdfcb9ba5df4acf4bf0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCOjGEmxyMDFyL3gWYVuat/UO0dALvkHqSZuEkDL28Z6QIgcBvwM9QZYp/kUbxMxWGDJXu9RLtCd8vOTi062cPJSRY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.1.tgz",
+     "unpackedSize": 272116
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "7e3bd41de5c69a43c6783b82d928a67bd5e0f77b",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.1"
+   },
+   "0.17.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.2_1776319038073_0.8597345487945411"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-bclCWqpW38M4Bnj/PWIlAS6R/VjAaFqV5yf4lLzqtHB2jvWU321b2e+gLcJlCsL/8CaZC/4Wi6v5Mb44jsxeEQ==",
+     "shasum": "eeec23ed9e46a08351c3b9f8dd29478e0d53c7e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAuxrodec1l58U3Pa+zqjn+xtzliz0qhbKFa6Bsmm4btAiEA3Vjx8e8ash3Q8oyku9CALZnSWl7DqU8/QyYRAtOjOHY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.2.tgz",
+     "unpackedSize": 272639
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d93a8340a98511f917d3a1f4858315c26fbc14bd",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.2"
+   },
+   "0.17.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.3",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.3_1776328132168_0.6176100854866831"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-YrAwSKkHIORnlYmLwKuREharKyj628Otp7Yui91V3k0QtgP1IALVzH1d6+JibajZWFsGdZS8VnornjZYugHPOw==",
+     "shasum": "c1515dc07741ae98379933ff081371813aa70b7d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICJyxOSOtLcA71Fa9791L17K/4XslIMCUmSCI4jHhYx6AiEAv6SmeN/A+9KlTVQa93o8NXy9XD54Foq3T7hNhkbwUL4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.3.tgz",
+     "unpackedSize": 273474
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "ed38620362ee63257fcda4cefa4d5f2af17c08e2",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.3"
+   },
+   "0.17.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.4",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.4_1776340115755_0.2944554646482802"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-hSPYyHx16Bh8bWbkg6uig685axY8P6FRmlo3OdctVVrdFliINS6HxXhVMo3hpR6IfLPTFe28SSOHbu3uDzNfAQ==",
+     "shasum": "120504f3f9eebe5f1fec4df2979336076b9837cd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGVvsyyom14FDoHo6YTVbFJUwl2IPcOEmCIrPTrrdnYPAiEAyumiBIBq63242P3nEbSK7J+mwMlTdXzfQ5llvx4aot4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.4.tgz",
+     "unpackedSize": 274566
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "7ea2f14b71eae974f34804f9264a00bd4a11c099",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.4"
+   },
+   "0.17.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.5",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.5_1776340789221_0.03736505150253189"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-HQuQIwyFcbK2obEXsbBEhO2xVmc8Mu9xY56CqNWICLVRZPVgC3za8zJN9poTOchKxnN/W/q/u56QVS5bPorScQ==",
+     "shasum": "75bf2cc08d70f337383275767fef88b04237d59e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCfDwlIgDXA7jw/0fMChcoDElq0rjORq2VZD/td3bPRAAIhAJwN+ir6b1hWqoR9sRqwUYMUHDzkyFsHy3LRUm/PAgpB"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.5.tgz",
+     "unpackedSize": 274851
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "354f6065251a18692c130472fcb724c786829d35",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.5"
+   },
+   "0.17.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.6",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.6_1780479899240_0.6925269087560746"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@casys/mcp-compose": "^0.5.2",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 42,
+     "integrity": "sha512-di4zStqk3D6ijAm/uL0Dp8kID+2ZCHD3HNYosgXxC+epD7jteUwYcyKJsF+YmulQf9UbdYIqTJ5Axkt9E44nHg==",
+     "shasum": "bcb01b287c9ef066ca8f4ab27bd3b886c0d18b7b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFLC0k1xtK7wWRsxlQUMhi4QfktK5X5+e0FN7aYRRcuVAiEAtgD3/PJemNZxpBLzQMsg4BzNa1CI+Di3JXQCjOTSHlI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.6.tgz",
+     "unpackedSize": 357271
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "ecb7d49c005ddae16348c12a0d5aa0136700723a",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.6"
+   },
+   "0.17.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.17.7",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.17.7_1780481034332_0.7536537488536326"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@casys/mcp-compose": "^0.5.2",
+     "@modelcontextprotocol/ext-apps": "^1.7.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-GJSOrav6nnxIxYdPdgBPksS14wnUuREIFWUby74DNdQCxuc3AhL4HYeD+7YwdsJmzA2DfH9gG7NmOEzBHaZIqg==",
+     "shasum": "e5154cf34aeac3ae8fa18f2400d91358d491d330",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC7Cp1RoTfwErRe4Wd5BlB6og+c6amljhSdPIFp/IvLTAiBRoU1hj4O7IU06P2qgVuCYD290wvwaRtB9toTttpVSqw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.17.7.tgz",
+     "unpackedSize": 277646
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "139278e958deeaffd722d21b273890793b869ae1",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.17.7"
+   },
+   "0.18.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.18.0",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.18.0_1780481843941_0.13063338266323554"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 41,
+     "integrity": "sha512-DgPWI3F4eUIg2n+dof8iuXErsndLng767r+DGPO0OSVQblMQMdUxizkEZ0m0de2ITYDW8w2D3/ZJj/M6sYTz4w==",
+     "shasum": "9d8766d4a9eca7df785ba4d471e172b43711e212",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDx9om7Yf2P0+jOnffSmznnCaKC52jgEVZnywalUm5XAAiEAh11eRKlKEHJpgj8oF6Ky7+3qJIYS+lSHMrtIOsXKzvY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.18.0.tgz",
+     "unpackedSize": 277727
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "6daf9fd402356942e2a61aee4ccb42ab6fec3c62",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.18.0"
+   },
+   "0.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.19.0",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.19.0_1782712857404_0.803838451533365"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.1",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-VFqwteW6WZjRXtwjBycrTsloyXJQ9sXavgEzX0F4IOqYIclwTxGpdRQwoF/Qaw7TFk6LDsGKCB82C013wPGJXw==",
+     "shasum": "56f179302359839756eddfecf36f96a3441c9ee9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEOJVFQ//cPOK/0dCthoaTQ7rrrzT1FBBsc93uC28uP/AiBEBQJZvyJOx8DwZEgKbyw58WNDku5tO9ZTBBZfem0rvA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.19.0.tgz",
+     "unpackedSize": 294314
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "f1ad12c71c92abaf46e269ece8fe5a5c3fd2bf2f",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.19.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.2.1",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1771896644280_0.5771018072469218"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "deprecated": "Published by mistake, use 0.8.x",
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-oLZw2SPJM4YpLUYJIDA+05YD5FXTDB+VxDdkSrepQ7Qt7loU+ROSBdcyc7AhSlxYjjCgt/rBZXuBOLJmkzlYng==",
+     "shasum": "20f77f0deecfb5f5ec2f09f9d083ce34d346c0d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC34i7R74F5iloGDuzRIt5UeYYLf3T/Yu5YQ+qySVDm0wIgHaMir+5ioMvrc5p6tRIxgH0u8reCyb1uXnUmN9P1Uwg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 177132
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d5921d9ca44a615e151b9e1b61da4bb7384e99a1",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.2.1"
+   },
+   "0.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.20.0",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.20.0_1782745336742_0.6496107245687581"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-Y5y4tCFIkW3jY3Z7eCKF/dAMHxG87VvjyM4Wn2hqmt1zr0TdZDJ45M+1AbrmKsCCOVWDzuzftOY3d/VQvMYqOQ==",
+     "shasum": "f93837939bc0fbb92cef183cf207564b89f2294b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCYOxQoytbkbSYaLpkwwODqZhjPCtFSl0LtNxviISrVAgIhAOZXzvxQDVskNAZxc1mQpZucOYyWf5pWBtVjbJcI5SzR"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.20.0.tgz",
+     "unpackedSize": 302472
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "145530b208d9f1bdc72d948525f122619f0b372d",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.20.0"
+   },
+   "0.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.21.0",
+    "_nodeVersion": "25.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.21.0_1782790743444_0.9270671787301434"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.11.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 43,
+     "integrity": "sha512-I8/s4R2USCuPpfUW+9kylGdKfjfTEMv7/7YqO2PYl4TKzD8/wgxboseiFeP61xZaqHje1EBJSfChUcr0hQI/+Q==",
+     "shasum": "115bf1072875c18da10ba7a218d18acf1e440f90",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDNL15svFEsTxyN0QRDhsFzJrtgVR0paOTcmk6H2GN0aAIgaQKJ6+yZul4IVY5kr88ncRVDINRCWBcs7CLzRSptsso="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.21.0.tgz",
+     "unpackedSize": 307771
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "29b6a786fec128c8b011907c35dd141b1b3bbf93",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.21.0"
+   },
+   "0.21.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.21.1",
+    "_nodeVersion": "26.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.21.1_1784171972015_0.9128794786648939"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 45,
+     "integrity": "sha512-lj9P9HT9Is7mIOOq7wRQasN2aB7zW3Za7dI7XVxZwsWIbNlemkKSQ66cKlbK1aBZTqj4RDg4Z/CFluCB3042cg==",
+     "shasum": "58ae6778242c05683b29504c5198deced486cd69",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGtjVF2MKiNjifhPkKpFnKdRbFW0RP4AE0rjGCa7rNOzAiBbd7oKZwCX8lBN9iq2h9j6krDJSlRX3qK0+x7JqOXrCQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.21.1.tgz",
+     "unpackedSize": 313723
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "a076de7187d22f84952add29490523c464ecaf71",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.21.1"
+   },
+   "0.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.22.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.22.0_1784606070718_0.5484056559344284"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-FsyXDLoaP4Ne6e+l2m+nh1Ji966EU/mD+Y4HrJNWB6shbJKbBHl7S0Xea8NoiS68XHl+BWrazg0+5ChsJTSCGw==",
+     "shasum": "c33de23e29b0aacb68239727fb11fd7664c482eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAUaGIk9g/I8mM2ASsin3qaBBdtqKeHUmIGkWFPrKIXKAiBN02xqdC2SKP3kkzpu2vIjFZtcY7m7ZRHfzE8S623gkQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.22.0.tgz",
+     "unpackedSize": 321714
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "c98d40fea56c31451fe91e20ef75308d03e6b1c5",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.22.0"
+   },
+   "0.23.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.23.0",
+    "_nodeVersion": "26.5.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.23.0_1785401809115_0.006256851557927101"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "11.17.0",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-hzCF4qZIjMPy4Dz25XnTcl+cAhLC/StF9kFniViWiavBGySCFOxq85Ap/SK0IJ/60gtuA30XZq/Y+RVpQzVxpg==",
+     "shasum": "10cd5e2f18fd3a0a826f8f75f092987ffc7fba63",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAjIkPN1arOzxsuUj1mDGUeQfDqHFUb7TqLQ/zrya99hAiAcXzq/Fzyf8jq2jjP+BwbhKJako3hw8sb3KLa6ScT8dQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.23.0.tgz",
+     "unpackedSize": 536548
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "8c900ced0cf636dfc6e031729631076499d6f80f",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.23.0"
+   },
+   "0.24.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.24.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.24.0_1785421379641_0.42262246249635704"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 56,
+     "integrity": "sha512-bAObaov2lh0knU/XvcPaM4T7ldvKXapCveh8kQswLkUcYLaLtfnfPZVBNpKLUegxGY/eP/U3VVQNrRgWMGFNwA==",
+     "shasum": "d3bbaf5579256227ee371b80692ccc203ae30c99",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDFJgDoHa+tRMVGZf3v0BfLuQLlPgwiACC+U9WIYGFZkAiBj0rm7xa5FocyngQ5MkVs+ENHOsfLo6ciiMcLJiO45Fw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.24.0.tgz",
+     "unpackedSize": 511179
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "136d8fccbeb9a353d693d45dfe092437a48d6f07",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.24.0"
+   },
+   "0.24.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.24.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.24.1_1785464434654_0.7351367989999564"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-OAGJ2/QCQqGwfQtcBudNl4yyGWLddkpOb1IDjeiiOZeE0ulzb8fi4p0MOZ3hl3GwUIlk/NBYqLI7vbqdz2ntmg==",
+     "shasum": "3a497172e6f3316bfc84311903922eb55e939ed2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCONcNjGs3hK2DBpwmoqN0J8FiaT3jUY4WbF744+COmswIhANQMtuC2D2yL52TX63oR1vA/UhFQlp40mvAOBOKHLCRW"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.24.1.tgz",
+     "unpackedSize": 521159
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2697651f2003f1b292232252b35028ca24ddc09a",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.24.1"
+   },
+   "0.25.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.25.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.25.0_1786163477741_0.09272028748366212"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 58,
+     "integrity": "sha512-+Ek9/JTSayPOQ+QDs4ntzRpXNCf8NmloP3WzeDvu/PXRTm9BrDrb4wWxDjwegKkPsoMuLr2oE2WLuZ8QiMcbrQ==",
+     "shasum": "1410bb2b2e72b46c0c02b96a3fc52e432437e8f1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCSWpGIu556WLDuw4lP3IAtmv/OwFcfAck+1Gb1OVygfQIgWPxL1KiSI5hUWIMEa7xWsRUfUA4DY49hyED87wMeuVc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.25.0.tgz",
+     "unpackedSize": 543430
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "2f85eb830e67e75551a8e8a87df23f339bb74402",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.25.0"
+   },
+   "0.26.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.26.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.26.0_1786447627265_0.4606694772136559"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 58,
+     "integrity": "sha512-syp6uqPI1bbClYp8KO7KNnEBSUg2NuJovZB2F48/NB+lcYiAIx41+EQYLq+EclxOkuTZMt1NWpEcnVUZ6Kt4aQ==",
+     "shasum": "2b10639713eeaa4784e0d01cb16f4f16b3a2ac4e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDaxkIkNeA/TeQ/QcCQ/Mukw70s04GxcuUx0Y3jaKbe2wIhAL60117Si9nGYaOvP5sby7ieL146vxLYhAHVgwfKLcRA"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.26.0.tgz",
+     "unpackedSize": 560524
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "fca26fd50f2e0707979997005e5d55b6f0b53bd8",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.26.0"
+   },
+   "0.26.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.26.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.26.1_1787243912219_0.696697111005131"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.4",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 58,
+     "integrity": "sha512-XRJVI8+SZpcGpfEGbjsIPddPUJc8SFYBUuVpjFOYGBfKi1eXoUCIhRiErmxdr4Rv9JL/+KlShmGQrsPuy+2Aww==",
+     "shasum": "fe04047da636dff695f80e0b2abec3dd551db33a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIADuQcco7ENSUd+C8iqs53oKXer29fokYttzh4CrDo9TAiEA84ej+tTkI6WMG+I50nXiu17r0uETrYS7egt4qsOdNLM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.26.1.tgz",
+     "unpackedSize": 567536
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "0649b200d93e874a1b0dc086510fd0be80b76d85",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.26.1"
+   },
+   "0.27.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.27.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.27.0_1787889287933_0.4616223069801444"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.8",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4",
+     "jose": "^6.0.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "directories": {},
+    "dist": {
+     "fileCount": 254,
+     "integrity": "sha512-Ps9/JIsIRFF6U3gTzsxWiVPOg9QnveZCjMawx/dYPkhyOKwwdQ5Q+yeZGdCZ8SN/BSDPueMA0XmH59pOFHH7aA==",
+     "shasum": "38d9e3df4bb5560a2207ec2aabfed9fd0188ef6e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD5oEA9zVkdsLfRyTnDa5QBU0mDRW1CNyIeKQDI3yJBdAIgR8RRUitXMQTfebSKuh2TW6pM6YAXmbmTSgp8lqQBIdU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.27.0.tgz",
+     "unpackedSize": 1029603
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./esm/mod.js",
+      "types": "./esm/mod.d.ts"
+     }
+    },
+    "gitHead": "eb35169ef4c550c861fb99aefe87bb9843dd1ff5",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "server",
+     "middleware",
+     "oauth",
+     "observability"
+    ],
+    "license": "MIT",
+    "main": "./esm/mod.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "module": "./esm/mod.js",
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "types": "./esm/mod.d.ts",
+    "version": "0.27.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.8.0",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.0_1771895920063_0.9305316727814366"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-LPQTmXtyV6iV+oAXcKPjE99FYX+/4mzGR/jV1ocJXA98D1rXoHUnA0kgFIcdQV0fXb8eU9cChmmBne+F6P/V4w==",
+     "shasum": "d7feb6c8f4b3b1390937452d09fdef3f242f109d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCwI1t9uFQHb0yQ67NFMSjkb5A3xFuTGMd7yG6r+YstBgIhAPxrgWLv61Mlq2AlRGigN6jyJGwliIUHcXR6H11JxiFp"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.8.0.tgz",
+     "unpackedSize": 165370
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d5921d9ca44a615e151b9e1b61da4bb7384e99a1",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.8.1",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.8.1_1771896639379_0.15862688670704173"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-xS8V++UEKJDCVwFZn+zIxXs5x4VBzKmokk5XpPyFfdm1JsTkQjLW0jdoyiznn/yaDw8nLR6OwLTUklBL9Bu/LQ==",
+     "shasum": "3a3c5ac4e32141b66865273cc72329564733699c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICRhB4j8Uvd8w1I3g3Y7MC7lVzzLwpBd2xYWak/V3N+QAiBNg+z1wdxMIyLBzZzTP+rdLL+3R4V2+zZb6MANTgkx0w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.8.1.tgz",
+     "unpackedSize": 177132
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "d5921d9ca44a615e151b9e1b61da4bb7384e99a1",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.8.1"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.9.0",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.0_1771898515411_0.008009600308938492"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.3",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 31,
+     "integrity": "sha512-NfDF2z/dlDFEKs1nsugSTQXIe71Aladk6DkuCzKyOuMK45gmL3J7EIA+qTgwvIzADWdMS2YQb24GxjtsU4FE/Q==",
+     "shasum": "17d7c17cbd752b1bdf669c4eca09dcda843475cb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC5xCJdy19VFAMhvFXob+JxKHsF8GAKRCbKzSTbffPHhAiBuMVFS/1A6evDBXfnoYAsJ+clgSazYg49LP16bc1T6Dw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.9.0.tgz",
+     "unpackedSize": 177748
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "0731515da63dcf6a752b2d8cc330c523f09926d8",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.9.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.1_1773645004423_0.6291876424685394"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.4",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 38,
+     "integrity": "sha512-ErGMODmAtAQ9+yWLkASKCzBm7Sb9WXYWwmfaB98hrm043BeTmbGbkrax5/9Cu/2gq8BdiRpnhHSLIWRbczkDsA==",
+     "shasum": "516ceda5081c1f2cc32bdac1a97c08321ccd8d30",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDoKyA0AZKnsiyW4LiUKUYXrQ0LMtqG6miSWGvZ9TiuFAIgChd54Rbyml2J6AGUer2SzNXcmn6z+GBVvDTW3jBZQCc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.9.1.tgz",
+     "unpackedSize": 198368
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "e843502326a00178b0a632b30ef8ea0fb1cfab0e",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.9.1"
+   },
+   "0.9.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@casys/mcp-server@0.9.2",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.9.2_1773730492497_0.058091848964936244"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:250be44a4fc2]",
+     "name": "superworldsavior"
+    },
+    "_npmVersion": "10.9.4",
+    "bugs": {
+     "url": "https://github.com/Casys-AI/mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "@opentelemetry/api": "^1.9.0",
+     "ajv": "^8.17.1",
+     "hono": "^4.0.0",
+     "jose": "^6.0.0",
+     "yaml": "^2.7.0"
+    },
+    "description": "Production-ready MCP server framework with concurrency control, auth, and observability",
+    "devDependencies": {
+     "tsx": "^4.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-e82YogqFsA3WizAWy1Y/HY2KOJgAUJBH0BWKiQbSxPGdOzGRCFH6eNIIE8tDRI93fbkAnrVanldh0KWyoNQZ5A==",
+     "shasum": "bd625de43f5b8e8702fe30c55cfcfc9add1c26e7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFqpFx4mBMSpMCtHExBV8JGTN9TwuojFYmN2r9+/GW99AiEA5Qq5oq6JR4eYzIP8vwuF1lfUHlerWO+WPifE/GHat3I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@casys/mcp-server/-/mcp-server-0.9.2.tgz",
+     "unpackedSize": 201781
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "b374accb16b0fa21de5015c5e585609f2addab8c",
+    "homepage": "https://github.com/Casys-AI/mcp-server#readme",
+    "license": "MIT",
+    "main": "mod.ts",
+    "maintainers": [
+     {
+      "email": "[redacted-email:250be44a4fc2]",
+      "name": "superworldsavior"
+     }
+    ],
+    "name": "@casys/mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Casys-AI/mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "test": "tsx --test src/**/*_test.ts"
+    },
+    "type": "module",
+    "types": "mod.ts",
+    "version": "0.9.2"
+   }
+  }
+ },
+ "name": "@casys/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@casys%2Fmcp-server"
+}

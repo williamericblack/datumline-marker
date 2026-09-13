@@ -1,0 +1,338 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a2b62d0c7277]",
+    "name": "satyabrat7805"
+   },
+   {
+    "email": "[redacted-email:7266a2f49373]",
+    "name": "ashwanikharwar"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@krutai/mcp-client",
+  "_rev": "3-52c2d54062f2bf4f348ecddbda2bd8fb",
+  "bugs": {
+   "url": "https://github.com/AccountantAIOrg/krut_packages/issues"
+  },
+  "description": "MCP client connector for KrutAI \u2014 backend-managed streamable-http MCP connections with OAuth and streaming logs",
+  "dist-tags": {
+   "latest": "0.1.2"
+  },
+  "homepage": "https://github.com/AccountantAIOrg/krut_packages#readme",
+  "keywords": [
+   "krutai",
+   "mcp",
+   "model-context-protocol",
+   "oauth",
+   "streaming"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:a2b62d0c7277]",
+    "name": "satyabrat7805"
+   },
+   {
+    "email": "[redacted-email:7266a2f49373]",
+    "name": "ashwanikharwar"
+   }
+  ],
+  "name": "@krutai/mcp-client",
+  "readme": "# @krutai/mcp-client\n\nBackend-managed MCP client connector for KrutAI.\n\nThis package lets your app connect to remote `streamable-http` MCP servers through the Krut backend. Krut owns MCP transport sessions, OAuth authorization, encrypted token storage, and streamed tool events. Your app only talks to Krut with a KrutAI API key.\n\nRaw OAuth tokens are stored by the Krut backend and are never returned by this package.\n\n## Features\n\n- Connect to remote MCP servers over `streamable-http`\n- Start browser-based OAuth when an MCP server requires authentication\n- Reuse encrypted OAuth tokens on future calls\n- List tools and call tools\n- Stream long-running tool logs, progress, task updates, results, and errors\n- List/read MCP resources\n- List/get MCP prompts\n- Send raw MCP requests for advanced methods\n\n## Install\n\n```bash\nnpm install @krutai/mcp-client\n```\n\n## Backend Requirements\n\nThe Krut backend must include the `/api/mcp` routes and have these environment variables configured:\n\n```bash\nBACKEND_URL=\"https://your-backend.example.com\"\nMCP_TOKEN_ENCRYPTION_KEY=\"a-long-random-secret\"\n```\n\n`BACKEND_URL` is used as the OAuth redirect origin:\n\n```txt\n${BACKEND_URL}/api/mcp/oauth/callback\n```\n\n`MCP_TOKEN_ENCRYPTION_KEY` encrypts MCP OAuth access and refresh tokens. If it is not set, the backend falls back to `SESSION_SECRET`.\n\n## Supported MCP Providers\n\nSupported provider shortcuts are managed by the Krut backend. Fetch them at runtime so apps can show provider shortcuts without shipping hard-coded MCP server URLs.\n\n```ts\nconst providers = await mcp.listSupportedProviders();\n\nconsole.table(providers);\n```\n\nDefault seeded provider shortcuts:\n\n| Provider | Server URL | OAuth client setup |\n| --- | --- | --- |\n| Notion | `https://mcp.notion.com/mcp` | Dynamic Client Registration |\n| Linear | `https://mcp.linear.app/mcp` | Dynamic Client Registration |\n| Slack | `https://mcp.slack.com/mcp` | Static OAuth client config required |\n| Google Calendar | `https://calendarmcp.googleapis.com/mcp/v1` | Static OAuth client config required |\n| Gmail | `https://gmailmcp.googleapis.com/mcp/v1` | Static OAuth client config required |\n| Bitly | `https://api-ssl.bitly.com/v4/mcp` | OAuth |\n| Supabase | `https://mcp.supabase.com/mcp` | Dynamic Client Registration |\n| Sentry | `https://mcp.sentry.dev/mcp` | Dynamic Client Registration |\n\n\nDynamic Client Registration providers can be connected directly with `connect()` + `startAuth()`.\n\n## Quick Start\n\n```ts\nimport { krutMcpClient } from \"@krutai/mcp-client\";\n\nconst mcp = krutMcpClient({\n  apiKey: process.env.KRUTAI_API_KEY,\n  serverUrl: \"http://localhost:8000\",\n});\n\nawait mcp.initialize();\n\nconst connection = await mcp.connect({\n  name: \"Example MCP\",\n  serverUrl: \"https://example.com/mcp\",\n});\n\nconst auth = await mcp.startAuth(connection.id);\n\nif (auth.authorizationUrl) {\n  console.log(\"Open this URL:\", auth.authorizationUrl);\n}\n\nconst tools = await mcp.listTools(connection.id);\nconsole.log(tools);\n```\n\n## Create A Client\n\n```ts\nimport { KrutMcpClient } from \"@krutai/mcp-client\";\n\nconst mcp = new KrutMcpClient({\n  apiKey: process.env.KRUTAI_API_KEY,\n  serverUrl: \"https://api.krut.ai\",\n});\n\nawait mcp.initialize();\n```\n\nOr use the factory:\n\n```ts\nimport { krutMcpClient } from \"@krutai/mcp-client\";\n\nconst mcp = krutMcpClient({\n  apiKey: process.env.KRUTAI_API_KEY,\n});\n```\n\n### Config\n\n```ts\ntype KrutMcpClientConfig = {\n  apiKey?: string;\n  serverUrl?: string;\n  mcpPrefix?: string;\n  validateOnInit?: boolean;\n  fetch?: typeof fetch;\n};\n```\n\n- `apiKey`: KrutAI API key. Defaults to `process.env.KRUTAI_API_KEY`.\n- `serverUrl`: Krut backend URL. Defaults to `http://localhost:8000`.\n- `mcpPrefix`: Backend MCP route prefix. Defaults to `/api/mcp`.\n- `validateOnInit`: Set `false` to skip API-key validation during `initialize()`.\n- `fetch`: Optional custom fetch implementation for tests or special runtimes.\n\n## Connections\n\nConnections are user-scoped by the API key owner. Calling `connect()` with the same `serverUrl` reuses the existing connection.\n\n```ts\nconst connection = await mcp.connect({\n  name: \"GitHub MCP\",\n  serverUrl: \"https://github.example.com/mcp\",\n});\n\nconsole.log(connection.id);\nconsole.log(connection.status);\n```\n\nConnection shape:\n\n```ts\ntype McpConnection = {\n  id: string;\n  name?: string | null;\n  serverUrl: string;\n  status: string;\n  lastError?: string | null;\n  createdAt: string;\n  updatedAt: string;\n};\n```\n\nCheck current status:\n\n```ts\nconst status = await mcp.getStatus(connection.id);\nconsole.log(status.status);\n```\n\nCommon statuses:\n\n- `created`: Connection record exists but has not connected yet.\n- `connected`: Last connection/auth check succeeded.\n- `pending_auth`: OAuth authorization URL was generated and user action is needed.\n- `auth_required`: The server requires auth but no authorization URL was available.\n- `failed`: Last connection attempt failed.\n\n## OAuth Authentication\n\nSome MCP servers require OAuth. Use `startAuth()` after creating a connection.\n\n```ts\nconst auth = await mcp.startAuth(connection.id);\n\nif (auth.status === \"connected\") {\n  console.log(\"Already connected\");\n}\n\nif (auth.authorizationUrl) {\n  window.location.href = auth.authorizationUrl;\n}\n```\n\nIn a Node CLI:\n\n```ts\nconst auth = await mcp.startAuth(connection.id);\n\nif (auth.authorizationUrl) {\n  console.log(\"Open in your browser:\");\n  console.log(auth.authorizationUrl);\n}\n```\n\nAfter the user completes auth, the MCP server redirects to the Krut backend callback. Krut verifies the OAuth `state`, exchanges the code, encrypts tokens, and marks the connection as connected.\n\nPoll status if your UI needs to wait:\n\n```ts\nasync function waitUntilConnected(connectionId: string) {\n  for (;;) {\n    const status = await mcp.getStatus(connectionId);\n    if (status.status === \"connected\") return status;\n    if (status.status === \"failed\") throw new Error(status.lastError || \"MCP auth failed\");\n    await new Promise((resolve) => setTimeout(resolve, 1500));\n  }\n}\n```\n\n## Tools\n\nList tools:\n\n```ts\nconst tools = await mcp.listTools(connection.id);\nconsole.log(tools);\n```\n\nCall a tool and wait for the final result:\n\n```ts\nconst result = await mcp.callTool({\n  connectionId: connection.id,\n  toolName: \"search\",\n  arguments: {\n    query: \"latest invoices\",\n  },\n});\n\nconsole.log(result);\n```\n\n## Streaming Tool Calls\n\nUse `streamToolCall()` for long-running jobs. It returns an async iterable of events.\n\n```ts\nconst events = await mcp.streamToolCall({\n  connectionId: connection.id,\n  toolName: \"long_running_import\",\n  arguments: {\n    fileUrl: \"https://example.com/data.csv\",\n  },\n});\n\nfor await (const event of events) {\n  switch (event.type) {\n    case \"started\":\n      console.log(\"Run started:\", event.runId);\n      break;\n    case \"log\":\n      console.log(`[${event.level}]`, event.message);\n      break;\n    case \"progress\":\n      console.log(\"Progress:\", event.percent ?? event.progress, event.message ?? \"\");\n      break;\n    case \"task\":\n      console.log(\"Task update:\", event.task);\n      break;\n    case \"result\":\n      console.log(\"Result:\", event.result);\n      break;\n    case \"error\":\n      console.error(\"Error:\", event.error);\n      break;\n    case \"done\":\n      console.log(\"Done:\", event.status);\n      break;\n  }\n}\n```\n\nStream event types:\n\n```ts\ntype McpStreamEvent =\n  | { type: \"started\"; runId: string; toolName: string }\n  | { type: \"log\"; level: string; logger?: string; message: string; data?: unknown }\n  | { type: \"progress\"; progress: number; total?: number; percent?: number; message?: string }\n  | { type: \"task\"; task: unknown }\n  | { type: \"result\"; result: unknown }\n  | { type: \"error\"; error: string; data?: unknown }\n  | { type: \"done\"; runId: string; status: \"completed\" | \"failed\" };\n```\n\nThe backend sends newline-delimited JSON over one HTTP response. This works in modern Node runtimes and browsers that support streaming `fetch()`.\n\n## Resources\n\nIf an MCP server exposes resources, list them:\n\n```ts\nconst resources = await mcp.listResources(connection.id);\nconsole.log(resources);\n```\n\nRead a resource:\n\n```ts\nconst resource = await mcp.readResource({\n  connectionId: connection.id,\n  uri: \"file:///docs/readme.md\",\n});\n\nconsole.log(resource);\n```\n\nUse pagination cursor if the server returns one:\n\n```ts\nconst page1 = await mcp.listResources(connection.id);\nconst page2 = await mcp.listResources(connection.id, \"next-cursor\");\n```\n\n## Prompts\n\nIf an MCP server exposes prompts, list them:\n\n```ts\nconst prompts = await mcp.listPrompts(connection.id);\nconsole.log(prompts);\n```\n\nGet a prompt with arguments:\n\n```ts\nconst prompt = await mcp.getPrompt({\n  connectionId: connection.id,\n  name: \"summarize_document\",\n  arguments: {\n    tone: \"concise\",\n    audience: \"engineering\",\n  },\n});\n\nconsole.log(prompt);\n```\n\nUse pagination cursor if the server returns one:\n\n```ts\nconst page1 = await mcp.listPrompts(connection.id);\nconst page2 = await mcp.listPrompts(connection.id, \"next-cursor\");\n```\n\n## Raw Requests\n\nUse `rawRequest()` for MCP methods that do not yet have a convenience wrapper.\n\n```ts\nconst result = await mcp.rawRequest({\n  connectionId: connection.id,\n  method: \"tools/list\",\n  params: {},\n});\n\nconsole.log(result);\n```\n\n## Error Handling\n\n```ts\ntry {\n  await mcp.listTools(connection.id);\n} catch (error) {\n  console.error(error instanceof Error ? error.message : error);\n}\n```\n\nIf a server requires OAuth and the connection is not authorized, backend calls may return an auth-required error. Call `startAuth(connection.id)` and send the user to `authorizationUrl`.\n\nFor tool calls, the backend can also return an auth-required error with an authorization URL. The package preserves that response in `KrutMcpApiError`.\n\n```ts\nimport { KrutMcpApiError } from \"@krutai/mcp-client\";\n\ntry {\n  await mcp.callTool({\n    connectionId: connection.id,\n    toolName: \"list_events\",\n    arguments: {},\n  });\n} catch (error) {\n  if (error instanceof KrutMcpApiError && error.authorizationUrl) {\n    window.location.href = error.authorizationUrl;\n  }\n}\n```\n\n## Full Example\n\n```ts\nimport { krutMcpClient } from \"@krutai/mcp-client\";\n\nconst mcp = krutMcpClient({\n  apiKey: process.env.KRUTAI_API_KEY,\n  serverUrl: \"http://localhost:8000\",\n});\n\nawait mcp.initialize();\n\nconst connection = await mcp.connect({\n  name: \"Example MCP\",\n  serverUrl: \"https://example.com/mcp\",\n});\n\nconst auth = await mcp.startAuth(connection.id);\n\nif (auth.authorizationUrl) {\n  console.log(\"Authenticate here:\", auth.authorizationUrl);\n  process.exit(0);\n}\n\nconst tools = await mcp.listTools(connection.id);\nconsole.log(\"Tools:\", tools);\n\nconst events = await mcp.streamToolCall({\n  connectionId: connection.id,\n  toolName: \"process\",\n  arguments: {\n    input: \"hello\",\n  },\n});\n\nfor await (const event of events) {\n  console.log(event);\n}\n```\n\n## Limitations\n\n- v1 supports only remote `streamable-http` MCP servers.\n- v1 does not support local stdio MCP servers.\n- v1 does not expose MCP sampling. Tool calls can stream logs/progress, but MCP servers cannot ask Krut to run LLM sampling through this package yet.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-client",
+   "type": "git",
+   "url": "git+https://github.com/AccountantAIOrg/krut_packages.git"
+  },
+  "time": {
+   "0.1.0": "2026-06-01T10:14:15.079Z",
+   "0.1.1": "2026-06-03T09:12:44.986Z",
+   "0.1.2": "2026-08-11T10:37:41.843Z",
+   "created": "2026-06-01T10:14:14.779Z",
+   "modified": "2026-08-11T10:37:42.016Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@krutai/mcp-client@0.1.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-client_0.1.0_1780308854928_0.11145210276910356"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7266a2f49373]",
+     "name": "ashwanikharwar"
+    },
+    "_npmVersion": "11.6.2",
+    "author": "",
+    "bugs": {
+     "url": "https://github.com/AccountantAIOrg/krut_packages/issues"
+    },
+    "dependencies": {
+     "krutai": "^0.1.10"
+    },
+    "description": "MCP client connector for KrutAI \u2014 backend-managed streamable-http MCP connections with OAuth and streaming logs",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "tsup": "^8.0.1",
+     "typescript": "^5.3.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-n2c2H+dt9Ahf0eZdcFNJIp6KGbsVTrMJW7PgstwyTTc/Dh2od+dZTdnwSk+/+iquGgtx56lHG55ShjoQfzkOzg==",
+     "shasum": "b2f5515b7380e13711639786e770789cab1b03db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFyZEqxWtXGUQkoSAx9dqnddHnQP01R+qkN4JxPUxH7qAiBLjM6As5XYTSXsWAaBPg7uPkii8l1b/VS/rfInshs0wA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@krutai/mcp-client/-/mcp-client-0.1.0.tgz",
+     "unpackedSize": 62015
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "df7c6bd4c67015144f720e8e79aaeb83b97338c1",
+    "homepage": "https://github.com/AccountantAIOrg/krut_packages#readme",
+    "keywords": [
+     "krutai",
+     "mcp",
+     "model-context-protocol",
+     "oauth",
+     "streaming"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a2b62d0c7277]",
+      "name": "satyabrat7805"
+     },
+     {
+      "email": "[redacted-email:7266a2f49373]",
+      "name": "ashwanikharwar"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@krutai/mcp-client",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-client",
+     "type": "git",
+     "url": "git+https://github.com/AccountantAIOrg/krut_packages.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist *.tsbuildinfo",
+     "dev": "tsup --watch",
+     "prepack": "npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@krutai/mcp-client@0.1.1",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-client_0.1.1_1780477964874_0.3588096081178236"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7266a2f49373]",
+     "name": "ashwanikharwar"
+    },
+    "_npmVersion": "11.6.2",
+    "author": "",
+    "bugs": {
+     "url": "https://github.com/AccountantAIOrg/krut_packages/issues"
+    },
+    "dependencies": {
+     "krutai": "^0.1.10"
+    },
+    "description": "MCP client connector for KrutAI \u2014 backend-managed streamable-http MCP connections with OAuth and streaming logs",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "tsup": "^8.0.1",
+     "typescript": "^5.3.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-vtd6edZNBqEhruQkQTODrwpQbSxdK34lcem9aAdbysvlh5GClm2PCEMLV5HaRdluSGr5YBj8OW0ismNJk0/TQw==",
+     "shasum": "a3718aa7458ccd3ec878bab9f600ce78c3c9496c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCSABuQR18sdBYkPNJTdIYEwqlt8EF+vF0oB1nzmkEhqQIhALJZRLWYhCi4u1JSwULxFuRLH5qo7HY2TUyotfVGvv5s"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@krutai/mcp-client/-/mcp-client-0.1.1.tgz",
+     "unpackedSize": 71915
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "45d7914956e7961efd53059c1a20562be394e738",
+    "homepage": "https://github.com/AccountantAIOrg/krut_packages#readme",
+    "keywords": [
+     "krutai",
+     "mcp",
+     "model-context-protocol",
+     "oauth",
+     "streaming"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a2b62d0c7277]",
+      "name": "satyabrat7805"
+     },
+     {
+      "email": "[redacted-email:7266a2f49373]",
+      "name": "ashwanikharwar"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@krutai/mcp-client",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-client",
+     "type": "git",
+     "url": "git+https://github.com/AccountantAIOrg/krut_packages.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist *.tsbuildinfo",
+     "dev": "tsup --watch",
+     "prepack": "npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@krutai/mcp-client@0.1.2",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-client_0.1.2_1786444661690_0.8689117441962202"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7266a2f49373]",
+     "name": "ashwanikharwar"
+    },
+    "_npmVersion": "11.6.2",
+    "author": "",
+    "bugs": {
+     "url": "https://github.com/AccountantAIOrg/krut_packages/issues"
+    },
+    "dependencies": {
+     "krutai": "^0.1.10"
+    },
+    "description": "MCP client connector for KrutAI \u2014 backend-managed streamable-http MCP connections with OAuth and streaming logs",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "tsup": "^8.0.1",
+     "typescript": "^5.3.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 9,
+     "integrity": "sha512-NSr/1fAiVCHBQXkGQMbaf9HY2dCOkayUcNLF2xzd4nuvAu0guC3vZdknKroy3sqNQhSgpGCSS5IwQfQz48ei4A==",
+     "shasum": "ba8acda91309c0318c4771e379cbe20ba4c9a23a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCgnUAIh5agokdCpImCQS+hkvnNnFH1r5zMDdZCJPtShQIhAJmsVmP/xjOeuNcfq5nSkB8KZIe7cJ203UnNui2bRaKX"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@krutai/mcp-client/-/mcp-client-0.1.2.tgz",
+     "unpackedSize": 70249
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0f935415d5ff10a3283efbb8e9f45af6556058e2",
+    "homepage": "https://github.com/AccountantAIOrg/krut_packages#readme",
+    "keywords": [
+     "krutai",
+     "mcp",
+     "model-context-protocol",
+     "oauth",
+     "streaming"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:a2b62d0c7277]",
+      "name": "satyabrat7805"
+     },
+     {
+      "email": "[redacted-email:7266a2f49373]",
+      "name": "ashwanikharwar"
+     }
+    ],
+    "module": "./dist/index.mjs",
+    "name": "@krutai/mcp-client",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-client",
+     "type": "git",
+     "url": "git+https://github.com/AccountantAIOrg/krut_packages.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist *.tsbuildinfo",
+     "dev": "tsup --watch",
+     "prepack": "npm run build",
+     "typecheck": "tsc --noEmit"
+    },
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   }
+  }
+ },
+ "name": "@krutai/mcp-client",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@krutai%2Fmcp-client"
+}

@@ -1,0 +1,309 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:4959f8cfb3c5]",
+    "name": "kalelaufa"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.0.1",
+   "2.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@kalelaufa/github-mcp-server",
+  "_rev": "3-577acddcacb7cc4030a0faf13892040f",
+  "description": "Production-ready GitHub MCP Server with full GitHub API coverage",
+  "dist-tags": {
+   "latest": "2.0.0"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:4959f8cfb3c5]",
+    "name": "kalelaufa"
+   }
+  ],
+  "name": "@kalelaufa/github-mcp-server",
+  "readme": "# GitHub MCP Server\r\n\r\nProduction-ready [Model Context Protocol](https://modelcontextprotocol.io) server that wraps the\r\nGitHub REST + GraphQL APIs so AI assistants can manage repositories, issues, pull requests,\r\nreleases, actions, secrets, and more.\r\n\r\n## Features\r\n\r\n- ~90 tools covering repositories, issues, branches, files, pull requests, releases,\r\n  GitHub Actions, secrets/variables, search, and AI-assisted repo analysis.\r\n- Multiple auth methods (env token, auth file with multiple accounts).\r\n- Built-in resilience: rate-limit throttling (`p-limit`), retries with backoff (`p-retry`),\r\n  LRU response cache with ETag revalidation.\r\n- Zod-based input validation for every tool.\r\n- Structured error mapping (`GitHubMcpError` \u2192 MCP `isError` responses).\r\n- Logs to **stderr** (safe for stdio transport) or a file.\r\n\r\n## Install\r\n\r\n```bash\r\nnpm install\r\nnpm run build\r\n```\r\n\r\n## Configuration\r\n\r\nConfiguration is merged from (highest priority first):\r\n\r\n1. Environment variables\r\n2. JSON config files (`config.json`) at:\r\n   - `$GITHUB_MCP_CONFIG` (if set)\r\n   - `./config.json` (cwd)\r\n   - `~/.config/github-mcp/config.json`\r\n   - `/etc/github-mcp/config.json`\r\n3. Built-in defaults\r\n\r\nSee `config.json.example` for all options.\r\n\r\n### Authentication\r\n\r\nThe server is method-aware and supports every GitHub token type:\r\n\r\n| Method | Token kind | How to provide |\r\n|--------|-----------|----------------|\r\n| `token` | Personal Access Token (classic `ghp_`, OAuth `gho_`, App user-to-server `ghu_`, installation `ghs_`) | `GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_PAT` or auth store |\r\n| `fine-grained` | Fine-grained PAT (`github_pat_`) | same as above (sent as `Bearer`) |\r\n| `oauth-device` | OAuth Device Flow | `auth_device_login` \u2192 `auth_device_poll` tools |\r\n| `oauth-web` | OAuth Authorization Code Flow | `auth_web_login` \u2192 `auth_web_callback` tools |\r\n| `github-app` | GitHub App JWT \u2192 installation token | `auth_app_login` tool (needs app id + private key) |\r\n\r\n#### Static token\r\n\r\n```bash\r\nexport GITHUB_TOKEN=ghp_xxx        # or GH_TOKEN / GITHUB_PAT\r\n```\r\n\r\nOr use the auth store file `~/.config/github-mcp/auth.json`:\r\n\r\n```json\r\n{ \"activeToken\": \"ghp_xxx\", \"method\": \"token\" }\r\n```\r\n\r\n#### OAuth (Device / Web)\r\n\r\nConfigure the OAuth app client, then drive the flow from the MCP client:\r\n\r\n```bash\r\nexport GITHUB_OAUTH_CLIENT_ID=Iv1.xxx\r\nexport GITHUB_OAUTH_CLIENT_SECRET=xxx      # required for web flow\r\nexport GITHUB_OAUTH_SCOPES=\"repo read:org\"\r\n```\r\n\r\n- Device: call `auth_device_login` (returns a user code + URL), authorize in a browser, then `auth_device_poll`.\r\n- Web: call `auth_web_login` (returns an authorize URL), authorize, then `auth_web_callback` with the `code`.\r\n\r\n#### GitHub App\r\n\r\n```bash\r\nexport GITHUB_APP_ID=123456\r\nexport GITHUB_APP_PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY----- ...\"   # or GITHUB_APP_PRIVATE_KEY_PATH=/path/key.pem\r\nexport GITHUB_APP_INSTALLATION_ID=98765432                            # optional; first installation used if omitted\r\n```\r\n\r\nCall `auth_app_login` to mint an installation token (the server builds the JWT with RS256 and exchanges it).\r\n\r\n#### Managing accounts\r\n\r\nTools `auth_status`, `auth_list_accounts`, `auth_switch_account`, and `auth_logout`\r\nlet you inspect and switch between multiple stored accounts. Any successful login\r\nrefreshes the active token used by the REST/GraphQL clients.\r\n\r\n## Usage\r\n\r\n### Transports\r\n\r\nThe server supports three transports, selected via `GITHUB_MCP_TRANSPORT`\r\n(`stdio` by default):\r\n\r\n| Transport | Env | Endpoint | Notes |\r\n|-----------|-----|----------|-------|\r\n| `stdio`   | `GITHUB_MCP_TRANSPORT=stdio` | stdin/stdout | Default; logs go to stderr |\r\n| `http`    | `GITHUB_MCP_TRANSPORT=http`  | `http://host:PORT/mcp` | Streamable HTTP (MCP session per connection) |\r\n| `sse`     | `GITHUB_MCP_TRANSPORT=sse`   | `http://host:PORT/sse` + `POST /messages` | Legacy SSE |\r\n\r\nFor `http`/`sse`, also set `GITHUB_MCP_PORT` (default `3000`).\r\n\r\n### With an MCP client (stdio, default)\r\n\r\n```bash\r\nGITHUB_TOKEN=ghp_xxx node dist/index.js\r\n```\r\n\r\nRegister it in your client's MCP server list:\r\n\r\n```json\r\n{\r\n  \"mcpServers\": {\r\n    \"github\": {\r\n      \"command\": \"node\",\r\n      \"args\": [\"/path/to/github-mcp-server/dist/index.js\"],\r\n      \"env\": { \"GITHUB_TOKEN\": \"ghp_xxx\" }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n### Streamable HTTP example\r\n\r\n```bash\r\nGITHUB_TOKEN=ghp_xxx GITHUB_MCP_TRANSPORT=http GITHUB_MCP_PORT=3000 node dist/index.js\r\n# Client connects to http://localhost:3000/mcp (Accept: application/json, text/event-stream)\r\n```\r\n\r\n### Environment variables\r\n\r\n| Variable | Description |\r\n|----------|-------------|\r\n| `GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_PAT` | GitHub personal access / fine-grained token |\r\n| `GITHUB_DEFAULT_OWNER` | Default repo owner when a tool omits `owner` |\r\n| `GITHUB_DEFAULT_REPO` | Default repo when a tool omits `repo` |\r\n| `GITHUB_ORG` | Default organization |\r\n| `GITHUB_WORKSPACE` | Workspace path |\r\n| `GITHUB_CLONE_DIR` | Directory for cloned repos |\r\n| `GITHUB_MCP_TRANSPORT` | `stdio` (default) / `http` / `sse` |\r\n| `GITHUB_MCP_PORT` | Port (for http/sse transport) |\r\n| `GITHUB_MCP_TIMEOUT` | Request timeout (ms) |\r\n| `GITHUB_MCP_LOG_LEVEL` | `trace` `debug` `info` `warn` `error` |\r\n| `GITHUB_PROXY` | Outbound proxy URL |\r\n| `GITHUB_MCP_CONFIG` | Path to a `config.json` |\r\n\r\n## Development\r\n\r\n```bash\r\nnpm run dev        # tsx watch\r\nnpm run typecheck  # tsc --noEmit\r\nnpm run lint       # eslint\r\nnpm test           # vitest run\r\nnpm run build      # tsc -> dist/\r\n```\r\n\r\n## License\r\n\r\nMIT\r\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "1.0.0": "2026-07-02T05:30:10.681Z",
+   "1.0.1": "2026-07-02T06:41:05.055Z",
+   "2.0.0": "2026-07-26T09:30:45.188Z",
+   "created": "2026-07-02T05:30:10.245Z",
+   "modified": "2026-07-26T09:30:45.349Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kalelaufa/github-mcp-server@1.0.0",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/github-mcp-server_1.0.0_1782970210556_0.6619854493357176"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4959f8cfb3c5]",
+     "name": "kalelaufa"
+    },
+    "_npmVersion": "11.3.0",
+    "author": {
+     "name": "KalelAufa"
+    },
+    "bin": {
+     "github-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KalelAufa/xera-cli-scaffold/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "@octokit/plugin-retry": "^7.0.0",
+     "@octokit/plugin-throttling": "^9.0.0",
+     "@octokit/rest": "^21.0.0",
+     "execa": "^9.0.0",
+     "graphql": "^16.9.0",
+     "lru-cache": "^11.0.0",
+     "p-limit": "^6.0.0",
+     "p-retry": "^6.0.0",
+     "tweetsodium": "^0.0.4",
+     "zod": "^3.23.0"
+    },
+    "description": "GitHub MCP Server \u2014 81 tools covering the full GitHub API via Model Context Protocol",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 74,
+     "integrity": "sha512-HCiH0YWMWIQLE4ABNug7z12q6GgxC1ta2zR+uETLLx+jp5TL+hWVXQabgKLID00b8RkoBH3PDRo1ILN1m/U/Kw==",
+     "shasum": "f1c1cc2ad3fb0368b8a26977951cac57e1dbea98",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICh7FX+zytm+jGouv3dupvjjsXtTOFWFJ+yLhjkZOYq3AiBDjcYfXDgvZ9A2//qnQADAZ+0CLNcIn+qtiuphUsVnnA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kalelaufa/github-mcp-server/-/github-mcp-server-1.0.0.tgz",
+     "unpackedSize": 260133
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": "./dist/index.js"
+    },
+    "gitHead": "18049714d72f0b25354039fa6bc21ded75dbceda",
+    "homepage": "https://github.com/KalelAufa/xera-cli-scaffold#readme",
+    "keywords": [
+     "mcp",
+     "github",
+     "model-context-protocol",
+     "api",
+     "cli"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4959f8cfb3c5]",
+      "name": "kalelaufa"
+     }
+    ],
+    "name": "@kalelaufa/github-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KalelAufa/xera-cli-scaffold.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "rebuild": "npm run clean && npm run build",
+     "start": "node ./dist/index.js"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@kalelaufa/github-mcp-server@1.0.1",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/github-mcp-server_1.0.1_1782974464904_0.4639370647797756"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4959f8cfb3c5]",
+     "name": "kalelaufa"
+    },
+    "_npmVersion": "11.3.0",
+    "author": {
+     "name": "KalelAufa"
+    },
+    "bin": {
+     "github-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KalelAufa/github-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "execa": "^9.0.0",
+     "graphql": "^16.9.0",
+     "lru-cache": "^11.0.0",
+     "p-retry": "^6.0.0",
+     "tweetsodium": "^0.0.4"
+    },
+    "description": "GitHub MCP Server \u2014 81 tools covering the full GitHub API via Model Context Protocol",
+    "devDependencies": {
+     "@types/node": "^20.14.0",
+     "typescript": "^5.5.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 75,
+     "integrity": "sha512-aW4IR6eTk5VdqZuuV8YUPfEhnr+CYRGLxVaUoBv6T33zu0C0VdR8UhiPnNVXcUAJGhK1zebGO2GKtVLDGKaMCw==",
+     "shasum": "3db559163b9400c8c8678fa6d70b7993459b3a01",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDAn3sOzVqz5FYXZrwF+i8ZqxTb27ycPLGkM8tpRzE5sAIhANYV1mIuOIcqZbJh9IsaRaeJqM/th4E2XdOHF7YEthPe"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kalelaufa/github-mcp-server/-/github-mcp-server-1.0.1.tgz",
+     "unpackedSize": 262993
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "exports": {
+     ".": "./dist/index.js"
+    },
+    "gitHead": "200f8031a9567ca57a35e2b60c5a70383132e86d",
+    "homepage": "https://github.com/KalelAufa/github-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "github",
+     "model-context-protocol",
+     "api",
+     "cli"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4959f8cfb3c5]",
+      "name": "kalelaufa"
+     }
+    ],
+    "name": "@kalelaufa/github-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KalelAufa/github-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "prepublishOnly": "npm run build",
+     "rebuild": "npm run clean && npm run build",
+     "start": "node ./dist/index.js"
+    },
+    "type": "module",
+    "version": "1.0.1"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@kalelaufa/github-mcp-server@2.0.0",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/github-mcp-server_2.0.0_1785058245028_0.8677151088376063"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4959f8cfb3c5]",
+     "name": "kalelaufa"
+    },
+    "_npmVersion": "11.3.0",
+    "bin": {
+     "github-mcp": "dist/index.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.8.0",
+     "chalk": "^5.4.1",
+     "dotenv": "^16.4.7",
+     "execa": "^9.5.2",
+     "lru-cache": "^11.1.0",
+     "octokit": "^4.1.2",
+     "p-limit": "^6.2.0",
+     "p-retry": "^6.2.1",
+     "tweetnacl": "^1.0.3",
+     "zod": "^3.24.3"
+    },
+    "description": "Production-ready GitHub MCP Server with full GitHub API coverage",
+    "devDependencies": {
+     "@types/node": "^22.13.10",
+     "eslint": "^9.22.0",
+     "tsx": "^4.19.3",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.26.0",
+     "vitest": "^3.1.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 148,
+     "integrity": "sha512-2XE3xMIaOFsw9AmCC1jEyM5DZaxaljJ0zTwihCoDGftpJAjSjBw357M2YlWSuk3pCjobZRTvMfo3P6y1Jkm+Ow==",
+     "shasum": "125a91e0112d4ab52d5915c8289b7b267d4b3860",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGN6d1yWP9jxGCTTx9PfoW+Bg0aoQx/qhRUKFgrSsMbMAiEAgiw/3evxaS7sFp2cFtGGePOKNLkvVmhwiC0PWKLrLQM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@kalelaufa/github-mcp-server/-/github-mcp-server-2.0.0.tgz",
+     "unpackedSize": 560719
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "fbb40fba008cc9d8d5bdff6c1eba248e55c1d438",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4959f8cfb3c5]",
+      "name": "kalelaufa"
+     }
+    ],
+    "name": "@kalelaufa/github-mcp-server",
+    "scripts": {
+     "build": "tsc",
+     "clean": "rm -rf dist",
+     "dev": "tsx watch src/index.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.0.0"
+   }
+  }
+ },
+ "name": "@kalelaufa/github-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@kalelaufa%2Fgithub-mcp-server"
+}

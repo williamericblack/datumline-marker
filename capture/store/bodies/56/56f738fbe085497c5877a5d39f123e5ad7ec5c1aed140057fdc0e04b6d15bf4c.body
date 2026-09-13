@@ -1,0 +1,209 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5cb84d00e2af]",
+    "name": "aroha-labs"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@aroha-sdk/mcp-guard",
+  "_rev": "2-297e3130a58717c6e38ff20ac16bfafb",
+  "description": "A firewall for your AI agent's tools \u2014 wrap any MCP server with spending limits, action limits, human approval gates, and a full audit log. Zero code, one config change.",
+  "dist-tags": {
+   "latest": "0.2.0"
+  },
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "guardrails",
+   "firewall",
+   "ai-agent",
+   "safety",
+   "aroha",
+   "human-in-the-loop",
+   "audit"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5cb84d00e2af]",
+    "name": "aroha-labs"
+   }
+  ],
+  "name": "@aroha-sdk/mcp-guard",
+  "readme": "# @aroha-sdk/mcp-guard\r\n\r\n![Beta](https://img.shields.io/badge/status-beta-blue) ![npm](https://img.shields.io/npm/v/@aroha-sdk/mcp-guard) ![Zero deps](https://img.shields.io/badge/dependencies-0-green)\r\n\r\n**A firewall for your AI agent's tools.** Wrap any MCP server with action limits, always-deny rules, human approval gates, and a full audit log \u2014 zero code, one config change.\r\n\r\nYour assistant's GitHub MCP server can delete repos. Your database server can drop tables. The model is polite, but politeness is not a security boundary. `mcp-guard` puts a hard boundary between the model and every tool it can reach.\r\n\r\n## Quick start\r\n\r\nTake any MCP server in your client config and wrap it:\r\n\r\n**Before:**\r\n```json\r\n{\r\n  \"mcpServers\": {\r\n    \"github\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-github\"]\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n**After:**\r\n```json\r\n{\r\n  \"mcpServers\": {\r\n    \"github\": {\r\n      \"command\": \"npx\",\r\n      \"args\": [\"-y\", \"@aroha-sdk/mcp-guard\",\r\n               \"--block\", \"delete_*\",\r\n               \"--gate\",  \"merge_*,create_repository\",\r\n               \"--limit\", \"create_*:10\",\r\n               \"--\",\r\n               \"npx\", \"-y\", \"@modelcontextprotocol/server-github\"]\r\n    }\r\n  }\r\n}\r\n```\r\n\r\nThat's it. Works with Claude Desktop, Cursor, Windsurf, Cline, Zed \u2014 anything that speaks MCP over stdio. The wrapped server needs no changes and never knows the guard is there.\r\n\r\n## What each rule does\r\n\r\n| Rule | Behaviour |\r\n|------|-----------|\r\n| `--block <globs>` | Matching tools are **always denied**. The model gets a clear refusal, the server never sees the call. |\r\n| `--limit <glob>:<n>` | At most *n* calls per session across all tools matching the glob. The n+1th call is denied with a \"do not retry\" message. |\r\n| `--gate <globs>` | Each call **pauses for human approval** via [MCP elicitation](https://modelcontextprotocol.io) \u2014 your client shows an approve/deny prompt with the tool name and arguments. No response within the timeout (default 120s) means deny. Clients without elicitation support fail closed: the call is denied. |\r\n| *(always on)* | Every decision is appended to `~/.aroha/mcp-guard.jsonl` \u2014 tool, timestamp, allow/deny \u2014 plus a session receipt on exit. Disable with `--no-log`. |\r\n\r\nGlobs are simple: `*` matches anything, `?` one character, matching is case-insensitive. Rules also accept env vars (`AROHA_GUARD_BLOCK`, `AROHA_GUARD_LIMIT`, `AROHA_GUARD_GATE`) so config args stay short.\r\n\r\n## Why fail closed?\r\n\r\nEvery ambiguous situation resolves to *deny*: unknown elicitation support, approval timeout, malformed rules at startup. A guard that fails open is decoration.\r\n\r\n## Recipes\r\n\r\n**Read-only database access:**\r\n```\r\n--block \"insert_*,update_*,delete_*,drop_*,execute_*\"\r\n```\r\n\r\n**Filesystem with a write budget:**\r\n```\r\n--limit \"write_file:20\" --block \"delete_*\" --gate \"move_*\"\r\n```\r\n\r\n**Anything irreversible needs a human:**\r\n```\r\n--gate \"send_*,delete_*,merge_*,deploy_*,publish_*\"\r\n```\r\n\r\n**Audit only (observe before you restrict):**\r\n```\r\n--name \"github\" --log ./github-audit.jsonl\r\n```\r\n\r\n## Library use\r\n\r\nThe rule engine and proxy are exported for embedding:\r\n\r\n```typescript\r\nimport { GuardEngine, parseRules } from \"@aroha-sdk/mcp-guard\";\r\n\r\nconst engine = new GuardEngine(parseRules({\r\n  block: [\"delete_*\"],\r\n  limit: [\"create_*:5\"],\r\n  gate:  [\"merge_*\"],\r\n}));\r\n\r\nengine.decide(\"delete_repo\");  // { action: \"block\", reason: \"...\" }\r\n```\r\n\r\n## Part of the Aroha Protocol\r\n\r\n`mcp-guard` is the zero-config entry point to [Aroha](https://www.aroha-labs.com) \u2014 cryptographically bounded authority for AI agents. When you outgrow session-scoped globs and need signed, verifiable, delegable authority (spending mandates, task mandates, receipts), the same rules become [Ed25519-signed mandates](https://www.aroha-labs.com/docs/mandates) that survive across agents and organisations.\r\n\r\nMCP calls the tools. **mcp-guard bounds what they're allowed to do.**\r\n\r\n## License\r\n\r\nMIT \u00a9 Aroha Labs\r\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-07-14T03:22:12.927Z",
+   "0.2.0": "2026-08-28T22:58:03.161Z",
+   "created": "2026-07-14T03:22:12.585Z",
+   "modified": "2026-08-28T22:58:03.341Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aroha-sdk/mcp-guard@0.1.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-guard_0.1.0_1783999332764_0.19725367092820512"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5cb84d00e2af]",
+     "name": "aroha-labs"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "aroha-mcp-guard": "dist/cli.js",
+     "mcp-guard": "dist/cli.js"
+    },
+    "description": "A firewall for your AI agent's tools \u2014 wrap any MCP server with spending limits, action limits, human approval gates, and a full audit log. Zero code, one config change.",
+    "devDependencies": {
+     "typescript": "^5.4.5",
+     "vitest": "^1.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-DKwF2sMENuS/VHv/gqlvDx0xLRIzizC28dpJlllTVCh0BXGDWwQKGv1sy5RnFl9pPPn8OTi1Rfq6n1M0d3MC3g==",
+     "shasum": "90ec56829446a3aeaf4fba988be640efbf08cea8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCNtlTaB1VRB+fWCesdU3vvZ82ZXD3MAUYgWi4DFytkQwIhAP+4YyIp44akB1ww2AodMlMgcwEgGkn1Un2XgupNWSlb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aroha-sdk/mcp-guard/-/mcp-guard-0.1.0.tgz",
+     "unpackedSize": 66795
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b2e9bf225e88141f030fc7a09433d1300a837b3c",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "guardrails",
+     "firewall",
+     "ai-agent",
+     "safety",
+     "aroha",
+     "human-in-the-loop",
+     "audit"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5cb84d00e2af]",
+      "name": "aroha-labs"
+     }
+    ],
+    "name": "@aroha-sdk/mcp-guard",
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsc -p tsconfig.json --watch",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aroha-sdk/mcp-guard@0.2.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-guard_0.2.0_1787957883027_0.6021568399430601"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5cb84d00e2af]",
+     "name": "aroha-labs"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "aroha-mcp-guard": "dist/cli.js",
+     "mcp-guard": "dist/cli.js"
+    },
+    "description": "A firewall for your AI agent's tools \u2014 wrap any MCP server with spending limits, action limits, human approval gates, and a full audit log. Zero code, one config change.",
+    "devDependencies": {
+     "typescript": "^5.4.5",
+     "vitest": "^1.6.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 23,
+     "integrity": "sha512-qka71w56c8WcXqebNYOY54luobTdUDB98fbXdnkhey2cMFkmPEY/R62xN5/RLMBg7tqHaeApitMzxbvlmd2L+A==",
+     "shasum": "423a1dfe87f72c528dc678c7c80c2ab1a3189a26",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGtii4h+Ry8+pNuwikb//lE8CNHpZ+iRN71a+lt9Net5AiAubs6oZ09fbrKcKYUPaQaxmlFYnYNaAoTr+wFMOGJzLg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aroha-sdk/mcp-guard/-/mcp-guard-0.2.0.tgz",
+     "unpackedSize": 74858
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c7b1bd835dfecbf5a685f0acfde517735c1407b5",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "guardrails",
+     "firewall",
+     "ai-agent",
+     "safety",
+     "aroha",
+     "human-in-the-loop",
+     "audit"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5cb84d00e2af]",
+      "name": "aroha-labs"
+     }
+    ],
+    "name": "@aroha-sdk/mcp-guard",
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "dev": "tsc -p tsconfig.json --watch",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   }
+  }
+ },
+ "name": "@aroha-sdk/mcp-guard",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@aroha-sdk%2Fmcp-guard"
+}

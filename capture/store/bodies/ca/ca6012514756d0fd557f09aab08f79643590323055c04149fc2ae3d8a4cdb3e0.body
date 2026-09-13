@@ -1,0 +1,1859 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ec477cf92e56]",
+    "name": "quotentiroler"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.1.6",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.4.0",
+   "0.4.1",
+   "0.5.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@maxhealth.tech/mcp-http",
+  "_rev": "17-9d3b0570deb7f9e15215b2ccba61a6e5",
+  "bugs": {
+   "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+  },
+  "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+  "dist-tags": {
+   "latest": "0.5.0",
+   "legacy": "0.3.3"
+  },
+  "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ec477cf92e56]",
+    "name": "quotentiroler"
+   }
+  ],
+  "name": "@maxhealth.tech/mcp-http",
+  "readme": "# @maxhealth.tech/mcp-http\n\nOAuth, CORS and observability layer for [MCP](https://modelcontextprotocol.io/) HTTP servers, built on the official [`@modelcontextprotocol/server`](https://www.npmjs.com/package/@modelcontextprotocol/server) SDK.\n\nBuilt on the **Web Fetch API** \u2014 runs on Cloudflare Workers, Pages Functions, Deno Deploy, Bun, Node 18+, and any Hono deployment.\n\n## Features\n\n- **2026-07-28 protocol via the SDK** \u2014 delegates to `createMcpHandler`, so `server/discover`, MRTR, `resultType` and `-32020 HeaderMismatch` come from upstream; 2025-era clients are still served statelessly\n- **RFC 9728** protected-resource metadata served automatically, at the path-aware route (`/.well-known/oauth-protected-resource/mcp` for an endpoint mounted at `/mcp`)\n- **RFC 8414** `/.well-known/oauth-authorization-server` (optional)\n- **Bearer extraction + 401 gate** with `WWW-Authenticate` resource-metadata pointer\n- **JWT `exp` early-rejection** (configurable, 30 s clock-skew buffer)\n- **CORS** \u2014 permissive defaults (`*`), fully configurable per-origin, or disabled\n- **`forwardBearer(token)`** \u2014 inject the caller's token into upstream `fetch` calls\n- **Observability** \u2014 `onRequest` hook with outcome, status, and duration\n- **Error handling** \u2014 `onError` hook with JSON-RPC 500 fallback\n- **Adapters** \u2014 first-class Hono and Cloudflare Pages Functions adapters\n\n## Install\n\n```bash\n# bun\nbun add @maxhealth.tech/mcp-http @modelcontextprotocol/server\n\n# npm\nnpm install @maxhealth.tech/mcp-http @modelcontextprotocol/server\n\n# pnpm\npnpm add @maxhealth.tech/mcp-http @modelcontextprotocol/server\n```\n\n`@modelcontextprotocol/server` is a **peer dependency** (^2.0.0).\n`hono` is an **optional peer dependency** (\u2265 4.12.0) \u2014 only needed for the `/hono` adapter.\n\n> **Upgrading from 0.2.x?** The peer moved from the retired monolithic\n> `@modelcontextprotocol/sdk` to `@modelcontextprotocol/server`. Every export still\n> works \u2014 see [Migrating from 0.2.x](#migrating-from-02x).\n\n## Quick start\n\n### Cloudflare Workers\n\n```ts\nimport { createWorkerFetch, forwardBearer } from \"@maxhealth.tech/mcp-http\";\nimport { McpServer } from \"@modelcontextprotocol/server\";\n\nexport default {\n  fetch: createWorkerFetch({\n    authorizationServer: \"https://auth.example.com\",\n    createServer: (token) => {\n      const server = new McpServer({ name: \"my-api\", version: \"1.0.0\" });\n      // Register tools, resources, prompts\u2026\n      // Use forwardBearer(token) to call upstream APIs with the caller's token\n      return server;\n    },\n  }),\n};\n```\n\n### Hono\n\n```ts\nimport { Hono } from \"hono\";\nimport { mcpHono } from \"@maxhealth.tech/mcp-http/hono\";\nimport { forwardBearer } from \"@maxhealth.tech/mcp-http\";\n\nconst app = new Hono<{ Bindings: Env }>();\n\napp.route(\n  \"/\",\n  mcpHono({\n    authorizationServer: \"https://auth.example.com\",\n    createServer: (token, { c }) => {\n      const server = new McpServer({ name: \"my-api\", version: \"1.0.0\" });\n      const fetchFn = forwardBearer(token);\n      const fhirUrl = c.env.FHIR_BASE_URL;\n      // Register tools using fetchFn and fhirUrl\u2026\n      return server;\n    },\n  }),\n);\n\nexport default app;\n```\n\n### Cloudflare Pages Functions\n\n```ts\n// functions/[[path]].ts\nimport { mcpPagesFunction } from \"@maxhealth.tech/mcp-http/cloudflare\";\nimport { forwardBearer } from \"@maxhealth.tech/mcp-http\";\n\nexport const onRequest = mcpPagesFunction({\n  authorizationServer: \"https://auth.example.com\",\n  createServer: (token, { env }) => {\n    const server = new McpServer({ name: \"my-api\", version: \"1.0.0\" });\n    // Use forwardBearer(token) for upstream calls\n    return server;\n  },\n});\n```\n\n### Generic (any runtime)\n\n```ts\nimport { createMcpHttpHandler } from \"@maxhealth.tech/mcp-http\";\n\nconst handler = createMcpHttpHandler({\n  authorizationServer: \"https://auth.example.com\",\n  createServer: (token) => buildMyMcpServer(token),\n});\n\n// Use with any runtime that supports Request \u2192 Response\nBun.serve({ fetch: handler });\nDeno.serve(handler);\n```\n\n## Configuration\n\n`createMcpHttpHandler(config)` accepts a `McpHttpHandlerConfig` object:\n\n| Option                        | Type                                 | Default           | Description                                                                                                                                                                       |\n| ----------------------------- | ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `authorizationServer`         | `string`                             | **(required)**    | OAuth Authorization Server URL (issuer). Trailing slash is stripped automatically. Populates `authorization_servers` in the protected-resource metadata.                          |\n| `createServer`                | `(token, ctx) => McpServer`          | **(required)**    | Factory called per-request after Bearer extraction. Receives the raw token and a `PlatformCtx`. May be async.                                                                     |\n| `mcpPath`                     | `string`                             | `\"/mcp\"`          | Path the MCP endpoint listens on. Must start with `/`. Also used as the `resource` path in the RFC 9728 metadata.                                                                 |\n| `earlyRejectExpiredTokens`    | `boolean`                            | `true`            | Reject JWTs with expired `exp` before hitting upstream. Set `false` for opaque tokens.                                                                                            |\n| `cors`                        | `CorsOptions \\| false`               | `{ origin: \"*\" }` | CORS configuration. Set `false` to disable.                                                                                                                                       |\n| `authorizationServerMetadata` | `AuthorizationServerMetadata`        | \u2014                 | If provided, serves at `GET /.well-known/oauth-authorization-server`. Takes precedence over `discoverAuthorizationServer`.                                                        |\n| `discoverAuthorizationServer` | `boolean`                            | `false`           | When `true`, fetches and proxies the AS metadata from `{authorizationServer}/.well-known/oauth-authorization-server`. Result is cached; failures are retried on the next request. |\n| `protectedResourceMetadata`   | `Partial<ProtectedResourceMetadata>` | \u2014                 | Extra fields merged into the protected-resource metadata (`resource` and `authorization_servers` cannot be overridden).                                                           |\n| `onRequest`                   | `(event) => void`                    | \u2014                 | Observability hook called once per request with outcome, status, and duration.                                                                                                    |\n| `onError`                     | `(err, req) => Response?`            | \u2014                 | Error hook. Return a `Response` to override the default JSON-RPC 500.                                                                                                             |\n\n### CORS options\n\n```ts\ncreateMcpHttpHandler({\n  // \u2026\n  cors: {\n    origin: [\"https://app.example.com\", \"https://admin.example.com\"],\n    credentials: true,\n    maxAge: 3600,\n    allowHeaders: [\"X-Custom-Header\"],\n    exposeHeaders: [\"X-Request-Id\"],\n  },\n});\n```\n\nThe default CORS config allows `*` origins and admits the MCP-required request headers (`Content-Type`, `Authorization`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`).\n\nPer-tool `Mcp-Param-*` headers (SEP-2243) are admitted dynamically: any such header a client lists in its preflight `Access-Control-Request-Headers` is echoed back in `Access-Control-Allow-Headers`. Header names outside that prefix are never reflected, so you still declare your own via `allowHeaders`.\n\n`Access-Control-Allow-Methods` is derived per route from the same table that produces the `405` `Allow` header, so preflight only advertises methods the endpoint actually serves (`POST` on the MCP path, `GET` on the well-known documents).\n\n## Exports\n\nThe package exposes three entry points:\n\n| Import path                           | Contents                                       |\n| ------------------------------------- | ---------------------------------------------- |\n| `@maxhealth.tech/mcp-http`            | Core handler, types, and \u00e0 la carte primitives |\n| `@maxhealth.tech/mcp-http/hono`       | `mcpHono()` adapter                            |\n| `@maxhealth.tech/mcp-http/cloudflare` | `mcpPagesFunction()` adapter                   |\n\n### \u00c0 la carte primitives\n\nFor advanced use cases, individual building blocks are re-exported from the main entry point:\n\n```ts\nimport {\n  // JWT utilities\n  extractBearer, // (header: string | null) => string | null\n  isJwtExpired, // (token: string) => boolean\n\n  // Upstream fetch helper\n  forwardBearer, // (token: string) => FetchFn\n\n  // CORS\n  applyCors, // (headers: Headers, req: Request, options: CorsOptions) => void\n  handlePreflight, // (req: Request, corsConfig: CorsOptions | false) => Response | null\n\n  // Well-known metadata\n  buildProtectedResourceMetadata,\n  buildAuthorizationServerMetadata,\n  protectedResourceResponse,\n  authorizationServerResponse,\n  protectedResourcePath, // (mcpPath) => RFC 9728 \u00a73.1 path-aware route\n  PROTECTED_RESOURCE_PATH, // \"/.well-known/oauth-protected-resource\" (bare; compatibility alias)\n  AUTHORIZATION_SERVER_PATH, // \"/.well-known/oauth-authorization-server\"\n\n  // Transport\n  handleMcpPost, // (options: HandleMcpPostOptions) => Promise<Response>\n\n  // JSON-RPC errors\n  toJsonRpcErrorBody,\n  toJsonRpcErrorResponse,\n  JSON_RPC_ERROR_CODES,\n} from \"@maxhealth.tech/mcp-http\";\n```\n\n## Request lifecycle\n\n```\nRequest\n  \u2502\n  \u251c\u2500 OPTIONS  \u2192  CORS preflight 204\n  \u2502\n  \u251c\u2500 GET /.well-known/oauth-protected-resource{mcpPath}  \u2192  RFC 9728 metadata (resource = origin+mcpPath)\n  \u251c\u2500 GET /.well-known/oauth-protected-resource           \u2192  same document (compatibility alias)\n  \u251c\u2500 GET /.well-known/oauth-authorization-server \u2192  RFC 8414 metadata (static, discovered, or 404)\n  \u2502\n  \u251c\u2500 POST /mcp\n  \u2502   \u251c\u2500 No Bearer token?  \u2192  401 + WWW-Authenticate\n  \u2502   \u251c\u2500 JWT expired?      \u2192  401 (if earlyRejectExpiredTokens)\n  \u2502   \u2514\u2500 Valid token       \u2192  createServer() \u2192 MCP transport \u2192 Response\n  \u2502\n  \u2514\u2500 anything else  \u2192  404\n```\n\nAll responses pass through the CORS middleware and the `onRequest` observability hook.\n\n### Protected-resource metadata route\n\n[RFC 9728 \u00a73.1](https://datatracker.ietf.org/doc/html/rfc9728#section-3.1) forms the metadata URL by inserting `/.well-known/oauth-protected-resource` **between the host and the resource's path**, rather than appending the resource path to a fixed well-known URL. So a resource at `https://api.example.com/mcp` publishes its metadata at:\n\n```\nhttps://api.example.com/.well-known/oauth-protected-resource/mcp\n```\n\nThat is the route this package serves, and the URL advertised in the `WWW-Authenticate: Bearer resource_metadata=\"\u2026\"` challenge on a 401. Use `protectedResourcePath(mcpPath)` to compute it yourself:\n\n```ts\nimport { protectedResourcePath } from \"@maxhealth.tech/mcp-http\";\n\nprotectedResourcePath(\"/mcp\"); // \"/.well-known/oauth-protected-resource/mcp\"\nprotectedResourcePath(\"/api/v1/mcp\"); // \"/.well-known/oauth-protected-resource/api/v1/mcp\"\nprotectedResourcePath(\"/\"); // \"/.well-known/oauth-protected-resource\"\n```\n\nA root-mounted resource has no path component to insert, so it uses the bare well-known path.\n\nThe bare path is **also** served, for every mount point, as a compatibility alias. Versions up to and including 0.2.1 served only the bare path, so clients that discovered the endpoint against an older release keep working. Prefer the path-aware route in new code.\n\n## Migrating from 0.2.x\n\n0.3.0 re-layers this package on the official v2 SDK. **No export was removed or changed**, so most upgrades are a dependency swap:\n\n```diff\n- npm install @modelcontextprotocol/sdk\n+ npm install @modelcontextprotocol/server\n```\n\n```diff\n- import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\n+ import { McpServer } from \"@modelcontextprotocol/server\";\n```\n\nThe monolithic `@modelcontextprotocol/sdk` was retired in favour of focused packages; `@modelcontextprotocol/server` went stable at 2.0.0 on 2026-07-27. This package's own exports are unchanged, but the v2 `McpServer` is **not** a full drop-in: it dropped the short-form registration methods that v1 still accepted. If your `createServer` uses them, rename to the `register*` forms \u2014 the signatures are identical:\n\n```diff\n- server.tool(...)      \u2192 server.registerTool(...)\n- server.resource(...)  \u2192 server.registerResource(...)\n- server.prompt(...)    \u2192 server.registerPrompt(...)\n```\n\n`WebStandardStreamableHTTPServerTransport` is API-compatible across the two.\n\n### Who owns what, as of 0.4.0\n\nProtocol semantics belong to the SDK. `handleMcpPost` delegates to `createMcpHandler`, so the 2026-07-28 revision, `server/discover`, the `_meta` envelope, MRTR, `resultType`, and the inbound validation ladder that emits `-32020 HeaderMismatch` all come from there rather than being reimplemented here.\n\n`legacy` is left at its default `'stateless'`, so 2025-era clients are still served \u2014 one fresh instance per request, no sessions \u2014 instead of being turned away.\n\nRemoved in 0.4.0, with nothing to migrate to because the protocol no longer has them:\n\n| Removed                                        | Why                                                                               |\n| ---------------------------------------------- | --------------------------------------------------------------------------------- |\n| `handleMcpPostStateful`, `SessionStore`        | Sessions are gone in 2026-07-28; sampling is replaced by in-result input requests |\n| `stateful`, `sessionTtlMs` config              | Selected the session path                                                         |\n| `Mcp-Session-Id`, `Last-Event-ID` CORS entries | Named headers the revision no longer defines                                      |\n\n`handleMcpPost` keeps its name and its `onError` contract. Its options changed shape: it now takes a `createServer` factory rather than a constructed `server`, because the SDK builds one instance per serving unit, per era.\n\n**Why `onError` still exists.** `createMcpHandler`'s `onerror` is reporting-only and, per the SDK's documentation, \"never alters the response\". `onError` here may still return a `Response` to override the reply: the delegation captures out-of-band reports and routes them, plus anything thrown, through the same hook. That is the one piece of behaviour the SDK cannot express, and the reason this wrapper exists at all rather than consumers calling `createMcpHandler` directly.\n\n### What this package still owns\n\nThe SDK has no equivalent for these, so they are not going anywhere:\n\n- **CORS** \u2014 the SDK ships none at all. Route-aware preflight, `Mcp-Param-*` prefix admission, and the shared route table live here.\n- **`forwardBearer(token)`** \u2014 on-behalf-of upstream `fetch`.\n- **JWT `exp` pre-check** \u2014 cheap local rejection with clock-skew buffer, before any verifier round-trip.\n- **`onRequest` / `onError`** hooks.\n- **One-call wiring** \u2014 `createMcpHttpHandler` and the Hono / Pages adapters.\n\n## Development\n\n```bash\nbun install\nbun run typecheck    # tsc --noEmit\nbun run lint         # eslint .\nbun run format:check # prettier --check .\nbun test             # 121 tests\nbun run check        # typecheck + lint + format + test with coverage + build\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+  },
+  "time": {
+   "0.1.0": "2026-05-07T23:10:00.653Z",
+   "0.1.1": "2026-05-08T08:19:55.904Z",
+   "0.1.2": "2026-05-08T09:47:39.101Z",
+   "0.1.3": "2026-05-08T11:49:55.327Z",
+   "0.1.4": "2026-05-31T19:25:25.172Z",
+   "0.1.5": "2026-05-31T19:30:46.926Z",
+   "0.1.6": "2026-05-31T19:49:04.373Z",
+   "0.2.0": "2026-07-31T21:20:16.409Z",
+   "0.2.1": "2026-07-31T21:34:34.590Z",
+   "0.2.2": "2026-07-31T23:10:58.183Z",
+   "0.3.0": "2026-07-31T22:58:17.218Z",
+   "0.3.1": "2026-08-01T12:58:29.599Z",
+   "0.3.2": "2026-08-07T13:48:14.153Z",
+   "0.3.3": "2026-08-07T16:29:20.426Z",
+   "0.4.0": "2026-08-07T16:02:51.768Z",
+   "0.4.1": "2026-08-07T16:25:40.454Z",
+   "0.5.0": "2026-08-07T16:47:43.849Z",
+   "created": "2026-05-07T23:10:00.427Z",
+   "modified": "2026-08-07T16:47:44.225Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.0",
+    "_nodeVersion": "22.12.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.0_1778195400513_0.7184218607224429"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ec477cf92e56]",
+     "name": "quotentiroler"
+    },
+    "_npmVersion": "11.6.4",
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 30,
+     "integrity": "sha512-aGhxLZbk4YamEuerrlvhI1DvjkDpY/Bd1n18YgM7xJ1TvbHtcq7/W1tom4XEhjVha1jC6aDmQ9O2Q8llCNE6Xg==",
+     "shasum": "60fd1707de17e8431130e85868d64cbfd5ed6a30",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEFBBKDniYi2zstzsR9kDel7iRnrpcFeNrY0MnwXP6eHAiEAnOZ5bnlDGAXFmmRz7RuE7DN+vx9sNH++eEiyS6cjNn0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.0.tgz",
+     "unpackedSize": 148150
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "240d7c51efd850d8ef295c7c95995d81c93a4ffe",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "ci": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.1_1778228395693_0.7813442385676757"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.14.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.1"
+     },
+     "fileCount": 46,
+     "integrity": "sha512-ZRosGVvdC+VZbRqYWN2nkeQ9vL7pZtZ2qvUvJzn1y39hMYIUMRV4D+PL95Oyk2MEQsJ8Gv5SCMl1Bo4c3zqS0Q==",
+     "shasum": "086311e8dc5a841c26e2998a26b71b22572490aa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCMLK574AIeeNcFRtZSK38QAsj3Unlghqh0iklOcwPV4AIgWzMyf3c2HJW1a8UD2bu0zlZ5LyqWfvMASEZyCN7qCh4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.1.tgz",
+     "unpackedSize": 77356
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "1be9a727388c6667b402283f1102862bdf945940",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "ci": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run ci",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.2_1778233658958_0.031669735796201026"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.14.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.2"
+     },
+     "fileCount": 46,
+     "integrity": "sha512-+/GdpJi9zCbXkp6bXhUzLTB44FAA7FOv2x66JqpeeLbk0lDZX/U/NFDat2U5h8r1Nx/Scc+xM6Jpo2HZDD9gag==",
+     "shasum": "3cebd9da6f41ef490f2be692c26eff94f2d539a5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDyiyvJV+ZGDmxXbl44XUqgTKaes7P/ryMS9rfExlQpkgIhAJa2XsFYnxT9/2feTOjRg1yjJxfiolLgv1OZllSSYhMJ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.2.tgz",
+     "unpackedSize": 83317
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "9d36e821c5d71b4b154c0b0123782fbd0c1cbf66",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "ci": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run ci",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.3",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.3_1778240995192_0.6465198423144756"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.14.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.3"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-jQ+4qPs8pzVJN172ZvmxmESKsnDWdLtSuBuXrrg/FfHSwDSkMB/SgM9TX8VjC+M+k25368L7aEjO5zLHE8ptHg==",
+     "shasum": "a67c5a31f6de2304627a4cdc803645dd41d773eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDA/I4NjaDyLIjUhpQ0kogEqn+MhfZWoxySx8DSeK9guAiEAxtjprpIa4ZiNjAsEQuz+piOhvw8InYnflNoJf8G8fms="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.3.tgz",
+     "unpackedSize": 95005
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "f4be7e6882d4f842f33987fc1a23e5a413f86ced",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.4",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.4_1780255525020_0.8430507365123892"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.4"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-zJOE/iYFbLbSKmOlxkad5qZQAysEkJ2Mj6tZ2VyvrVysdNJ3DZsp0Ub2exGQQ9EwWgNjzZGJDRj4Y5SZi6cAbg==",
+     "shasum": "ad2bcc3f7ccbd4e79d11e9c24d85e016c84532a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBEYxYGOkISPdcwDJoCXn+igu9xeAjsPbdN/d16nLo/zAiEA/AXwflg0x5LyBqkKx9OzYeRe92UVcJoALVtEiu3dU7g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.4.tgz",
+     "unpackedSize": 112042
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "eb9ca5f14b76e191ebbc6fd03db6fb07ff90aef7",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.5",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.5_1780255846805_0.5490714210191143"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.5"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-eN136OSiHDh+i/ouT5RCUJ0z3s3bMYZrK+v1nppfth4Po1jB7rpasHtYOsJdBGrciWLfnTMoF72SEE/synH8cA==",
+     "shasum": "51b647b81a7e42be862b39afef1ea1c59fcfaca6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC8sONMrqF+KdI4Q9tm9TdD4RJr2nXTukOd6o2Dj2BQUgIhAMQU1XR2msff9AuvIOqBVBr5vKWyZjoXi2tA56qg2U7K"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.5.tgz",
+     "unpackedSize": 112324
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "1bdb8bd16d948411e4015fe2397ad77d71487ef4",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.5"
+   },
+   "0.1.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.1.6",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.1.6_1780256944196_0.6328660307469727"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@types/bun": "^1.3.0",
+     "eslint": "^10.3.0",
+     "hono": "^4.12.0",
+     "prettier": "^3.8.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.1.6"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-hw5AQGyv84TQYNfK/sKDFn+iwLE0cyGyWwBHQAV1ThjIdhkHTBH/C8t3FVhDwTMbOCK03jYnzdKoR+6q3LwUHA==",
+     "shasum": "68a0122e885071d7d5bdca4db741640bc879dd66",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBBXfMRK3ihN4lZNH1fgeEFu6at5fb3cKEr23yEP0N3FAiEAtpTiq2JySZt9NhJiNvGMyjzrmAGyEYBbz3fXuP0C7dA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.1.6.tgz",
+     "unpackedSize": 112985
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "9032c934ce7dfc63eee4efe44c98a4ebd3862874",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.6"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.2.0_1785532816284_0.9728162929128665"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.2.0"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-fxWLPElnnXc0oizK+cJdpm4KzlxPNm0eewXiIGw19wt27PP16lgyjM9mu/gzkXtvCI9nrY9nRWnXQ8IblU5PKw==",
+     "shasum": "69bf4b4c1293b2c58d54779169a75baf69cfd8ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGCC8UaMooj0BP/P226IdT7M3W6o5JvJ0YQgvPWahkE9AiEA50668igVBYoifKILqYCGlzFCBbmZV6P4FnSAq9a1aZc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.2.0.tgz",
+     "unpackedSize": 128011
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "5791f29708eaa20f7080eca38dde85fc44121825",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.2.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.2.1_1785533674429_0.6919625018669207"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.2.1"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-ufMFDEHJGc24ipuXs/+d8r5WGBVOl7fUUTgJJLVJNllfXj3syp0jDHa5tDeCWfuHMnPkc8OVdTk2761DiXdlYg==",
+     "shasum": "8248a97f8a247b6ca3cc494bc12a613a5b4d5004",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQChW2DVx0F2C5/zGtGRB5kDTFgGM/hsY4ZQIPRyi1hI1gIhAM4Y9yeQlu2pymoi+8uTprJq59O0jXGbWbusmXhF2HUq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.2.1.tgz",
+     "unpackedSize": 128988
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "cf18b922bd9c49d47d58294360dc51d67a820269",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.2.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.2.2_1785539458044_0.6561801199968222"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "Framework-agnostic MCP HTTP transport with RFC 9728 OAuth plumbing for edge runtimes",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.2.2"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-PCNh71O1DRqXTLkTVBPY+shrYDKpeXLfjDyotddIiIN3gKvItozWIpsnxI/eTjJGrq55LDPXYmgrHwrPJT//Rw==",
+     "shasum": "84ef2180f62d6aff22cdd16bd3b6fa9749db0bcb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDd+/bT4uLlYe0xuqqBSghCkMaM/nC+F52Vcd1unW6/HgIgDjchHsadLisinKyxFbPpD5I89qXqyhFF2keDH8TOQTE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.2.2.tgz",
+     "unpackedSize": 134949
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "53afa4bd94875096da1f7e8301cb4a065a227ed0",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.29.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.3.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.3.0_1785538697066_0.6459289322426358"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.3.0"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-v45uZyysExIFLpabfZ+ApWkIgT9zTThLg3jV3CLDsZoRxNyaMkg7wQOlSqryIvT9wClZyn2Wj3vhoiAJONCPPQ==",
+     "shasum": "e6aa4828e35f36ac5430b2f5e7515592892efeb0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDRMFXad1+hTFFWuVslrEl2U1typna2v+VWlAytiWx6DgIhAIBMvamiSvLHqIWmRkViyWuFWkAiCkQJ8UGWwmgjTgL9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.3.0.tgz",
+     "unpackedSize": 150174
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "0b4a9a3ad288790523ceeeae56bee275dfc7b10e",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.3.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.3.1_1785589109445_0.5792863860437101"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.3.1"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-ja1b0P48DDEAYKbmY7kr/Alw1yrE/nxIUkSbz/1Fqr0KYd2Dfp1/zqGY0O75EroXPZG+IXjOw+gbyCwCDp4/vA==",
+     "shasum": "504bbe5eba73735c7629a73a403c0c8be9887bfa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC5ghjanDi7zc1kwaMDDkk/WFQ5nTmmZ8Zt8eDCSzJF2gIgX4e7+RkV+g2ffq2T7kH7d/w5Oe2hVTHjVm4hfYaYagU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.3.1.tgz",
+     "unpackedSize": 152164
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "1566189110b13bdf69e864cfc69da08ff18d08ee",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.3.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.3.2_1786110493981_0.3081129053832943"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.3.2"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-HYS8Cd7j8nUMSmihIcXVmZzUq01gHuUvP0genL2vLRFe/ZfKjxWSN6hkTxmW9gaJEBjIv3iyXQY/OipdzA4S6w==",
+     "shasum": "a720c145ac6c65dea7c25ece61531a8e936fdabb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA990imvAc+tUkpIMZkhrI8D6BHVleFX4vol31VU5YlaAiEAy90g3d6mTmLpOhQiJjkCEh4nzsKkTL5t1xgqzvNKxXA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.3.2.tgz",
+     "unpackedSize": 155233
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "cac330895011b7b53e7e351a5885a38980fb70f3",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.3.3",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.3.3_1786120160286_0.8878501938423979"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.3.3"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-Unkc/cwEWSmjz+onezbhWpmaIkOyNzB7UXHl2Co/p2cdRNJ67Tdssi96tRAbcwHzsI8gsElHeklAcakTlQXK4Q==",
+     "shasum": "f75dd5a461ca3639e27539fbef9ec1c2bc893224",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB18VPCQz3OyKj0ZohL56v7gmIx1ntta/cdBX2Z7bLZ4AiEAqMcoLIHRE2gBPXYZEWRSOyS9OzYXhe3sWYiL8Bt8yjk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.3.3.tgz",
+     "unpackedSize": 156245
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "e9a4e6adfbc47d911c4330440978632fce3250ae",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.3"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.4.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.4.0_1786118571537_0.21525866227130974"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.4.0"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-NXwaOFgIyrzzAPk5lLv2b2X+1JTtWI4m9fb5FOR+OSYKT33BpWBZQM15i/qhS9qmaOSv7yTZOHgK+HC2V8wwUQ==",
+     "shasum": "8a6787b6f190a8bee220eaa2fe1a4bebaf702c4d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCGncKBXt2SIcE+tMdBxOrqKC620M93jT2RC1nBYmMhLwIhAONco0RIjRAE9WT7WJ2oJeqolKtXDS44X+a0QxQybS7X"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.4.0.tgz",
+     "unpackedSize": 136532
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "d3745df8dd054df60c50a387c99eb0c43db52249",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.4.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.4.1_1786119940306_0.5372495731074267"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.4.1"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-IKXTG+4SWT9pe214FtdrrwGZpmuul5Rm58R79h7s8w9NS+W0qj6rr+yKX/z1iZJE8JZ/3/7t28WL9i1uH2oYgA==",
+     "shasum": "acbc0fbfaf314a05918c101f68da5e2d94a0368b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFujEGtWt4Qf3xuDAAvR5zbphY88sW4DXHXQ1/vgruG1AiEAjxj9AzWyiaej2f3oe1mwmKFnoPNQwOcsRKdBonQJtOw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.4.1.tgz",
+     "unpackedSize": 135495
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "ad058d9ba51ef37330e1155f49c441e8b3c12d81",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.4.1"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@maxhealth.tech/mcp-http@0.5.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-http_0.5.0_1786121263694_0.6013379231078588"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:848a92a1-9c4f-47d2-9f0e-bb4c05fafac6"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "bugs": {
+     "url": "https://github.com/Max-Health-Inc/mcp-http/issues"
+    },
+    "description": "OAuth, CORS and observability layer for MCP HTTP servers on edge runtimes, built on @modelcontextprotocol/server",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "@types/bun": "^1.3.14",
+     "eslint": "^10.8.0",
+     "hono": "^4.12.33",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.65.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@maxhealth.tech%2fmcp-http@0.5.0"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-Axyn1SIF9y5PlLZ9oZByBxbB1RDHqoj+AKpD+zOhGb6kRftY+BWbqrDI0JJS+2CLb7CGM92oh1c7c9rbXp1VFg==",
+     "shasum": "d0465586d823086267f74e94ec1f33b016a11656",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCOOWOtPH5ShOX8y1qF4FmrjYJNt9Vwdcb2YvvpcfVryAIgfpbRX2FGFdCgiEfGahWF5qg+D/dnE3kOYhZLe3kdyvg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@maxhealth.tech/mcp-http/-/mcp-http-0.5.0.tgz",
+     "unpackedSize": 140429
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+     },
+     "./cloudflare": {
+      "import": "./dist/cloudflare/index.js",
+      "types": "./dist/cloudflare/index.d.ts"
+     },
+     "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+     }
+    },
+    "gitHead": "455623f8416fa0bdcb2a2a85088b4ec3bfd2b8c1",
+    "homepage": "https://github.com/Max-Health-Inc/mcp-http#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ec477cf92e56]",
+      "name": "quotentiroler"
+     }
+    ],
+    "name": "@maxhealth.tech/mcp-http",
+    "peerDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "hono": ">=4.12.0"
+    },
+    "peerDependenciesMeta": {
+     "hono": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Max-Health-Inc/mcp-http.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "bun run typecheck && bun run lint && bun run format:check && bun test --coverage && bun run build && node -e \"require('fs').existsSync('dist/src/index.js') || process.exit(1)\"",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "lint:fix": "eslint . --fix",
+     "prepublishOnly": "bun run check",
+     "test": "bun test",
+     "test:coverage": "bun test --coverage --coverage-threshold 0.9 --coverage-include-source-map",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   }
+  }
+ },
+ "name": "@maxhealth.tech/mcp-http",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@maxhealth.tech%2Fmcp-http"
+}

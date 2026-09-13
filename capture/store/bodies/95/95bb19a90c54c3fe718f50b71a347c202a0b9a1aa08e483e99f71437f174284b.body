@@ -1,0 +1,332 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:63b526e6afcf]",
+    "name": "shwetankshrey"
+   },
+   {
+    "email": "[redacted-email:096d0ee99e27]",
+    "name": "ishitamundhra"
+   },
+   {
+    "email": "[redacted-email:09ef593d7707]",
+    "name": "eternaltangent"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@enterpret/zendesk-mcp-server",
+  "_rev": "4-9fd9bc158f5a32c935cd1d66401199bb",
+  "author": {
+   "email": "[redacted-email:1e3978a7e698]",
+   "name": "Digital4Better"
+  },
+  "bugs": {
+   "url": "https://github.com/aavaz-ai/zendesk-mcp-server/issues"
+  },
+  "description": "MCP server for Zendesk Support & Help Center APIs. Forked from @fruggr/zendesk-mcp-server; adds ZENDESK_OAUTH_BEARER env mode for headless broker-supplied OAuth tokens.",
+  "dist-tags": {
+   "latest": "0.2.0"
+  },
+  "homepage": "https://github.com/aavaz-ai/zendesk-mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "zendesk",
+   "help-center",
+   "modelcontextprotocol",
+   "ai",
+   "claude"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:63b526e6afcf]",
+    "name": "shwetankshrey"
+   },
+   {
+    "email": "[redacted-email:096d0ee99e27]",
+    "name": "ishitamundhra"
+   },
+   {
+    "email": "[redacted-email:09ef593d7707]",
+    "name": "eternaltangent"
+   }
+  ],
+  "name": "@enterpret/zendesk-mcp-server",
+  "readme": "# @enterpret/zendesk-mcp-server\n\n> Fork of [`@fruggr/zendesk-mcp-server`](https://github.com/fruggr/zendesk-mcp-server) (MIT).\n> Adds one feature: a `ZENDESK_OAUTH_BEARER` env mode for headless setups\n> where an external OAuth broker (e.g. Nango) hands the access token\n> directly to the subprocess.\n>\n> All credit for the underlying server design + tool surface goes to\n> [Digital4Better](https://digital4better.com).\n\n---\n\n# Zendesk MCP Server\n\n[![npm](https://img.shields.io/npm/v/@fruggr/zendesk-mcp-server)](https://www.npmjs.com/package/@fruggr/zendesk-mcp-server)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that connects LLMs to the **Zendesk Support & Help Center APIs** \u2014 with per-user OAuth 2.1 PKCE authentication and fine-grained tool visibility controls.\n\n## Why this server?\n\nMost Zendesk integrations use a shared admin API key, giving every user full access to every ticket. This server takes a different approach:\n\n- **Per-user authentication** \u2014 Each user authenticates with their own Zendesk credentials via OAuth 2.1 PKCE. No shared admin key, no elevated privileges. The LLM sees exactly what the user is allowed to see.\n- **Context-friendly tool modes** \u2014 Expose 37 individual tools, 3 namespace proxies, or a single unified tool. Choose the mode that fits your LLM's context budget.\n- **Section-based article editing** \u2014 For large Help Center articles, read and rewrite one section at a time (parsed by h1/h2/h3 headings) instead of shuffling the full HTML body through the LLM. Reduces tokens by 10\u2013100\u00d7 on targeted edits.\n- **Read-only mode** \u2014 Restrict the server to read operations only, ideal for assistants that should never modify data.\n- **Zero runtime dependencies beyond the MCP SDK** \u2014 Built on `@modelcontextprotocol/sdk` and `zod`. No Express, no heavyweight frameworks.\n\n> Built and maintained by [Digital4better](https://digital4better.com) for the [Fruggr](https://www.fruggr.io) project.\n\n## Tool modes\n\nThe server registers tools in one of three modes, controlled by `--mode`:\n\n| Mode | Tools exposed | Best for |\n|------|--------------|----------|\n| **`all`** | 37 individual tools (`get_ticket`, `search_articles`, ...) | Clients with good tool selection, full granularity |\n| **`namespace`** (default) | 3 proxy tools (`zendesk_tickets`, `zendesk_help_center`, `zendesk_users`) | Balanced context usage, grouped operations |\n| **`single`** | 1 proxy tool (`zendesk`) | Minimal context footprint, single entry point |\n\nIn `namespace` and `single` modes, the proxy tool accepts `{ \"operation\": \"<tool_name>\", \"params\": { ... } }` and dispatches to the appropriate handler after validating params through the original Zod schema. Proxy descriptions include only the first sentence of each sub-operation to stay compact; the full schema is applied when the operation is actually called.\n\n> **Tip:** The `single` mode is particularly useful for models with limited tool slots \u2014 one tool handles all 36 operations.\n\n### Scoping the surface\n\n`--namespace` and `--read-only` apply to every mode (including the default `namespace` mode) \u2014 they filter tools **before** the proxies are built, so the description of each proxy reflects only the operations that survive the filters. Combine them to register a focused surface:\n\n```bash\n# Only the Help Center proxy, only read-only operations\nzendesk-mcp-server acme --namespace help_center --read-only\n\n# Only the Tickets proxy (read + write)\nzendesk-mcp-server acme --namespace tickets\n```\n\n`--namespace` is repeatable. `--tool` is also available for cherry-picking individual operations but forces `--mode all`.\n\n## Available tools\n\n<details>\n<summary><strong>Tickets</strong> (10 tools)</summary>\n\n| Tool | Description | Mode |\n|------|-------------|------|\n| `get_ticket` | Retrieve a ticket by ID with optional comments | read |\n| `get_ticket_attachments` | Download ticket attachments (images as base64, others as references) | read |\n| `search_tickets` | Search tickets using Zendesk query syntax | read |\n| `list_tickets` | List tickets with cursor-based pagination | read |\n| `get_linked_incidents` | Get incidents linked to a problem ticket | read |\n| `create_ticket` | Create a new ticket with subject, description, priority, tags... | write |\n| `update_ticket` | Update ticket status, priority, assignee, tags, custom fields | write |\n| `add_private_note` | Add an internal note (not visible to requester) | write |\n| `add_public_comment` | Add a public comment (visible to requester) | write |\n| `manage_tags` | Add or remove tags on a ticket | write |\n\n</details>\n\n<details>\n<summary><strong>Help Center</strong> (21 tools)</summary>\n\n| Tool | Description | Mode |\n|------|-------------|------|\n| `search_articles` | Full-text search across Help Center articles | read |\n| `get_article` | Retrieve article by ID with full HTML body | read |\n| `get_article_outline` | Compact outline of an article (sections + available translations) | read |\n| `get_article_section` | Retrieve a single section (html or markdown) | read |\n| `list_categories` | List all Help Center categories | read |\n| `list_sections` | List sections, optionally filtered by category | read |\n| `list_articles` | List articles with sorting and translation info | read |\n| `list_article_translations` | List available translations for an article | read |\n| `list_article_attachments` | List attachments on an article | read |\n| `list_permission_groups` | List Guide permission groups (needed to create articles) | read |\n| `list_content_tags` | List Guide content tags (end-user visible) | read |\n| `list_labels` | List article labels (search ranking, not user-visible) | read |\n| `list_user_segments` | List user segments (article visibility) | read |\n| `compare_translations` | Section-level diff between two locales of an article | read |\n| `create_article` | Create a new article in a section | write |\n| `update_article` | Update article metadata (draft, labels, tags, visibility, section) | write |\n| `create_article_translation` | Create a translation for an article | write |\n| `update_article_translation` | Update an article's translation (full body) | write |\n| `update_article_section` | Replace a single section of an article | write |\n| `create_content_tag` | Create a new Guide content tag | write |\n| `create_article_attachment` | Upload an attachment to an article | write |\n\n</details>\n\n<details>\n<summary><strong>Users & Organizations</strong> (5 tools)</summary>\n\n| Tool | Description | Mode |\n|------|-------------|------|\n| `get_current_user` | Get the authenticated user (verify identity) | read |\n| `search_users` | Search users by name, email, or query syntax | read |\n| `get_user` | Retrieve a user by ID | read |\n| `get_organization` | Retrieve an organization by ID | read |\n| `list_organizations` | List all organizations with pagination | read |\n\n</details>\n\n<details>\n<summary><strong>Search</strong> (1 tool)</summary>\n\n| Tool | Description | Mode |\n|------|-------------|------|\n| `search` | Unified search across tickets, users, and organizations | read |\n\n</details>\n\n## Prerequisites\n\n- **Node.js** >= 20 (runtime \u2014 declared in `package.json#engines.node`)\n- A **Zendesk** instance (Support or Suite)\n\n> Contributors and maintainers run the toolchain on a newer Node + pnpm \u2014\n> see [Development](#development).\n\n## Installation\n\n```bash\n# Run without installing\nnpx -y @fruggr/zendesk-mcp-server <your-subdomain>\n```\n\nOr install globally:\n\n```bash\nnpm install -g @fruggr/zendesk-mcp-server\nzendesk-mcp-server <your-subdomain>\n```\n\nOr clone and run locally:\n\n```bash\ngit clone https://github.com/fruggr/zendesk-mcp-server.git\ncd zendesk-mcp-server\npnpm install\npnpm build\nnode dist/index.js <your-subdomain>\n```\n\nOr run a development branch directly from GitHub (handy for testing PRs without publishing to npm) \u2014 the `prepare` script builds the package automatically on install:\n\n```bash\n# Latest main\nnpx -y github:fruggr/zendesk-mcp-server <your-subdomain>\n\n# A specific branch / tag / commit\nnpx -y github:fruggr/zendesk-mcp-server#my-feature-branch <your-subdomain>\n```\n\n## Authentication\n\nThe server supports two authentication methods:\n\n### Option A: OAuth 2.1 PKCE (recommended)\n\nNo API key needed. Each user authenticates via their browser on the first tool call.\n\n**Zendesk setup:**\n\n1. Go to **Admin Center > Apps and integrations > APIs > OAuth Clients**\n2. Create a public client:\n   - **Identifier**: `<your-subdomain>_zendesk` (or set `ZENDESK_OAUTH_CLIENT_ID`)\n   - **Redirect URL**: `http://localhost:3000/callback`\n\n**Run:**\n\n```bash\nzendesk-mcp-server <your-subdomain>\n```\n\nOn the first tool call, a browser window opens for the user to authenticate. The token is cached in memory for the session.\n\n### Option B: API token\n\nFor headless/CI environments or quick testing.\n\n**Zendesk setup:**\n\n1. Go to **Admin Center > Apps and integrations > APIs > Zendesk API**\n2. Enable **Token Access**, create a token\n\n**Run:**\n\n```bash\nZENDESK_EMAIL=[redacted-email:53e6cdc30765] ZENDESK_API_TOKEN=dneib123... \\\n  zendesk-mcp-server <your-subdomain>\n```\n\n## Configuration\n\n### MCP client configuration\n\n<details>\n<summary><strong>Claude Desktop</strong></summary>\n\nAdd to your `claude_desktop_config.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"zendesk\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@fruggr/zendesk-mcp-server\", \"<your-subdomain>\", \"--mode\", \"single\"],\n      \"env\": {\n        \"ZENDESK_EMAIL\": \"[redacted-email:53e6cdc30765]\",\n        \"ZENDESK_API_TOKEN\": \"your-api-token\"\n      }\n    }\n  }\n}\n```\n\n</details>\n\n<details>\n<summary><strong>Claude Code</strong></summary>\n\n```bash\nclaude mcp add zendesk -- npx -y @fruggr/zendesk-mcp-server <your-subdomain> --mode single\n```\n\nFor API token auth, set the env vars before launching Claude Code or add them to your shell profile.\n\n</details>\n\n<details>\n<summary><strong>VS Code (Copilot / Continue / Cline)</strong></summary>\n\nAdd to your `.vscode/mcp.json`:\n\n```json\n{\n  \"servers\": {\n    \"zendesk\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@fruggr/zendesk-mcp-server\", \"<your-subdomain>\", \"--mode\", \"single\"],\n      \"env\": {\n        \"ZENDESK_EMAIL\": \"[redacted-email:53e6cdc30765]\",\n        \"ZENDESK_API_TOKEN\": \"your-api-token\"\n      }\n    }\n  }\n}\n```\n\n</details>\n\n### CLI reference\n\n```\nzendesk-mcp-server <subdomain> [options]\n\nOptions:\n  --mode <mode>           single | namespace (default) | all\n  --namespace <ns>        Filter by namespace (repeatable): tickets, help_center, users\n  --tool <name>           Filter by tool name (repeatable, forces --mode all)\n  --read-only             Only expose read operations\n  --log-level <level>     debug | info (default) | warn | error\n```\n\n`--namespace` and `--read-only` are applied before the proxies are registered, so they narrow the surface in every mode \u2014 in the default `namespace` mode, `--namespace help_center` registers a single proxy (`zendesk_help_center`) instead of three.\n\n**Examples:**\n\n```bash\n# Single tool mode \u2014 minimal context, all 37 operations in one tool\nzendesk-mcp-server acme --mode single\n\n# Read-only tickets only\nzendesk-mcp-server acme --read-only --namespace tickets\n\n# Cherry-pick specific tools\nzendesk-mcp-server acme --tool get_ticket --tool search_tickets --tool get_current_user\n```\n\n### Environment variables\n\n| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `ZENDESK_SUBDOMAIN` | yes (or CLI arg) | \u2014 | Zendesk subdomain (e.g., `acme` for acme.zendesk.com) |\n| `ZENDESK_OAUTH_CLIENT_ID` | no | `<subdomain>_zendesk` | OAuth client identifier |\n| `ZENDESK_EMAIL` | for API token auth | \u2014 | Agent email for Basic auth |\n| `ZENDESK_API_TOKEN` | for API token auth | \u2014 | Zendesk API token |\n| `LOG_LEVEL` | no | `info` | Log verbosity |\n\nIf both `ZENDESK_EMAIL` and `ZENDESK_API_TOKEN` are set, the server uses API token auth. Otherwise, it uses OAuth 2.1 PKCE.\n\n## Development\n\n### Toolchain\n\n| Tool | Version | Source of truth |\n| ---- | ------- | ---------------- |\n| Node | 24 | [`.nvmrc`](.nvmrc) \u2014 read by `nvm`, `fnm`, `mise`, `asdf`, `volta` |\n| pnpm | 11 | [`package.json#packageManager`](package.json) (pinned with a corepack integrity hash) |\n\nThe toolchain (Node 24 + pnpm 11) is used to build, lint, type-check and\ntest the project. The **published package** still runs on Node 20+ (see\n`engines.node`); a dedicated CI job installs the packed tarball on Node 20\nand runs the smoke test to keep that promise honest.\n\n```bash\n# Install dependencies\npnpm install\n\n# Dev mode (auto-reload)\nZENDESK_EMAIL=[redacted-email:53e6cdc30765] ZENDESK_API_TOKEN=xxx \\\n  pnpm dev -- <your-subdomain> --mode all\n\n# Build\npnpm build\n\n# Type-check\npnpm typecheck\n\n# Lint\npnpm check\n\n# Tests\npnpm test\n```\n\n## Inspiration & related projects\n\nThis project was built with reference to:\n- The official [Zendesk API documentation](https://developer.zendesk.com/api-reference/)\n- [mattcoatsworth/zendesk-mcp-server](https://github.com/mattcoatsworth/zendesk-mcp-server)\n- [koundinya/zd-mcp-server](https://github.com/koundinya/zd-mcp-server)\n\n## Releases & versioning\n\nVersions follow [SemVer](https://semver.org/) and are calculated **automatically** from commit messages \u2014 no one bumps the version by hand. Every merge to `main` triggers [semantic-release](https://github.com/semantic-release/semantic-release), which inspects the new [Conventional Commits](https://www.conventionalcommits.org/) since the previous tag, computes the next version, updates [`CHANGELOG.md`](CHANGELOG.md), publishes to npm, and creates the matching GitHub Release.\n\n| Commit type | Resulting bump |\n|---|---|\n| `fix:`, `perf:` | patch |\n| `feat:` | minor |\n| `feat!:`, `fix!:`, or a `BREAKING CHANGE:` footer | major |\n| `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `style:`, `build:` | no release |\n\n## Contributing\n\nPull requests are welcome \u2014 including AI-assisted ones, as long as the human author has read and validated every line.\n\nThe full guide is in [`CONTRIBUTING.md`](CONTRIBUTING.md). The short version:\n\n1. Fork and create a feature branch from `main`.\n2. Practice TDD: write the failing test first, then implement.\n3. Use [Conventional Commits](https://www.conventionalcommits.org/) \u2014 they drive the next version bump via semantic-release.\n4. Make `pnpm check`, `pnpm typecheck`, and `pnpm test` pass locally.\n5. Run a Claude Code review on your diff before pushing.\n6. Open a PR.\n\nEvery PR is reviewed automatically by [CodeRabbit](https://www.coderabbit.ai) in CI, on top of the author-side AI review. The project is maintained in part with [Claude Code](https://www.anthropic.com/claude-code) assistance; that workflow is documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).\n\n## License\n\n[MIT](LICENSE)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/aavaz-ai/zendesk-mcp-server.git"
+  },
+  "time": {
+   "0.1.0": "2026-06-01T21:58:52.253Z",
+   "0.2.0": "2026-06-02T10:46:46.574Z",
+   "created": "2026-06-01T21:58:51.994Z",
+   "modified": "2026-08-03T10:19:27.286Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@enterpret/zendesk-mcp-server@0.1.0",
+    "_nodeVersion": "24.9.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/zendesk-mcp-server_0.1.0_1780351132102_0.27417306697725086"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:096d0ee99e27]",
+     "name": "ishitamundhra"
+    },
+    "_npmVersion": "11.6.0",
+    "author": {
+     "email": "[redacted-email:1e3978a7e698]",
+     "name": "Digital4Better"
+    },
+    "bin": {
+     "zendesk-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/aavaz-ai/zendesk-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "cheerio": "1.2.0",
+     "hast-util-to-html": "9.0.5",
+     "hast-util-to-mdast": "10.1.2",
+     "open": "11.0.0",
+     "rehype-parse": "9.0.1",
+     "rehype-raw": "7.0.0",
+     "rehype-remark": "10.0.1",
+     "rehype-stringify": "10.0.1",
+     "remark-gfm": "4.0.1",
+     "remark-parse": "11.0.0",
+     "remark-rehype": "11.1.2",
+     "remark-stringify": "11.0.0",
+     "unified": "11.0.5",
+     "zod": "4.4.3"
+    },
+    "description": "MCP server for Zendesk Support & Help Center APIs. Forked from @fruggr/zendesk-mcp-server; adds ZENDESK_OAUTH_BEARER env mode for headless broker-supplied OAuth tokens.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.4.7",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.6",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@tsconfig/node20": "^20.1.9",
+     "@tsconfig/strictest": "^2.0.8",
+     "@types/hast": "^3.0.4",
+     "@types/node": "^22.15.0",
+     "@vitest/coverage-v8": "^4.1.0",
+     "conventional-changelog-conventionalcommits": "^9.3.1",
+     "msw": "^2.12.13",
+     "semantic-release": "^25.0.3",
+     "shx": "^0.4.0",
+     "tsdown": "^0.22.0",
+     "tsx": "^4.21.0",
+     "typescript": "^6.0.3",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-ZL1xGj+h2BokM9d1utIn6WqyTafLzLCtS+P1fPHl69TmPHoLgJKSKdqFrm9oy/hD3zLHIZn4kZNwK1sB8frLKA==",
+     "shasum": "1395f5ddf7eefe29960eda52b86f82803777034f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFmdUjdcX18M2+FOTMz0WFBVy2sVQZkRMVznVuJrwidJAiAjOMArgh2ClSEm3HvO7db1s6NGmtLqRy0xwm0vLPnOJw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@enterpret/zendesk-mcp-server/-/zendesk-mcp-server-0.1.0.tgz",
+     "unpackedSize": 235776
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "3529f19f05f36d549c700393906205ca82b226bd",
+    "homepage": "https://github.com/aavaz-ai/zendesk-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "zendesk",
+     "help-center",
+     "modelcontextprotocol",
+     "ai",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:096d0ee99e27]",
+      "name": "ishitamundhra"
+     }
+    ],
+    "name": "@enterpret/zendesk-mcp-server",
+    "packageManager": "pnpm@11.3.0+sha512.2c403d6594527287672b1f7056343a1f7c3634036a67ffabfcc2b3d7595d843768f8787148d1b57cf7956c90606bbd192857c363af19e96d2d0ec9ec5741d215",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/aavaz-ai/zendesk-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "check": "biome check src/",
+     "check:fix": "biome check --write src/",
+     "dev": "tsx watch src/index.ts",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:smoke": "pnpm build && node scripts/smoke-test.mjs",
+     "test:watch": "vitest watch",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@enterpret/zendesk-mcp-server@0.2.0",
+    "_nodeVersion": "24.9.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/zendesk-mcp-server_0.2.0_1780397206410_0.1682487210006962"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:096d0ee99e27]",
+     "name": "ishitamundhra"
+    },
+    "_npmVersion": "11.6.0",
+    "author": {
+     "email": "[redacted-email:1e3978a7e698]",
+     "name": "Digital4Better"
+    },
+    "bin": {
+     "zendesk-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/aavaz-ai/zendesk-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "cheerio": "1.2.0",
+     "hast-util-to-html": "9.0.5",
+     "hast-util-to-mdast": "10.1.2",
+     "open": "11.0.0",
+     "rehype-parse": "9.0.1",
+     "rehype-raw": "7.0.0",
+     "rehype-remark": "10.0.1",
+     "rehype-stringify": "10.0.1",
+     "remark-gfm": "4.0.1",
+     "remark-parse": "11.0.0",
+     "remark-rehype": "11.1.2",
+     "remark-stringify": "11.0.0",
+     "unified": "11.0.5",
+     "zod": "4.4.3"
+    },
+    "description": "MCP server for Zendesk Support & Help Center APIs. Forked from @fruggr/zendesk-mcp-server; adds ZENDESK_OAUTH_BEARER env mode for headless broker-supplied OAuth tokens.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.4.7",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.6",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@tsconfig/node20": "^20.1.9",
+     "@tsconfig/strictest": "^2.0.8",
+     "@types/hast": "^3.0.4",
+     "@types/node": "^22.15.0",
+     "@vitest/coverage-v8": "^4.1.0",
+     "conventional-changelog-conventionalcommits": "^9.3.1",
+     "msw": "^2.12.13",
+     "semantic-release": "^25.0.3",
+     "shx": "^0.4.0",
+     "tsdown": "^0.22.0",
+     "tsx": "^4.21.0",
+     "typescript": "^6.0.3",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 6,
+     "integrity": "sha512-t2R7qtPiaUbK9NlEHImXifKQ77eKrE0LMMXx80Qg33s3T8E2M/zFBGkEI0CVsxjWMOQoT1BKSMMlLTfhKUYI9Q==",
+     "shasum": "e471b8f22e735b5f1e04807d1628bab649c0c58c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDVU8vCVYzKDIGYmD1FPbEfvxem7lrXt4QKb2RgwRcn4AiEAweGQldg6Fm72nrYpGNQFV7OMQ5hJ1npHHuqAc2eNjpw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@enterpret/zendesk-mcp-server/-/zendesk-mcp-server-0.2.0.tgz",
+     "unpackedSize": 235776
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "19cf2d6b8916b5347045e06db265a7861621a2c2",
+    "homepage": "https://github.com/aavaz-ai/zendesk-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "zendesk",
+     "help-center",
+     "modelcontextprotocol",
+     "ai",
+     "claude"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:096d0ee99e27]",
+      "name": "ishitamundhra"
+     }
+    ],
+    "name": "@enterpret/zendesk-mcp-server",
+    "packageManager": "pnpm@11.3.0+sha512.2c403d6594527287672b1f7056343a1f7c3634036a67ffabfcc2b3d7595d843768f8787148d1b57cf7956c90606bbd192857c363af19e96d2d0ec9ec5741d215",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/aavaz-ai/zendesk-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "check": "biome check src/",
+     "check:fix": "biome check --write src/",
+     "dev": "tsx watch src/index.ts",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:smoke": "pnpm build && node scripts/smoke-test.mjs",
+     "test:watch": "vitest watch",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0"
+   }
+  }
+ },
+ "name": "@enterpret/zendesk-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@enterpret%2Fzendesk-mcp-server"
+}

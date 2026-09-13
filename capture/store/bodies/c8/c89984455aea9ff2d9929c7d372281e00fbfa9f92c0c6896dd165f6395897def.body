@@ -1,0 +1,447 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.4",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6dc2bcc99a15]",
+    "name": "markygab"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@markygab/nest-mcp",
+  "_rev": "4-641c73151e9255bde566d8f0ab40d727",
+  "bugs": {
+   "url": "https://github.com/markygab/nest-mcp/issues"
+  },
+  "description": "Decorator-based Model Context Protocol servers for NestJS.",
+  "dist-tags": {
+   "latest": "0.1.4"
+  },
+  "homepage": "https://github.com/markygab/nest-mcp#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "nestjs"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6dc2bcc99a15]",
+    "name": "markygab"
+   }
+  ],
+  "name": "@markygab/nest-mcp",
+  "readme": "# @markygab/nest-mcp\n\nInternal NestJS primitives for defining and serving Model Context Protocol (MCP)\ntools. The package provides decorator-based tool discovery, TypeBox/AJV input\nand output validation, explicit parameter injection, and MCP SDK server\nconstruction.\n\nIt deliberately does not include HTTP routing, authentication, authorization,\ntenant policy, or application-specific context. Each host application supplies\nthose concerns at its own boundary.\n\n## Install and register\n\nAdd the workspace package as a dependency, then import `NestMcpModule` once in\nthe application's root module or a module visible to all MCP tool providers.\n\n```ts\nimport { Module } from \"@nestjs/common\";\nimport { NestMcpModule } from \"@markygab/nest-mcp\";\n\nimport { ProjectsModule } from \"./projects/projects.module.js\";\n\n@Module({\n  imports: [NestMcpModule, ProjectsModule],\n})\nexport class AppModule {}\n```\n\nThe package uses Nest's `DiscoveryService` to find decorated providers across\nthe application container. Tool classes must still be registered as normal\nNest providers in their feature modules.\n\n## Define a tool\n\nUse TypeBox schemas for inputs and, where practical, outputs. `@McpTools()`\nassigns the provider to one named MCP server. `@McpTool()` declares a single\ntool, while `@McpArgs()` and `@McpContext()` make handler injection explicit.\n\n```ts\nimport { Inject, Injectable } from \"@nestjs/common\";\nimport {\n  McpArgs,\n  McpContext,\n  McpTool,\n  McpTools,\n  type McpRequestContext,\n  type McpToolArgs,\n} from \"@markygab/nest-mcp\";\nimport { Type } from \"@sinclair/typebox\";\n\nimport { ProjectsQueryService } from \"./projects-query.service.js\";\n\nconst GetProjectInput = Type.Object({\n  id: Type.String({ minLength: 1 }),\n});\nconst GetProjectOutput = Type.Object({\n  project: Type.Union([\n    Type.Object({ id: Type.String(), name: Type.String() }),\n    Type.Null(),\n  ]),\n});\n\ntype GetProjectInput = McpToolArgs<typeof GetProjectInput>;\n\n@Injectable()\n@McpTools(\"projects_mcp\")\nexport class ProjectsMcp {\n  constructor(\n    @Inject(ProjectsQueryService)\n    private readonly projects: ProjectsQueryService,\n  ) {}\n\n  @McpTool({\n    name: \"projects_get\",\n    title: \"Get project\",\n    description: \"Get a project visible to the current caller.\",\n    inputSchema: GetProjectInput,\n    outputSchema: GetProjectOutput,\n  })\n  async getProject(\n    @McpArgs() input: GetProjectInput,\n    @McpContext() context: McpRequestContext,\n  ) {\n    return {\n      project: await this.projects.getVisibleTo(context.actorId, input.id),\n    };\n  }\n}\n```\n\nTool names must be unique within a named server. Keep handlers thin: enforce\napplication policy and call existing domain services rather than placing\nvendor-client or persistence logic in MCP classes.\n\n## Tool schemas\n\n`@McpTool()` accepts TypeBox schemas and ordinary JSON Schema for both input\nand output. TypeBox remains a convenient authoring option and\n`McpToolArgs<typeof schema>` continues to infer its handler type. For plain\nJSON Schema\u2014such as a schema derived from an OpenAPI document\u2014supply your own\ngenerated or application type for the handler argument; arbitrary JSON Schema\nis not inferred as TypeScript.\n\n```ts\nconst CreateIssueInputSchema = {\n  type: \"object\",\n  properties: {\n    priority: { type: \"string\", enum: [\"low\", \"high\"] },\n    title: { type: \"string\" },\n  },\n  required: [\"priority\", \"title\"],\n} as const;\n\ntype CreateIssueInput = {\n  priority: \"low\" | \"high\";\n  title: string;\n};\n\n@McpTool({\n  name: \"issues_create\",\n  description: \"Create an issue\",\n  inputSchema: CreateIssueInputSchema,\n})\ncreateIssue(@McpArgs() input: CreateIssueInput) {\n  return this.issues.create(input);\n}\n```\n\n## Guard tool invocations\n\n`@UseMcpGuards()` attaches policy-agnostic guards to a tools class or an\nindividual tool. Guards run after the input schema is validated and before the\nhandler. Class guards run first, followed by method guards. Return `false` or\nthrow to prevent invocation; the caller receives the normal MCP tool error\nresponse. Pass either a guard instance or an injectable Nest provider class;\nprovider classes are resolved from the application container.\n\n```ts\nimport { Injectable } from \"@nestjs/common\";\nimport {\n  McpArgs,\n  McpTool,\n  McpTools,\n  UseMcpGuards,\n  type McpExecutionContext,\n  type McpGuard,\n} from \"@markygab/nest-mcp\";\n\nconst auditGuard: McpGuard = {\n  canActivate(context: McpExecutionContext) {\n    // validatedArgs, serverName, toolName, requestContext, and toolOptions\n    // are available here. Application policy remains outside this library.\n    return true;\n  },\n};\n\n@Injectable()\nclass ProjectsAccessGuard implements McpGuard {\n  canActivate(context: McpExecutionContext) {\n    return Boolean(context.requestContext.actorId);\n  }\n}\n\n@McpTools(\"projects_mcp\")\n@UseMcpGuards(auditGuard, ProjectsAccessGuard)\nclass ProjectsMcp {\n  @McpTool({ name: \"projects_get\", description: \"Get a project\", inputSchema: GetProjectInput })\n  @UseMcpGuards({ canActivate: () => true })\n  getProject(@McpArgs() input: GetProjectInput) {\n    return { project: input.id };\n  }\n}\n```\n\n## Intercept tool invocations\n\n`@UseMcpInterceptors()` wraps a permitted tool invocation. It accepts\n`McpInterceptor` objects or injectable Nest provider classes and may be applied\nto a tools class or a single tool. Provider classes are resolved from the\napplication container.\nInterceptors receive the same `McpExecutionContext` as guards, including the\nvalidated arguments and trusted request context. Class interceptors enter in\ndeclaration order, then method interceptors; they unwind in reverse order.\nThrown errors propagate to the standard MCP tool error response.\n\n```ts\nimport { Injectable } from \"@nestjs/common\";\nimport {\n  UseMcpInterceptors,\n  type McpExecutionContext,\n  type McpInterceptor,\n} from \"@markygab/nest-mcp\";\n\n@Injectable()\nclass TimingInterceptor implements McpInterceptor {\n  async intercept(context: McpExecutionContext, next) {\n    const startedAt = Date.now();\n\n    try {\n      return await next();\n    } finally {\n      // Hosts decide whether and where to record this information.\n      console.log(context.toolName, Date.now() - startedAt);\n    }\n  }\n}\n\n@UseMcpInterceptors(TimingInterceptor)\nclass ProjectsMcp {\n  // @UseMcpInterceptors(...) can also be applied to an @McpTool() method.\n}\n```\n\n## Request context and policy\n\n`McpRequestContext` contains common request identifiers, optional actor and\ntenant fields, an optional `integration` object, and `allowedToolNames`.\nApplications can add their own fields when creating the context.\n\nWhen a request context contains `allowedToolNames`, the package hides every\nother tool from both `tools/list` and `tools/call`. Authentication and\nauthorization should run before the MCP request reaches the package; build the\ntrusted context from the verified principal and route parameters, never from\nmodel-provided tool arguments.\n\n## Serve over HTTP\n\nThe host owns the controller, authentication, and request-context mapping. Add\na controller and transport service to the application that imports\n`NestMcpModule`; the example below exposes `POST`, `GET`, and `DELETE` requests\nat `/mcp/projects_mcp`, as required by Streamable HTTP clients.\n\n```ts\nimport {\n  All,\n  Controller,\n  Inject,\n  Injectable,\n  Module,\n  Param,\n  Req,\n  Res,\n} from \"@nestjs/common\";\nimport { StreamableHTTPServerTransport } from \"@modelcontextprotocol/sdk/server/streamableHttp.js\";\nimport { McpServerService, type McpRequestContext } from \"@markygab/nest-mcp\";\nimport type { Request, Response } from \"express\";\n\n@Injectable()\nexport class ProjectsMcpHttpService {\n  constructor(\n    @Inject(McpServerService)\n    private readonly mcpServer: McpServerService,\n  ) {}\n\n  async handle(\n    serverName: string,\n    request: Request,\n    response: Response,\n    context: McpRequestContext,\n  ) {\n    const transport = new StreamableHTTPServerTransport({\n      // Use stateless requests when the host does not persist MCP sessions.\n      sessionIdGenerator: undefined,\n    });\n    const server = this.mcpServer.createServer(serverName, context);\n\n    await server.connect(transport);\n\n    try {\n      await transport.handleRequest(request, response, request.body);\n    } finally {\n      await transport.close();\n    }\n  }\n}\n\n@Controller(\"mcp\")\nexport class ProjectsMcpHttpController {\n  constructor(\n    @Inject(ProjectsMcpAuthService)\n    private readonly auth: ProjectsMcpAuthService,\n    @Inject(ProjectsMcpHttpService)\n    private readonly http: ProjectsMcpHttpService,\n  ) {}\n\n  @All(\":serverName\")\n  async handle(\n    @Param(\"serverName\") serverName: string,\n    @Req() request: Request,\n    @Res() response: Response,\n  ) {\n    const context = this.auth.verifyAuthorization(\n      request.header(\"authorization\"),\n      serverName,\n    );\n\n    await this.http.handle(serverName, request, response, context);\n  }\n}\n```\n\nRegister these host-side providers alongside the shared module:\n\n```ts\n@Module({\n  imports: [NestMcpModule],\n  controllers: [ProjectsMcpHttpController],\n  providers: [ProjectsMcpAuthService, ProjectsMcpHttpService],\n})\nexport class ProjectsMcpModule {}\n```\n\n`ProjectsMcpAuthService` should verify the bearer token and return only trusted\ncontext, for example `{ requestId, actorId, tenantId, allowedToolNames }`.\nBind the token to `serverName` so a credential issued for `projects_mcp` cannot\nbe reused against another named server. If you use stateful MCP sessions,\nreplace the stateless transport configuration with a host-managed session ID\nstrategy and retain the corresponding transport for later requests.\n\nThe host application owns the corresponding controller, authentication\nservice, and transport service.\n\n## Runtime limits\n\nSet these optional environment variables in the host process to bound tool\nexecution and serialized responses:\n\n- `NEST_MCP_TOOL_TIMEOUT_MS` defaults to `15000`.\n- `NEST_MCP_TOOL_RESPONSE_MAX_BYTES` defaults to `128000`.\n\nBoth values must be positive integers.\n\n## Serve over stdio\n\nFor a local process, retrieve `McpServerService` from the Nest application\ncontext and provide the named server explicitly:\n\n```ts\nconst app = await NestFactory.createApplicationContext(AppModule);\nawait app.get(McpServerService).startStdio(\"projects_mcp\");\n```\n\n## Exports\n\n- `NestMcpModule` - registers discovery, validation, invocation, and server\n  providers.\n- `McpTools`, `McpTool`, `McpArgs`, `McpContext` - tool-definition decorators.\n- `McpServerService` - creates MCP SDK server instances, lists tools, and calls\n  tools programmatically.\n- `McpRequestContext`, `McpToolArgs`, `McpToolOptions`, and tool metadata types.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/markygab/nest-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-07-22T05:42:45.381Z",
+   "0.1.2": "2026-07-22T23:46:51.544Z",
+   "0.1.3": "2026-07-22T23:57:48.728Z",
+   "0.1.4": "2026-07-23T00:17:05.643Z",
+   "created": "2026-07-22T05:42:45.088Z",
+   "modified": "2026-07-23T00:17:06.002Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@markygab/nest-mcp@0.1.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nest-mcp_0.1.0_1784698965204_0.0014141908731262198"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6dc2bcc99a15]",
+     "name": "markygab"
+    },
+    "_npmVersion": "10.9.7",
+    "bugs": {
+     "url": "https://github.com/markygab/nest-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@sinclair/typebox": "^0.34.49",
+     "ajv": "^6.15.0"
+    },
+    "description": "Decorator-based Model Context Protocol servers for NestJS.",
+    "devDependencies": {
+     "@nestjs/common": "^11.1.0",
+     "@nestjs/core": "^11.1.0",
+     "@types/node": "^24.0.10",
+     "reflect-metadata": "^0.2.2",
+     "typescript": "^5.8.3",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-B5uoF1+ZrUVXhl+LP9SqhpX5spNjvUU6jj488YxA09tANuCiU8RTNgPDipb0HrQPaas7b9z7gEOKVgadVz1c2Q==",
+     "shasum": "6828a0949ae175b6b47150e16cb07061e1452508",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGpxVK5mY9yfb0GxejfjW9JIK+9vrRBwj6lu+NqZ0X5hAiA+s035oqsg9LpNyzBs6K/xU4UVgo62i1zaIavirfTfyA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@markygab/nest-mcp/-/nest-mcp-0.1.0.tgz",
+     "unpackedSize": 37413
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "861339576f529a93305e5ddc24b7e47fc90d766d",
+    "homepage": "https://github.com/markygab/nest-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "nestjs"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6dc2bcc99a15]",
+      "name": "markygab"
+     }
+    ],
+    "name": "@markygab/nest-mcp",
+    "peerDependencies": {
+     "@nestjs/common": "^11.0.0",
+     "@nestjs/core": "^11.0.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/markygab/nest-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepack": "npm run build",
+     "test": "vitest run",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@markygab/nest-mcp@0.1.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nest-mcp_0.1.2_1784764011405_0.15115353637127593"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:89807d42-9e40-43b8-ab15-f7e97c703fd4"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/markygab/nest-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@sinclair/typebox": "^0.34.49",
+     "ajv": "^6.15.0"
+    },
+    "description": "Decorator-based Model Context Protocol servers for NestJS.",
+    "devDependencies": {
+     "@nestjs/common": "^11.1.0",
+     "@nestjs/core": "^11.1.0",
+     "@types/node": "^24.0.10",
+     "reflect-metadata": "^0.2.2",
+     "typescript": "^5.8.3",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@markygab%2fnest-mcp@0.1.2"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-DycAQ1QqIS69Ue+SBeLMyIlATT+Qr3y7wOgJI+F4SGL9BEtRql8pSzXZXG7KWUONX1eWHAVvfGeTOKwxWQvFXg==",
+     "shasum": "94efcd4aa91e47443a3fe4006b75d38e7cd4d73c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD2rxPKf+aECn5hozGw269ZdymVIQeqkiZFX/7s/ns0sQIhAImO7M+ybLjvOz9nc6oaQobrp4FmYuUNWGLg9KdAECpI"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@markygab/nest-mcp/-/nest-mcp-0.1.2.tgz",
+     "unpackedSize": 45306
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "44501b7236b5ac7ed46ea1bcee72885d848fbc8d",
+    "homepage": "https://github.com/markygab/nest-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "nestjs"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6dc2bcc99a15]",
+      "name": "markygab"
+     }
+    ],
+    "name": "@markygab/nest-mcp",
+    "peerDependencies": {
+     "@nestjs/common": "^11.0.0",
+     "@nestjs/core": "^11.0.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/markygab/nest-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepack": "npm run build",
+     "test": "vitest run",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@markygab/nest-mcp@0.1.3",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nest-mcp_0.1.3_1784764668579_0.7441317601274993"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:89807d42-9e40-43b8-ab15-f7e97c703fd4"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/markygab/nest-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@sinclair/typebox": "^0.34.49",
+     "ajv": "^6.15.0"
+    },
+    "description": "Decorator-based Model Context Protocol servers for NestJS.",
+    "devDependencies": {
+     "@nestjs/common": "^11.1.0",
+     "@nestjs/core": "^11.1.0",
+     "@types/node": "^24.0.10",
+     "reflect-metadata": "^0.2.2",
+     "typescript": "^5.8.3",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@markygab%2fnest-mcp@0.1.3"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-Aw2wJcB5wx1vh5ffKVkG9352F3usiMlt1e+QQ728BbgmBxA9zrfMBL1++YXB7GzScZB2qHuoQ88d+8TF+dDmVA==",
+     "shasum": "1f734cc24d3b07dc54126df855f80d9b2461c4f1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC4hWsnmJaiYWfI7HB6vOIONzPNKsrBURUQPY8W+70XTQIhAKuRKpNxr7R37PkDc3u0QBJeACo9S1bq7bmNBu4x9Ip9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@markygab/nest-mcp/-/nest-mcp-0.1.3.tgz",
+     "unpackedSize": 45760
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "99df728e02a9dd10f45e1149943265207b1c521f",
+    "homepage": "https://github.com/markygab/nest-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "nestjs"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6dc2bcc99a15]",
+      "name": "markygab"
+     }
+    ],
+    "name": "@markygab/nest-mcp",
+    "peerDependencies": {
+     "@nestjs/common": "^11.0.0",
+     "@nestjs/core": "^11.0.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/markygab/nest-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepack": "npm run build",
+     "test": "vitest run",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@markygab/nest-mcp@0.1.4",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/nest-mcp_0.1.4_1784765825510_0.7847640904911868"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:89807d42-9e40-43b8-ab15-f7e97c703fd4"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "bugs": {
+     "url": "https://github.com/markygab/nest-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@sinclair/typebox": "^0.34.49",
+     "ajv": "^6.15.0"
+    },
+    "description": "Decorator-based Model Context Protocol servers for NestJS.",
+    "devDependencies": {
+     "@nestjs/common": "^11.1.0",
+     "@nestjs/core": "^11.1.0",
+     "@types/node": "^24.0.10",
+     "reflect-metadata": "^0.2.2",
+     "typescript": "^5.8.3",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@markygab%2fnest-mcp@0.1.4"
+     },
+     "fileCount": 26,
+     "integrity": "sha512-Ys7b9L1meYnh2Ff24VApj35JBav58moI6IGr7/WDV5JQXAB/D22stl64mdfS8KD7LrhaIYiN0dK5g5xsF1a9wA==",
+     "shasum": "ec422888c54014aa13b3f9e7d4ea0ef768aa2896",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCWMKig5ZdDflbkJDsWipufaGTLrAbpNVE83oeeUatUgAIgTlf/PHtx1mfL+DNabOHLE57vOwI5VZmWcSpVshHnWuo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@markygab/nest-mcp/-/nest-mcp-0.1.4.tgz",
+     "unpackedSize": 47116
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7bb02c79956121321b3645e52d57f2218ac6ea86",
+    "homepage": "https://github.com/markygab/nest-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "nestjs"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6dc2bcc99a15]",
+      "name": "markygab"
+     }
+    ],
+    "name": "@markygab/nest-mcp",
+    "peerDependencies": {
+     "@nestjs/common": "^11.0.0",
+     "@nestjs/core": "^11.0.0",
+     "reflect-metadata": "^0.2.2"
+    },
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/markygab/nest-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.json",
+     "prepack": "npm run build",
+     "test": "vitest run",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   }
+  }
+ },
+ "name": "@markygab/nest-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@markygab%2Fnest-mcp"
+}

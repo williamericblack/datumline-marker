@@ -1,0 +1,2812 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.30.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:05c65fc1bec4]",
+    "name": "ctxvm"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.27.1",
+   "1.27.1-contextvm.0",
+   "1.27.1-contextvm.1",
+   "1.27.1-contextvm.2",
+   "1.28.0",
+   "1.29.0",
+   "1.29.1",
+   "1.29.2",
+   "1.29.3",
+   "1.30.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@contextvm/mcp-sdk",
+  "_rev": "12-2c01d40af5c6d2c1afd8b616b7e4b6fa",
+  "author": {
+   "name": "ContextVM"
+  },
+  "bugs": {
+   "url": "https://github.com/ContextVM/mcp-sdk/issues"
+  },
+  "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+  "dist-tags": {
+   "latest": "1.30.0",
+   "next": "1.27.1-contextvm.2"
+  },
+  "homepage": "https://github.com/ContextVM/mcp-sdk",
+  "keywords": [
+   "contextvm",
+   "modelcontextprotocol",
+   "mcp",
+   "stdio",
+   "typescript",
+   "sdk"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:05c65fc1bec4]",
+    "name": "ctxvm"
+   }
+  ],
+  "name": "@contextvm/mcp-sdk",
+  "readme": "# @contextvm/mcp-sdk [![MIT licensed](https://img.shields.io/npm/l/%40contextvm%2Fmcp-sdk)](https://github.com/ContextVM/mcp-sdk/blob/main/LICENSE)\n\n<details>\n<summary>Table of Contents</summary>\n\n- [Overview](#overview)\n- [Fork Scope](#fork-scope)\n- [Installation](#installation)\n- [Quick Start](#quick-start)\n- [Core Concepts](#core-concepts)\n- [Package Exports](#package-exports)\n- [Publishing Notes](#publishing-notes)\n- [Documentation](#documentation)\n- [Contributing](#contributing)\n- [License](#license)\n\n</details>\n\n## Overview\n\n[`@contextvm/mcp-sdk`](package.json) is a lightweight fork of the upstream MCP TypeScript SDK tailored for ContextVM and other local-process integrations that only need the MCP protocol core plus `stdio` transport.\n\nThis fork keeps the core protocol runtime and high-level client/server APIs while intentionally removing the HTTP, SSE, WebSocket, Express, Hono, and OAuth-oriented surfaces that added weight without helping the stdio use case.\n\nIt makes it easy to:\n\n- Create MCP servers that expose resources, prompts, and tools\n- Build MCP clients that can connect to local MCP servers\n- Use the retained `stdio` transport with a smaller dependency footprint\n\n## Fork Scope\n\nSupported in this package:\n\n- MCP protocol types and schemas\n- Core protocol runtime\n- High-level [`Client`](src/client/index.ts:234) and [`Server`](src/server/index.ts:129) APIs\n- [`McpServer`](src/server/mcp.ts:72)\n- [`StdioClientTransport`](src/client/stdio.ts:92) and [`StdioServerTransport`](src/server/stdio.ts:12)\n- Experimental tasks support\n\nExplicitly not included in this fork:\n\n- Streamable HTTP transport\n- Legacy SSE transport\n- Express and Hono integrations\n- OAuth/auth helper stack\n- Browser/web transport layers\n\n## Installation\n\n```bash\nnpm install @contextvm/mcp-sdk zod\n```\n\nThis SDK has a required peer dependency on `zod` for schema validation. The package internally imports from `zod/v4`, while remaining compatible with projects using Zod v3.25 or later.\n\n## Quick Start\n\n```typescript\nimport { McpServer } from '@contextvm/mcp-sdk/server';\nimport { StdioServerTransport } from '@contextvm/mcp-sdk/server/stdio';\nimport { z } from 'zod';\n\nconst server = new McpServer({\n    name: 'example-server',\n    version: '1.0.0'\n});\n\nserver.tool('echo', { message: z.string() }, async ({ message }) => ({\n    content: [{ type: 'text', text: message }]\n}));\n\nconst transport = new StdioServerTransport();\nawait server.connect(transport);\n```\n\n## Core Concepts\n\n### Servers and transports\n\nAn MCP server is typically created with [`McpServer`](src/server/mcp.ts:72) and connected to [`StdioServerTransport`](src/server/stdio.ts:12) for local, process-spawned integrations.\n\n### Tools, resources, prompts\n\n- **Tools** let LLMs ask your server to take actions (computation, side effects, network calls).\n- **Resources** expose read-only data that clients can surface to users or models.\n- **Prompts** are reusable templates that help users talk to models in a consistent way.\n\nThe retained server surface still includes tools, resources, prompts, completions, logging, elicitation, sampling, and experimental tasks.\n\n### Capabilities: sampling, elicitation, and tasks\n\nThe SDK includes higher-level capabilities for richer workflows:\n\n- **Sampling**: server-side tools can ask connected clients to run LLM completions.\n- **Form elicitation**: tools can request non-sensitive input via structured forms.\n- **URL elicitation**: servers can ask users to complete secure flows in a browser (e.g., API key entry, payments, OAuth).\n- **Tasks (experimental)**: long-running tool calls can be turned into tasks that you poll or resume later.\n\n### JSON Schema validation (opt-in)\n\nTool `outputSchema` validation (on the client) and elicitation response validation (on the server) are **opt-in**. By default the SDK does not bundle a JSON Schema validator, so these responses are returned without validation.\n\nTo enable validation, import [`AjvJsonSchemaValidator`](src/validation/ajv-provider.ts:27) from the dedicated subpath and pass it to the client and/or server:\n\n```typescript\nimport { Client } from '@contextvm/mcp-sdk/client';\nimport { AjvJsonSchemaValidator } from '@contextvm/mcp-sdk/validation/ajv';\n\nconst client = new Client(\n    { name: 'my-client', version: '1.0.0' },\n    { jsonSchemaValidator: new AjvJsonSchemaValidator() }\n);\n```\n\nKeeping validation opt-in means the [`ajv`](package.json) runtime is only loaded when you actually import the validator \u2014 consumers that don't need output validation ship a smaller bundle. Note that [`McpServer`](src/server/mcp.ts:72) still validates its own tool inputs/outputs against their Zod schemas directly (via Zod), independent of this optional JSON Schema validator.\n\nThese higher-level capabilities are preserved in the stdio-focused fork.\n\n### Clients\n\nThe high-level [`Client`](src/client/index.ts:234) class connects to MCP servers over the retained [`StdioClientTransport`](src/client/stdio.ts:92) and exposes helpers like `listTools`, `callTool`, `listResources`, `readResource`, `listPrompts`, and `getPrompt`.\n\n### Node.js compatibility\n\nThis fork targets Node.js 18+ and is optimized for local stdio-based integrations.\n\n## Package Exports\n\n- `@contextvm/mcp-sdk`\n- `@contextvm/mcp-sdk/client`\n- `@contextvm/mcp-sdk/client/stdio`\n- `@contextvm/mcp-sdk/server`\n- `@contextvm/mcp-sdk/server/stdio`\n- `@contextvm/mcp-sdk/experimental`\n- `@contextvm/mcp-sdk/experimental/tasks`\n\n## Publishing Notes\n\nThis package is intended to be published as a public npm package under the [`@contextvm/mcp-sdk`](package.json) name. The published tarball only includes [`dist`](package.json:63) output.\n\n## Documentation\n\n- [Model Context Protocol documentation](https://modelcontextprotocol.io)\n- [MCP Specification](https://spec.modelcontextprotocol.io)\n- [ContextVM fork plan](docs/FORK_PLAN.md)\n- [Upstream sync procedure](docs/upstream-sync.md)\n\n## Release Workflow\n\nBuild the publishable package with [`npm run build`](package.json:71), inspect the tarball with [`npm pack --dry-run`](package.json), and publish with `npm publish --access public` once the [`@contextvm/mcp-sdk`](package.json:2) scope is ready.\n\n## Contributing\n\nIssues and pull requests are welcome on GitHub at <https://github.com/ContextVM/mcp-sdk>.\n\n## License\n\nThis project is licensed under the MIT License\u2014see the [LICENSE](LICENSE) file for details.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+  },
+  "time": {
+   "1.27.1": "2026-03-22T16:13:28.372Z",
+   "1.27.1-contextvm.0": "2026-03-22T15:30:31.904Z",
+   "1.27.1-contextvm.1": "2026-03-22T15:37:45.698Z",
+   "1.27.1-contextvm.2": "2026-03-22T15:44:06.566Z",
+   "1.28.0": "2026-03-25T17:53:26.277Z",
+   "1.29.0": "2026-06-12T10:43:30.208Z",
+   "1.29.1": "2026-06-12T11:02:32.259Z",
+   "1.29.2": "2026-06-18T08:31:17.792Z",
+   "1.29.3": "2026-06-19T11:29:15.352Z",
+   "1.30.0": "2026-06-19T12:31:55.273Z",
+   "2.0.0": "2026-03-22T14:12:49.717Z",
+   "created": "2026-03-22T15:30:31.628Z",
+   "modified": "2026-06-19T12:31:55.401Z"
+  },
+  "versions": {
+   "1.27.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.27.1",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.27.1_1774196008180_0.7912281042574525"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "json-schema-typed": "^8.0.2",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-vZj6ALfhsScUPFHXudCAH6xA0qQr7SASLmIHgzLA5nD4iURJ/D4VF2wnKUrqyT0Ne1MXmDhVcJ1xoPnM2yv3CA==",
+     "shasum": "37d5b48bbc504835ab234b997fe47e832ad54256",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDnutemcaQFQO7+0BRkvV2/sAKLFRpGI1BqieKmMzWckgIgR2NAA+5rs61iODO1+7mudxme2X5ZekrgGnmqXAwHG8g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.27.1.tgz",
+     "unpackedSize": 2352227
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "import": "./dist/esm/*",
+      "require": "./dist/cjs/*",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     },
+     "./validation/cfworker": {
+      "import": "./dist/esm/validation/cfworker-provider.js",
+      "require": "./dist/cjs/validation/cfworker-provider.js",
+      "types": "./dist/esm/validation/cfworker-provider.d.ts"
+     }
+    },
+    "gitHead": "f584ddd3ab9180247d76fb8b0c962340012053fc",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "overrides": {
+     "qs": "6.14.1"
+    },
+    "peerDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "@cfworker/json-schema": {
+      "optional": true
+     },
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "resolutions": {
+     "strip-ansi": "6.0.1"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ],
+      "validation/cfworker": [
+       "./dist/esm/validation/cfworker-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.27.1"
+   },
+   "1.27.1-contextvm.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.27.1-contextvm.0",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.27.1-contextvm.0_1774193431715_0.9610789957314998"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "json-schema-typed": "^8.0.2",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-n8kwg1a2d1/McgzpjyYAJ1K5MIihrt0KIQ4SL27jMwFIP7nWzLqleZ6uqTDNEh3/StFFM+C+KNb2b9MvdUJ28A==",
+     "shasum": "2b9abe49390cbdeaff7f8b73c3bc19d104dbb1cc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICNPs/ZMRAcgSkTHHKCahHuyLBrn4dSaj9ZB/iwIaC+VAiEA93Po5Y4LS7of3JPnMBsmb011G4RsDancvTlRLIkTV6g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.27.1-contextvm.0.tgz",
+     "unpackedSize": 2348457
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js"
+     }
+    },
+    "gitHead": "4cbcec0edb96332d87ed42c1910dca92cca507de",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "overrides": {
+     "qs": "6.14.1"
+    },
+    "peerDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "@cfworker/json-schema": {
+      "optional": true
+     },
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "resolutions": {
+     "strip-ansi": "6.0.1"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check .",
+     "lint:fix": "eslint src/ --fix && prettier --write .",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ]
+     }
+    },
+    "version": "1.27.1-contextvm.0"
+   },
+   "1.27.1-contextvm.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.27.1-contextvm.1",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.27.1-contextvm.1_1774193865477_0.9340800605797248"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "json-schema-typed": "^8.0.2",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-28pPBg6IbRMS/vHYicYeN+7Yt3hfvAI7wTBsI9tijRt7aDjeuzXAPeW5hI6NgnTPm+kRyC83TVwsSLDHnjzbgg==",
+     "shasum": "d637893580761840dbece8d188233dcde84340a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCC5q8gbcv3HZEOsquAx98+KZxuZdPCuWz17YTRl/u4EwIhAPrTMo50gN7cZqGrDZ9CR7fAksndNI+yjQBnllEuZue9"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.27.1-contextvm.1.tgz",
+     "unpackedSize": 2350497
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     }
+    },
+    "gitHead": "4cbcec0edb96332d87ed42c1910dca92cca507de",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "overrides": {
+     "qs": "6.14.1"
+    },
+    "peerDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "@cfworker/json-schema": {
+      "optional": true
+     },
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "resolutions": {
+     "strip-ansi": "6.0.1"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check .",
+     "lint:fix": "eslint src/ --fix && prettier --write .",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ]
+     }
+    },
+    "version": "1.27.1-contextvm.1"
+   },
+   "1.27.1-contextvm.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.27.1-contextvm.2",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.27.1-contextvm.2_1774194246317_0.022430528558321505"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "json-schema-typed": "^8.0.2",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-79xZd6YGgylQbEe74Zb6gV85UgJufyP3tKiL1OwAxuBCKixxSI1zn3xqO/GgdSOlGSsmr8SMYKZNesVfsZONTw==",
+     "shasum": "73d14ffcdc7521bb0c60262d832ff452a20fb0a8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGT8yTKpgYjUqijwO47RT+WmRUA8SApaK1ZjX47cbe2AAiEA37shkJUMUpTSslzJ7kK12wsBH7++xUPMfxUvSy9yjmw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.27.1-contextvm.2.tgz",
+     "unpackedSize": 2352179
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "import": "./dist/esm/*",
+      "require": "./dist/cjs/*",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     },
+     "./validation/cfworker": {
+      "import": "./dist/esm/validation/cfworker-provider.js",
+      "require": "./dist/cjs/validation/cfworker-provider.js",
+      "types": "./dist/esm/validation/cfworker-provider.d.ts"
+     }
+    },
+    "gitHead": "4cbcec0edb96332d87ed42c1910dca92cca507de",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "overrides": {
+     "qs": "6.14.1"
+    },
+    "peerDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "@cfworker/json-schema": {
+      "optional": true
+     },
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "readmeFilename": "README.md",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "resolutions": {
+     "strip-ansi": "6.0.1"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check .",
+     "lint:fix": "eslint src/ --fix && prettier --write .",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ],
+      "validation/cfworker": [
+       "./dist/esm/validation/cfworker-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.27.1-contextvm.2"
+   },
+   "1.28.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.28.0",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.28.0_1774461206133_0.9631267645139483"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "json-schema-typed": "^8.0.2",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-lWMlPeMuYnxqlNl2UYWs8X901e44mK46cv/D/dePMldGe/z12d9snGk21I3jyEhtZUODpGuH7aTLfDXb7ykQqg==",
+     "shasum": "5dd6f4638290b71e60c95416b4ebb3e092f345f7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDBCC+Qca1UqOMgXh6UWAVCGPIKO0XhqRtvsT6tCy/FZAIhAKgCc+WZYPfZcEsrjW08TEyIxXenUBFhiLBR9MGpzapd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.28.0.tgz",
+     "unpackedSize": 2353523
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "import": "./dist/esm/*",
+      "require": "./dist/cjs/*",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     },
+     "./validation/cfworker": {
+      "import": "./dist/esm/validation/cfworker-provider.js",
+      "require": "./dist/cjs/validation/cfworker-provider.js",
+      "types": "./dist/esm/validation/cfworker-provider.d.ts"
+     }
+    },
+    "gitHead": "9f93272d364f86417aa59dbc43225a5f120a02c8",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "overrides": {
+     "qs": "6.14.1"
+    },
+    "peerDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "@cfworker/json-schema": {
+      "optional": true
+     },
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "resolutions": {
+     "strip-ansi": "6.0.1"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ],
+      "validation/cfworker": [
+       "./dist/esm/validation/cfworker-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.28.0"
+   },
+   "1.29.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.29.0",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.29.0_1781261010037_0.08060244579225917"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "json-schema-typed": "^8.0.2",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-W2wo1gV+0WmXkWvDBQyM6x8UE7fGIieXPfZsTfTQN2+0V/QbPpGcMgOtq379pjgYZj12JVchu9iYKkSpdI6bcQ==",
+     "shasum": "9ea58e02e0cca9a37cef31698c7cb08ed7786faa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDwjCJaFJTqxi/ekVz6q6ARGe1i8blTo4RCoAh2LB5FawIhAPKQLW8SasMj8kUGEztoLhQKGVz74LxMakqUIopVb2g8"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.29.0.tgz",
+     "unpackedSize": 2367198
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     }
+    },
+    "gitHead": "b08987803df4747054963a51ee643899051d7a3f",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "peerDependencies": {
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.29.0"
+   },
+   "1.29.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.29.1",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.29.1_1781262152012_0.9934947564446097"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "json-schema-typed": "^8.0.2",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-2UKIRdxuGZHTTafLtKhx3PULwFG9e4aDWv2rIBa4kifaYa3Cnnpm7xl0kSGJi5zZQlcHHxd1hYXsDGfdIf2OrA==",
+     "shasum": "b5a260d8277002354cbf0d280be0de44a0f59d73",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBUQiK8iZs602Q5Ig/ivg05hY48fdNFxewDEYysM3fj3AiEAhGTEvSFWY00AuKkdN8trPnrP7aGZBo5Ipwi92RFdoCw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.29.1.tgz",
+     "unpackedSize": 2367786
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/mcp": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./shared/transport": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     }
+    },
+    "gitHead": "33c3e056bd64b8e40e11c7af4a2909c0c17d00b8",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "peerDependencies": {
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/mcp": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "shared/transport": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.29.1"
+   },
+   "1.29.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.29.2",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.29.2_1781771477490_0.6776199143671287"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "cross-spawn": "^7.0.5"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "json-schema-typed": "^8.0.2",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-BquItl7HEtcdB32RxrL/f9iHM3AVRL/QZeBYUmZ+48vA8z0Kog8w75C16esUuXa7dxW/nrac0dw/HuoK68oiIQ==",
+     "shasum": "541f3377900e40dfe7ade3abecd7e33dd117a967",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIARlx7p9tJIULkUP+hi9n/LPAcGXQ9Vsc/Qq0VsQYaShAiBm7tE4MnQDog8CexfLf7dXNZaW14f6oBCw+81BTlU3Dw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.29.2.tgz",
+     "unpackedSize": 2369603
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/mcp": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./shared/transport": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     }
+    },
+    "gitHead": "177d1dd0091fe2d7096fab2bba4477572b9b5044",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "peerDependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "peerDependenciesMeta": {
+     "ajv": {
+      "optional": true
+     },
+     "ajv-formats": {
+      "optional": true
+     },
+     "zod": {
+      "optional": true
+     },
+     "zod-to-json-schema": {
+      "optional": true
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "release": "npm run build && npm publish",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/mcp": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "shared/transport": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.29.2"
+   },
+   "1.29.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.29.3",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.29.3_1781868555176_0.16813920418144823"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "json-schema-typed": "^8.0.2",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 261,
+     "integrity": "sha512-uXgazG70EkzpCzGCEOgIV4FcALV/dGCpp6RXIJvj+WDilKWiWUASIrex3NdE/xrf8J41w0dCP5VGEyEcuNelEg==",
+     "shasum": "d043d3d210d90b5f3bfed456d6a8ff00ac969624",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC1GPjpHpUK//xubEDOI0ej7Q9eY2guFjxQI/Ta5xpDtQIgeTjKMJpP+MmQici5W9TwiEPcZ6LTKELdQK9f4YNcbww="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.29.3.tgz",
+     "unpackedSize": 2364833
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "import": "./dist/esm/*",
+      "require": "./dist/cjs/*",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client.js": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./client/stdio.js": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental.js": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./experimental/tasks.js": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server.js": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/mcp": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/mcp.js": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./server/stdio.js": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./shared/auth-info": {
+      "import": "./dist/esm/shared/auth-info.js",
+      "require": "./dist/cjs/shared/auth-info.js",
+      "types": "./dist/esm/shared/auth-info.d.ts"
+     },
+     "./shared/auth-info.js": {
+      "import": "./dist/esm/shared/auth-info.js",
+      "require": "./dist/cjs/shared/auth-info.js",
+      "types": "./dist/esm/shared/auth-info.d.ts"
+     },
+     "./shared/protocol": {
+      "import": "./dist/esm/shared/protocol.js",
+      "require": "./dist/cjs/shared/protocol.js",
+      "types": "./dist/esm/shared/protocol.d.ts"
+     },
+     "./shared/protocol.js": {
+      "import": "./dist/esm/shared/protocol.js",
+      "require": "./dist/cjs/shared/protocol.js",
+      "types": "./dist/esm/shared/protocol.d.ts"
+     },
+     "./shared/stdio": {
+      "import": "./dist/esm/shared/stdio.js",
+      "require": "./dist/cjs/shared/stdio.js",
+      "types": "./dist/esm/shared/stdio.d.ts"
+     },
+     "./shared/stdio.js": {
+      "import": "./dist/esm/shared/stdio.js",
+      "require": "./dist/cjs/shared/stdio.js",
+      "types": "./dist/esm/shared/stdio.d.ts"
+     },
+     "./shared/transport": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./shared/transport.js": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./shared/uriTemplate": {
+      "import": "./dist/esm/shared/uriTemplate.js",
+      "require": "./dist/cjs/shared/uriTemplate.js",
+      "types": "./dist/esm/shared/uriTemplate.d.ts"
+     },
+     "./shared/uriTemplate.js": {
+      "import": "./dist/esm/shared/uriTemplate.js",
+      "require": "./dist/cjs/shared/uriTemplate.js",
+      "types": "./dist/esm/shared/uriTemplate.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation.js": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     },
+     "./validation/ajv.js": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     }
+    },
+    "gitHead": "2cd254e0d9ab96662baec13b948fb998c32e092b",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "peerDependencies": {
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "release": "npm run build && npm publish",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client.js": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "client/stdio.js": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental.js": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "experimental/tasks.js": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server.js": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/mcp": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/mcp.js": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "server/stdio.js": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "shared/auth-info": [
+       "./dist/esm/shared/auth-info.d.ts"
+      ],
+      "shared/auth-info.js": [
+       "./dist/esm/shared/auth-info.d.ts"
+      ],
+      "shared/protocol": [
+       "./dist/esm/shared/protocol.d.ts"
+      ],
+      "shared/protocol.js": [
+       "./dist/esm/shared/protocol.d.ts"
+      ],
+      "shared/stdio": [
+       "./dist/esm/shared/stdio.d.ts"
+      ],
+      "shared/stdio.js": [
+       "./dist/esm/shared/stdio.d.ts"
+      ],
+      "shared/transport": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "shared/transport.js": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "shared/uriTemplate": [
+       "./dist/esm/shared/uriTemplate.d.ts"
+      ],
+      "shared/uriTemplate.js": [
+       "./dist/esm/shared/uriTemplate.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation.js": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ],
+      "validation/ajv.js": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.29.3"
+   },
+   "1.30.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@contextvm/mcp-sdk@1.30.0",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-sdk_1.30.0_1781872315061_0.9633659082687904"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:05c65fc1bec4]",
+     "name": "ctxvm"
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "ContextVM"
+    },
+    "bugs": {
+     "url": "https://github.com/ContextVM/mcp-sdk/issues"
+    },
+    "dependencies": {
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "cross-spawn": "^7.0.5",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "description": "Lightweight stdio-focused Model Context Protocol SDK for TypeScript",
+    "devDependencies": {
+     "@eslint/js": "^9.39.1",
+     "@types/cross-spawn": "^6.0.6",
+     "@types/node": "^22.12.0",
+     "@typescript/native-preview": "^7.0.0-dev.20251103.1",
+     "ajv": "^8.17.1",
+     "ajv-formats": "^3.0.1",
+     "eslint": "^9.8.0",
+     "eslint-config-prettier": "^10.1.8",
+     "eslint-plugin-n": "^17.23.1",
+     "json-schema-typed": "^8.0.2",
+     "prettier": "3.6.2",
+     "tsx": "^4.16.5",
+     "typescript": "^5.5.4",
+     "typescript-eslint": "^8.48.1",
+     "vitest": "^4.0.8",
+     "zod": "^3.25 || ^4.0",
+     "zod-to-json-schema": "^3.25.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 101,
+     "integrity": "sha512-Z4xyxxxtKnczEgVzLagaUdT1EtoVzc1bjr6kpIfTlw7mP5ESAzXeDUAMO9leIwituphz2ELE6ad9BjW7blDjjw==",
+     "shasum": "3465eae7208272bca7c5639da585bb1a36d26456",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIA1UlQ+D+j4vNVXWYmXbF5ohZhFIoOg1Av8Fdn96xDzzAiEAp3uvA3heyeYZMqSV1MyRkAJOBLpb/WWex0pX8Iy3Pjg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@contextvm/mcp-sdk/-/mcp-sdk-1.30.0.tgz",
+     "unpackedSize": 1206668
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "import": "./dist/esm/*",
+      "require": "./dist/cjs/*",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./client": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client.js": {
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js",
+      "types": "./dist/esm/client/index.d.ts"
+     },
+     "./client/stdio": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./client/stdio.js": {
+      "import": "./dist/esm/client/stdio.js",
+      "require": "./dist/cjs/client/stdio.js",
+      "types": "./dist/esm/client/stdio.d.ts"
+     },
+     "./experimental": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental.js": {
+      "import": "./dist/esm/experimental/index.js",
+      "require": "./dist/cjs/experimental/index.js",
+      "types": "./dist/esm/experimental/index.d.ts"
+     },
+     "./experimental/tasks": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./experimental/tasks.js": {
+      "import": "./dist/esm/experimental/tasks/index.js",
+      "require": "./dist/cjs/experimental/tasks/index.js",
+      "types": "./dist/esm/experimental/tasks/index.d.ts"
+     },
+     "./inMemory": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./inMemory.js": {
+      "import": "./dist/esm/inMemory.js",
+      "require": "./dist/cjs/inMemory.js",
+      "types": "./dist/esm/inMemory.d.ts"
+     },
+     "./server": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server.js": {
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js",
+      "types": "./dist/esm/server/index.d.ts"
+     },
+     "./server/mcp": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/mcp.js": {
+      "import": "./dist/esm/server/mcp.js",
+      "require": "./dist/cjs/server/mcp.js",
+      "types": "./dist/esm/server/mcp.d.ts"
+     },
+     "./server/stdio": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./server/stdio.js": {
+      "import": "./dist/esm/server/stdio.js",
+      "require": "./dist/cjs/server/stdio.js",
+      "types": "./dist/esm/server/stdio.d.ts"
+     },
+     "./shared/auth-info": {
+      "import": "./dist/esm/shared/auth-info.js",
+      "require": "./dist/cjs/shared/auth-info.js",
+      "types": "./dist/esm/shared/auth-info.d.ts"
+     },
+     "./shared/auth-info.js": {
+      "import": "./dist/esm/shared/auth-info.js",
+      "require": "./dist/cjs/shared/auth-info.js",
+      "types": "./dist/esm/shared/auth-info.d.ts"
+     },
+     "./shared/protocol": {
+      "import": "./dist/esm/shared/protocol.js",
+      "require": "./dist/cjs/shared/protocol.js",
+      "types": "./dist/esm/shared/protocol.d.ts"
+     },
+     "./shared/protocol.js": {
+      "import": "./dist/esm/shared/protocol.js",
+      "require": "./dist/cjs/shared/protocol.js",
+      "types": "./dist/esm/shared/protocol.d.ts"
+     },
+     "./shared/stdio": {
+      "import": "./dist/esm/shared/stdio.js",
+      "require": "./dist/cjs/shared/stdio.js",
+      "types": "./dist/esm/shared/stdio.d.ts"
+     },
+     "./shared/stdio.js": {
+      "import": "./dist/esm/shared/stdio.js",
+      "require": "./dist/cjs/shared/stdio.js",
+      "types": "./dist/esm/shared/stdio.d.ts"
+     },
+     "./shared/transport": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./shared/transport.js": {
+      "import": "./dist/esm/shared/transport.js",
+      "require": "./dist/cjs/shared/transport.js",
+      "types": "./dist/esm/shared/transport.d.ts"
+     },
+     "./shared/uriTemplate": {
+      "import": "./dist/esm/shared/uriTemplate.js",
+      "require": "./dist/cjs/shared/uriTemplate.js",
+      "types": "./dist/esm/shared/uriTemplate.d.ts"
+     },
+     "./shared/uriTemplate.js": {
+      "import": "./dist/esm/shared/uriTemplate.js",
+      "require": "./dist/cjs/shared/uriTemplate.js",
+      "types": "./dist/esm/shared/uriTemplate.d.ts"
+     },
+     "./spec.types": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./spec.types.js": {
+      "import": "./dist/esm/spec.types.js",
+      "require": "./dist/cjs/spec.types.js",
+      "types": "./dist/esm/spec.types.d.ts"
+     },
+     "./types": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./types.js": {
+      "import": "./dist/esm/types.js",
+      "require": "./dist/cjs/types.js",
+      "types": "./dist/esm/types.d.ts"
+     },
+     "./validation": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation.js": {
+      "import": "./dist/esm/validation/index.js",
+      "require": "./dist/cjs/validation/index.js",
+      "types": "./dist/esm/validation/index.d.ts"
+     },
+     "./validation/ajv": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     },
+     "./validation/ajv.js": {
+      "import": "./dist/esm/validation/ajv-provider.js",
+      "require": "./dist/cjs/validation/ajv-provider.js",
+      "types": "./dist/esm/validation/ajv-provider.d.ts"
+     }
+    },
+    "gitHead": "0552abf397974908b20973cdeed292e47d582617",
+    "homepage": "https://github.com/ContextVM/mcp-sdk",
+    "keywords": [
+     "contextvm",
+     "modelcontextprotocol",
+     "mcp",
+     "stdio",
+     "typescript",
+     "sdk"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:05c65fc1bec4]",
+      "name": "ctxvm"
+     }
+    ],
+    "name": "@contextvm/mcp-sdk",
+    "peerDependencies": {
+     "zod": "^3.25 || ^4.0"
+    },
+    "peerDependenciesMeta": {
+     "zod": {
+      "optional": false
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "scripts": {
+     "build": "npm run build:esm && npm run build:cjs",
+     "build:cjs": "mkdir -p dist/cjs && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json && tsc -p tsconfig.cjs.json",
+     "build:cjs:w": "npm run build:cjs -- -w",
+     "build:esm": "mkdir -p dist/esm && echo '{\"type\": \"module\"}' > dist/esm/package.json && tsc -p tsconfig.prod.json",
+     "build:esm:w": "npm run build:esm -- -w",
+     "check": "npm run typecheck && npm run lint",
+     "fetch:spec-types": "tsx scripts/fetch-spec-types.ts",
+     "lint": "eslint src/ && prettier --check ./src",
+     "lint:fix": "eslint src/ --fix && prettier --write ./src",
+     "prepack": "npm run build:esm && npm run build:cjs",
+     "release": "npm run build && npm publish",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsgo --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "typesVersions": {
+     "*": {
+      "*": [
+       "./dist/esm/*"
+      ],
+      "client": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client.js": [
+       "./dist/esm/client/index.d.ts"
+      ],
+      "client/stdio": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "client/stdio.js": [
+       "./dist/esm/client/stdio.d.ts"
+      ],
+      "experimental": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental.js": [
+       "./dist/esm/experimental/index.d.ts"
+      ],
+      "experimental/tasks": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "experimental/tasks.js": [
+       "./dist/esm/experimental/tasks/index.d.ts"
+      ],
+      "inMemory": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "inMemory.js": [
+       "./dist/esm/inMemory.d.ts"
+      ],
+      "server": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server.js": [
+       "./dist/esm/server/index.d.ts"
+      ],
+      "server/mcp": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/mcp.js": [
+       "./dist/esm/server/mcp.d.ts"
+      ],
+      "server/stdio": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "server/stdio.js": [
+       "./dist/esm/server/stdio.d.ts"
+      ],
+      "shared/auth-info": [
+       "./dist/esm/shared/auth-info.d.ts"
+      ],
+      "shared/auth-info.js": [
+       "./dist/esm/shared/auth-info.d.ts"
+      ],
+      "shared/protocol": [
+       "./dist/esm/shared/protocol.d.ts"
+      ],
+      "shared/protocol.js": [
+       "./dist/esm/shared/protocol.d.ts"
+      ],
+      "shared/stdio": [
+       "./dist/esm/shared/stdio.d.ts"
+      ],
+      "shared/stdio.js": [
+       "./dist/esm/shared/stdio.d.ts"
+      ],
+      "shared/transport": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "shared/transport.js": [
+       "./dist/esm/shared/transport.d.ts"
+      ],
+      "shared/uriTemplate": [
+       "./dist/esm/shared/uriTemplate.d.ts"
+      ],
+      "shared/uriTemplate.js": [
+       "./dist/esm/shared/uriTemplate.d.ts"
+      ],
+      "spec.types": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "spec.types.js": [
+       "./dist/esm/spec.types.d.ts"
+      ],
+      "types": [
+       "./dist/esm/types.d.ts"
+      ],
+      "types.js": [
+       "./dist/esm/types.d.ts"
+      ],
+      "validation": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation.js": [
+       "./dist/esm/validation/index.d.ts"
+      ],
+      "validation/ajv": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ],
+      "validation/ajv.js": [
+       "./dist/esm/validation/ajv-provider.d.ts"
+      ]
+     }
+    },
+    "version": "1.30.0"
+   }
+  }
+ },
+ "name": "@contextvm/mcp-sdk",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@contextvm%2Fmcp-sdk"
+}

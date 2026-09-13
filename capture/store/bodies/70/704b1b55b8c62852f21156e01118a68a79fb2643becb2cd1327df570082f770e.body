@@ -1,0 +1,1365 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.7.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:7c539ac81c9e]",
+    "name": "connorbritain"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.5.0",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@connorbritain/mssql-mcp-core",
+  "_rev": "15-2a01d25523c3cbf0709a547cd17e5a39",
+  "author": {
+   "email": "[redacted-email:7c539ac81c9e]",
+   "name": "Connor England"
+  },
+  "bugs": {
+   "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+  },
+  "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+  "dist-tags": {
+   "latest": "0.7.0"
+  },
+  "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+  "keywords": [
+   "mcp",
+   "sql-server",
+   "mssql",
+   "database",
+   "ai",
+   "claude",
+   "windsurf",
+   "model-context-protocol"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:7c539ac81c9e]",
+    "name": "connorbritain"
+   }
+  ],
+  "name": "@connorbritain/mssql-mcp-core",
+  "readme": "# @connorbritain/mssql-mcp-core\r\n\r\nShared core library for the MSSQL MCP tiered package family. This package provides every tool class, the MCP server harness, environment management, audit logging, secret resolution, intent routing, and policy enforcement middleware. Consumer packages (reader, writer, server) depend on this library and call `startMcpServer()` with a tier to get a fully configured MCP server.\r\n\r\n## Architecture\r\n\r\n```\r\n@connorbritain/mssql-mcp-core\r\n        |\r\n        |-- @connorbritain/mssql-mcp-reader  (14 read-only tools)\r\n        |-- @connorbritain/mssql-mcp-writer  (17 tools: reader + INSERT/UPDATE/DELETE)\r\n        |-- @connorbritain/mssql-mcp-server  (20 tools: writer + CREATE TABLE/INDEX, DROP TABLE)\r\n```\r\n\r\nEach consumer package is a thin wrapper that passes its tier to `startMcpServer()`. All business logic, tool implementations, and governance infrastructure live here.\r\n\r\n## How Consumer Packages Use This Library\r\n\r\n```ts\r\nimport { startMcpServer } from \"@connorbritain/mssql-mcp-core\";\r\n\r\nstartMcpServer({ tier: \"reader\" });\r\n```\r\n\r\nThe `tier` parameter controls which tools are registered with the MCP server:\r\n\r\n| Tier | Tools | What it adds |\r\n|------|-------|-------------|\r\n| `reader` | 14 | All read-only and schema discovery tools |\r\n| `writer` | 17 | Reader tools + `insert_data`, `update_data`, `delete_data` |\r\n| `admin` | 20 | Writer tools + `create_table`, `create_index`, `drop_table` |\r\n\r\n**[Config Builder](https://connorbritain.github.io/mssql-mcp-config-builder/)** \u2014 Visual wizard to generate configuration files for consumer packages.\r\n\r\n## Exports\r\n\r\n### Server Entry Point\r\n\r\n```ts\r\nimport { startMcpServer } from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`startMcpServer(config: McpServerConfig)`** \u2014 Initializes the MCP server over stdio for the given tier. Registers tools, applies `wrapToolRun` policy middleware to each, and starts listening.\r\n\r\n### Tool Classes\r\n\r\nAll 20 tool classes are exported individually:\r\n\r\n```ts\r\nimport {\r\n  // Read-only (Reader tier)\r\n  ReadDataTool,\r\n  ListTableTool,\r\n  ListDatabasesTool,\r\n  ListEnvironmentsTool,\r\n  ValidateEnvironmentConfigTool,\r\n  ListScriptsTool,\r\n  RunScriptTool,\r\n  DescribeTableTool,\r\n  SearchSchemaTool,\r\n  ProfileTableTool,\r\n  RelationshipInspectorTool,\r\n  InspectDependenciesTool,\r\n  TestConnectionTool,\r\n  ExplainQueryTool,\r\n\r\n  // Write (Writer tier adds these)\r\n  InsertDataTool,\r\n  DeleteDataTool,\r\n  UpdateDataTool,\r\n\r\n  // Admin/DDL (Server tier adds these)\r\n  CreateTableTool,\r\n  CreateIndexTool,\r\n  DropTableTool,\r\n} from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\nEach tool class implements the `RunnableTool` interface with `name`, `description`, `inputSchema`, and `run(params)`.\r\n\r\n### Environment Management\r\n\r\n```ts\r\nimport { EnvironmentManager, getEnvironmentManager } from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`EnvironmentManager`** \u2014 Manages multi-environment configurations, connection pools, per-environment policies (readonly, allowedTools, deniedTools, maxRowsDefault, requireApproval, auditLevel, allowedSchemas, deniedSchemas, allowedColumns, deniedColumns), and secret resolution.\r\n- **`getEnvironmentManager()`** \u2014 Returns the singleton instance.\r\n\r\n### Audit Logging\r\n\r\n```ts\r\nimport { AuditLogger, auditLogger } from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`AuditLogger`** \u2014 Writes JSON Lines audit log entries with timestamps, tool names, arguments (sensitive fields auto-redacted), results, session ID, and environment name.\r\n- **`auditLogger`** \u2014 Singleton instance. Configured via `AUDIT_LOG_PATH` and `AUDIT_LOGGING` environment variables.\r\n\r\n### Secret Resolution\r\n\r\n```ts\r\nimport {\r\n  SecretResolver,\r\n  createSecretResolver,\r\n  validateDotenvPath,\r\n  validateFileDirectory,\r\n} from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`SecretResolver`** \u2014 Resolves `${secret:NAME}` placeholders in environment config values from environment variables, `.env` files, or external secret providers.\r\n- **`createSecretResolver(config)`** \u2014 Factory for `SecretResolver` instances.\r\n\r\n### Intent Routing\r\n\r\n```ts\r\nimport { IntentRouter } from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`IntentRouter`** \u2014 Routes natural language intents to the appropriate MCP tool using keyword matching and scoring. Used internally by `startMcpServer`.\r\n\r\n### Policy Middleware\r\n\r\n```ts\r\nimport { wrapToolRun } from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`wrapToolRun(tool, options)`** \u2014 Monkey-patches a tool's `run()` method to enforce per-environment policies (readonly, allowedTools, deniedTools, requireApproval), obtain a connection pool, inject environment context into tool arguments, and log all invocations to the audit logger.\r\n\r\n### Toolset Helpers\r\n\r\n```ts\r\nimport {\r\n  createAllToolInstances,\r\n  getReaderTools,\r\n  getWriterTools,\r\n  getAdminTools,\r\n  buildToolRegistry,\r\n  READER_MUTATING_TOOLS,\r\n  WRITER_MUTATING_TOOLS,\r\n  ADMIN_MUTATING_TOOLS,\r\n  READER_APPROVAL_EXEMPT,\r\n  WRITER_APPROVAL_EXEMPT,\r\n  ADMIN_APPROVAL_EXEMPT,\r\n} from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n- **`createAllToolInstances()`** \u2014 Instantiates all 20 tool classes and returns them as a named object.\r\n- **`getReaderTools(t)`** \u2014 Returns the 14-tool array for the reader tier.\r\n- **`getWriterTools(t)`** \u2014 Returns the 17-tool array for the writer tier.\r\n- **`getAdminTools(t)`** \u2014 Returns the 20-tool array for the admin/server tier.\r\n- **`buildToolRegistry(t)`** \u2014 Returns the full routing config array used by `IntentRouter`.\r\n- **`READER_MUTATING_TOOLS`** \u2014 Empty `Set<string>` (reader has no mutating tools).\r\n- **`WRITER_MUTATING_TOOLS`** \u2014 `Set` of `insert_data`, `delete_data`, `update_data`.\r\n- **`ADMIN_MUTATING_TOOLS`** \u2014 `Set` of all write + DDL tool names.\r\n- **`READER_APPROVAL_EXEMPT`** \u2014 `Set` of tools that bypass `requireApproval` in the reader tier.\r\n- **`WRITER_APPROVAL_EXEMPT`** \u2014 `Set` of tools that bypass `requireApproval` in the writer tier.\r\n- **`ADMIN_APPROVAL_EXEMPT`** \u2014 `Set` of tools that bypass `requireApproval` in the admin tier.\r\n\r\n### Types\r\n\r\n```ts\r\nimport type {\r\n  TierLevel,\r\n  McpServerConfig,\r\n  IntentCategory,\r\n  RunnableTool,\r\n  ToolRoutingConfig,\r\n  IntentRouterOptions,\r\n  RoutingCandidate,\r\n  RouteParams,\r\n  RouteResult,\r\n  WrapToolRunOptions,\r\n  EnvironmentConfig,\r\n  EnvironmentsConfig,\r\n  AccessLevel,\r\n  AuditLogEntry,\r\n  AuditLevel,\r\n  SecretsConfig,\r\n  SecretProviderConfig,\r\n} from \"@connorbritain/mssql-mcp-core\";\r\n```\r\n\r\n## Build\r\n\r\n```bash\r\nnpm install\r\nnpm run build   # Compiles TypeScript to dist/\r\nnpm run watch   # Watch mode for development\r\n```\r\n\r\n## Related Packages\r\n\r\n| Package | npm | Tier |\r\n|---------|-----|------|\r\n| Reader | `@connorbritain/mssql-mcp-reader` | Read-only |\r\n| Writer | `@connorbritain/mssql-mcp-writer` | Read + write |\r\n| Server | `@connorbritain/mssql-mcp-server` | Full admin |\r\n\r\n## License\r\n\r\nMIT\r\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+  },
+  "time": {
+   "0.1.0": "2026-02-17T21:34:24.647Z",
+   "0.1.1": "2026-02-17T21:58:53.046Z",
+   "0.1.2": "2026-02-17T22:32:10.345Z",
+   "0.1.3": "2026-02-18T01:20:48.049Z",
+   "0.1.4": "2026-02-18T01:30:08.641Z",
+   "0.1.5": "2026-02-18T01:34:02.456Z",
+   "0.2.0": "2026-02-18T03:39:49.629Z",
+   "0.2.1": "2026-02-18T04:06:42.847Z",
+   "0.2.2": "2026-02-18T04:23:54.784Z",
+   "0.3.0": "2026-02-18T04:42:26.702Z",
+   "0.5.0": "2026-02-18T05:49:47.239Z",
+   "0.6.0": "2026-06-29T17:00:36.178Z",
+   "0.6.1": "2026-08-04T21:20:50.203Z",
+   "0.7.0": "2026-08-04T21:22:20.123Z",
+   "created": "2026-02-17T21:34:24.305Z",
+   "modified": "2026-08-04T21:22:20.265Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.0",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.0_1771364064427_0.06976568950704043"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-sx+CK/UU9mqngrtpOfIHASfpF5hs/nHVWQ3Nt7sqK/mjAJgskNgcaN6vnU6nE9ykXBpE2rVY51ALVkVwCaXn2g==",
+     "shasum": "e8ddf1d8e590cb66ce9abee873575b372a2bf7ef",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGmCbpAg/lc/YIjpmjEoV+CDMhycKggYJ1ZUWL1qmsvkAiEA0QfMgtZpH+JvlE3UGrI8AS/PiUT2SoWh9vLOVa5O1A4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.0.tgz",
+     "unpackedSize": 402514
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "625220daa9c5d1b6ab6a0b0640f383a71898a950",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "npx tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.1",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.1_1771365532893_0.48557439150902626"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-+j+XlN0vUj1/g+VIjqrmvUDkxW/NxlO9xVjfbpm9s8aXq/NYF0iMY7OuXZM/Ol3IiqM/mW293lCEBB4i8xLvGA==",
+     "shasum": "bbd1e03348f89689d8ac0520c7d9cd82d3631418",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD1YQiWJYS6FtR9IIMBQgA1JW6sYpCeX7Ps0lsnu3BcogIgGL7rYvBABNhUK3FqkYZk13708CS9KMmJvtDUAd7RahY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.1.tgz",
+     "unpackedSize": 404061
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3ec2f781083544fb63a00251feecbb69d9bae367",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.2",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.2_1771367530191_0.9954898050654204"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-MBIL79Q6Ab+185EyZbk4JwSyGGJChj9nuFG1i6NQlyLGytyGaR6N8q7bVKqH70RRh1yWiARit1vHcLlJx+coBA==",
+     "shasum": "aade8a8d5104806cc9dae089dd99244d1153c18a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBXP07/ePH8XLv1eXmR8qJJRMa8go54HHwFOgm45sur1AiEAlgTuRyVxYMRliCsfKfNZxPRw+hw2VC+umsiHWLf3C8s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.2.tgz",
+     "unpackedSize": 404075
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5fd0a5b298a25d0c5ec7d104f8d0a54c0e1c091e",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.3",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.3_1771377647897_0.16678277421671384"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-YL8qVbB9Wq+OfOje40CoWmXL4cadf20Gf6e89LEy9Xy6I4//5SETJ2Dw9unU5UQxRZonNq4YZJlbY2NbVnu8tg==",
+     "shasum": "408b1f3a13b869753d0129f347f52a400543e2f8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAM3rKhEJTu0tDT9Kz7b2BDmxU7VH6cBLB3uqt6eNAH6AiEA4XwZVruUxzSfiyiwL9mRJs6Cf42cP/YOvMIyIk7/8hg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.3.tgz",
+     "unpackedSize": 404322
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c7a39d69d936221affe5e7b9491b9e299f10c69d",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.4",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.4_1771378208436_0.24468131311415475"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-EEK9mBtzHtGok46P8a5Cm1/Sv+iHfnyMugY5rXLj23gA38tBHrkoV5frqxuOyY5deFS45XhjlQ2iIpJ//eRGSA==",
+     "shasum": "0153ec626efd416e6c5513d98e9df798529f12b7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDoAFPehiK9w9xm1+/52mda82eWqzDryhz3+5rZrO3HqAiEAj3uiz/PiWp2E+VNc1smt5FdQZ473SSCE69r0zHkuJrU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.4.tgz",
+     "unpackedSize": 404672
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cafb08935fa7d3358010da4ad7d06f63804d66bb",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.1.5",
+    "_nodeVersion": "24.11.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.1.5_1771378442296_0.48589537677482464"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.6.1",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 129,
+     "integrity": "sha512-LADx2alQkGwd2n1H4DD/yQdhVBctGNKa9k1JZBzyV4tvYH5tFGQifZ2vI6zhPK0G2zSst/nkzFR9ZUTuNJIZyA==",
+     "shasum": "cb29308e45ec7606923307455884aad60ea27103",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD4DCrGRy6rTJSrGiLQ5MhcQ+1OFF8cdzclwN8MihuBYgIhAK058a0Nr2aCxQL5hrGZWx5dwtoC7yG47am3Ey6SxHhC"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.1.5.tgz",
+     "unpackedSize": 404706
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3dcd1c75778a051e1ee080d30878a4ba31c06a02",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.5"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.2.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.2.0_1771385989446_0.5876547918816775"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 130,
+     "integrity": "sha512-2eahaFIB5dRPJ2Hln009RVRVg+ekMrpf4vuoMGkqt6nCySNKZc9WSpkRdrdeWxs0c9oVTb7uJXFPlRUi2KzkAQ==",
+     "shasum": "f483b4aa8595fda0715f5d3323962051fe5c18e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD1eCJh9QLNcZS5EuTKMt8fCB9nXR1rgXcai/USh1adQwIhAM4BuBuoXfsyhZA+yhtpvx0CM9Ng4t+h2CTRbP/pMpJi"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.2.0.tgz",
+     "unpackedSize": 436069
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "67b0db111a76eb60418eef3ab9921008402f91b9",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.2.1",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.2.1_1771387602671_0.6759031956298929"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 130,
+     "integrity": "sha512-pYbxtr3PIPPm4qwzBrKVXbkKxLUN4NH/IwraaZ4uhMngM/wmQAl/pY6HhpdG2ACX27zPdnPdnLtks9wKOeV8ig==",
+     "shasum": "a5f710f28a3fefe17f3f646d2d2f9afa5c0828e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCt3ptuDhvsXqZBw1+LfNnDlNGcxghsh5JgCSiaKKNhYQIgV9RuFWcRdFX1uvde5WjNOrpWiPhTKN5GOIT35WplEaY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.2.1.tgz",
+     "unpackedSize": 449474
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "2ece11198a99db6b062ea0a10153cde505fc81a4",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.2.2",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.2.2_1771388634646_0.14588216857338598"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 130,
+     "integrity": "sha512-3S+upo71m5jzL71nISgsUoStCPquHJax5o+dpq0JeWI/fZEzSZfHC2Rjf8RdClEDu8YW+dFYimI8SNe0/z1ocA==",
+     "shasum": "a0a06f05b900be65ab807e16799791f2b22e7bb2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFNUqxQOpfvyPGXa7E9h4coMKK0JkNld7EHzlPSG4UxGAiEAjnZaBUIqE7s6vq3ELiO3mAC4WJeWRSE1ddV2OoEM/Vk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.2.2.tgz",
+     "unpackedSize": 452136
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e443166c282a2d945a5377023d1859750409c39a",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.3.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.3.0_1771389746545_0.32327283209710567"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "typescript": "^5.4.5"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 150,
+     "integrity": "sha512-VbzPJ95DJu8d/Oopb/gq18tlYnsyeGnFYVjMhD3bBFUYR5lHSre8TV7rRmxrSduh+Db8z5Hoh9logtPqkg668Q==",
+     "shasum": "62e2061e2d53c9d5e1c1cfb69621f307e4d6e7b2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD+GMzh4eU6vKOlI9j2VdZAilScCjcKj+8B4S3LEvIvswIhAKLfCW26cQ+buLshJUnOqD/Bh40BaUpxuYWpljVXSQ5N"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.3.0.tgz",
+     "unpackedSize": 495155
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f4f7bdb029d31a8db5696728c6740b4f367e2ab4",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.5.0",
+    "_nodeVersion": "24.11.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.5.0_1771393787003_0.09537106421879127"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "deprecated": "Security: SQL injection (CVE-2026-63129, GHSA-2m9m-6cr5-9x25). Upgrade to >=0.6.0.",
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "tsx": "^4.19.0",
+     "typescript": "^5.4.5",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 178,
+     "integrity": "sha512-pS0GxZJFrFXn7WUwl4DDm1eL15JquE8oUdNYNAXk8f9LqfLBCLTXDLfBpcIRYS7o7jYtKy+kWt0LLbnaDOcAug==",
+     "shasum": "8097f806b5a43d499ede8f61c3369141acbf82cf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA1d41y49Re/6VxZIu6gs3KMPRVht3VE+zF/LuXR0Q3UAiBuu7+bO2YBWnfb/gx5p4I8/HjyETgF8/769Ym4oN8wvQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.5.0.tgz",
+     "unpackedSize": 551297
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5538311449c133931fa359e044a7fac885476b01",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-cloudwatch-logs": "^3.992.0",
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:smoke": "tsx test/smoke-sinks.ts",
+     "test:watch": "vitest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.6.0",
+    "_nodeVersion": "26.1.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.6.0_1782752435975_0.5126067718017553"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "tsx": "^4.19.0",
+     "typescript": "^5.4.5",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 190,
+     "integrity": "sha512-+A1VuywWyimnUN7DaXoOkTxXyqkF2bX9H+EmW/BFmoAHm0YjgghZb8n2W3M6sbPeDlyEOaPi5W+fsw0wBqzyfg==",
+     "shasum": "bb5d83ea420a01de9de7354c62f4c564d6e3abe2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID6oC2wcDs8ehNKeMgAACuDtwHPG0Ts3kcyLxjt80sKnAiAV+sWO3UM1pi7/uXwpDGLbOzPKvyH/E+GzEpk7Dibprw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.6.0.tgz",
+     "unpackedSize": 590000
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "bd658eeae9af03c6ee0c4f10199b58eddc1c7aae",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-cloudwatch-logs": "^3.992.0",
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:smoke": "tsx test/smoke-sinks.ts",
+     "test:watch": "vitest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.6.1",
+    "_nodeVersion": "26.1.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.6.1_1785878450043_0.47188262763084987"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1"
+    },
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "tsx": "^4.19.0",
+     "typescript": "^5.4.5",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 190,
+     "integrity": "sha512-F/xP1pRzqfhhUtFQ7JrKMF8oII464SF9GGTMMHmPlYsDBYnNv4oRe/DCe0LhJuPPrLpKd8xuIaZOWTcGNEzptA==",
+     "shasum": "49eb17734c789cc9e9fb6643c87aee55bc705227",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAVcXBuQsy59JAfQl+oy+fUi8PLKKAn7t+sEEpaPkkhLAiADBIMR7KqVsC/7k4XrykkR94P9zZ9N3ltUExpgtT5h9w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.6.1.tgz",
+     "unpackedSize": 590540
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-cloudwatch-logs": "^3.992.0",
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:smoke": "tsx test/smoke-sinks.ts",
+     "test:watch": "vitest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@connorbritain/mssql-mcp-core@0.7.0",
+    "_nodeVersion": "26.1.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mssql-mcp-core_0.7.0_1785878540000_0.348782379207784"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "connorbritain"
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "email": "[redacted-email:7c539ac81c9e]",
+     "name": "Connor England"
+    },
+    "bugs": {
+     "url": "https://github.com/ConnorBritain/mssql-mcp-core/issues"
+    },
+    "dependencies": {
+     "@azure/identity": "^4.4.0",
+     "@azure/keyvault-secrets": "^4.9.0",
+     "@modelcontextprotocol/sdk": "^1.23.0",
+     "dotenv": "^16.4.5",
+     "mssql": "^10.0.1",
+     "sql-surveyor": "^1.4.1"
+    },
+    "description": "Shared core library for MSSQL MCP servers - tools, config, routing, and server harness",
+    "devDependencies": {
+     "@types/mssql": "^9.1.7",
+     "@types/node": "^20.14.2",
+     "tsx": "^4.19.0",
+     "typescript": "^5.4.5",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 198,
+     "integrity": "sha512-SyOjtmCM5wu35TJsLypegbmHrwATXbpNfsO8R6aQEYViDtlQYfHWf3SIfbnojMR198e3PxU4+aZAV7p+EK1m5g==",
+     "shasum": "939795f086ae23cc1e9e47df97bf05184f0741dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGQuRlV7yeS27VauBandMUnnbaNuFCdCenPg66n6lziCAiEA5W5TV4bo34G/iB93SPk1ha1sAGAL7ghfu8V8S3X22j8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@connorbritain/mssql-mcp-core/-/mssql-mcp-core-0.7.0.tgz",
+     "unpackedSize": 627511
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "94aa6b93cee21a403daa421895893ba40d1a2bbc",
+    "homepage": "https://github.com/ConnorBritain/mssql-mcp-core",
+    "keywords": [
+     "mcp",
+     "sql-server",
+     "mssql",
+     "database",
+     "ai",
+     "claude",
+     "windsurf",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:7c539ac81c9e]",
+      "name": "connorbritain"
+     }
+    ],
+    "name": "@connorbritain/mssql-mcp-core",
+    "optionalDependencies": {
+     "@aws-sdk/client-cloudwatch-logs": "^3.992.0",
+     "@aws-sdk/client-secrets-manager": "^3.700.0"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ConnorBritain/mssql-mcp-core.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "test": "vitest run",
+     "test:smoke": "tsx test/smoke-sinks.ts",
+     "test:watch": "vitest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.7.0"
+   }
+  }
+ },
+ "name": "@connorbritain/mssql-mcp-core",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@connorbritain%2Fmssql-mcp-core"
+}

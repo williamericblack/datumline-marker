@@ -1,0 +1,1077 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.86.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:cd5e3215527f]",
+    "name": "npm-memlab"
+   },
+   {
+    "email": "[redacted-email:5b75beaa076b]",
+    "name": "jacksongl"
+   },
+   {
+    "email": "[redacted-email:fa0abf447193]",
+    "name": "meta-memlab"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "2.0.0",
+   "2.0.1",
+   "2.0.2",
+   "2.0.3",
+   "2.1.0",
+   "2.1.1",
+   "2.18.1",
+   "2.3.0",
+   "2.52.0",
+   "2.86.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@memlab/mcp-server",
+  "_rev": "10-bcc1a1f24fa4d42a45f892f14425903e",
+  "author": {
+   "email": "[redacted-email:894a695cda8e]",
+   "name": "Liang Gong"
+  },
+  "bugs": {
+   "url": "https://github.com/facebook/memlab/issues"
+  },
+  "contributors": [],
+  "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+  "dist-tags": {
+   "latest": "2.86.0"
+  },
+  "homepage": "https://github.com/facebook/memlab#readme",
+  "keywords": [
+   "mcp",
+   "memlab",
+   "memory",
+   "leak",
+   "heap",
+   "snapshot",
+   "analysis",
+   "claude",
+   "ai"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:cd5e3215527f]",
+    "name": "npm-memlab"
+   },
+   {
+    "email": "[redacted-email:5b75beaa076b]",
+    "name": "jacksongl"
+   },
+   {
+    "email": "[redacted-email:fa0abf447193]",
+    "name": "meta-memlab"
+   }
+  ],
+  "name": "@memlab/mcp-server",
+  "readme": "# @memlab/mcp-server\n\nAn [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that wraps [MemLab](https://facebook.github.io/memlab/)'s heap analysis APIs, giving AI coding assistants (Claude Code, Cursor, etc.) interactive tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities.\n\n## Prerequisites\n\nThe MCP server loads and analyzes large heap snapshots in memory, which can exceed Node.js's default heap limit. You need to configure `--max-old-space-size=8192` (or higher) to avoid out-of-memory crashes. The configuration examples below include this setting.\n\n**Snapshot-size ceiling.** The server holds the full parsed graph (nodes, edges, dominator tree, indexes) resident, so its own RSS is roughly **3\u20135\u00d7 the on-disk snapshot size**. With the recommended `--max-old-space-size=8192`, snapshots up to ~850 MB on disk have been analyzed reliably; `memlab_load_snapshot` refuses files above `max_file_size_mb` (default 900) to avoid OOM crashes that would lose all state. For larger heaps, raise both `--max-old-space-size` and `max_file_size_mb`. When loading multiple snapshots with `keep_previous: true`, each resident snapshot adds its full graph to RSS \u2014 unload ones you're done with via `memlab_snapshots`.\n\n## Quick Start\n\n### Option 1: Global install\n\n```bash\nnpm install -g @memlab/mcp-server\n```\n\nThen configure (`~/.claude.json` for Claude Code, or `.mcp.json` for Cursor/Windsurf):\n\n```json\n{\n  \"mcpServers\": {\n    \"memlab\": {\n      \"type\": \"stdio\",\n      \"command\": \"memlab-mcp\",\n      \"env\": {\n        \"NODE_OPTIONS\": \"--max-old-space-size=8192\"\n      }\n    }\n  }\n}\n```\n\n### Option 2: npx (no install)\n\nAdd to your Claude Code MCP config (`~/.claude.json` for Claude Code, or `.mcp.json` for Cursor/Windsurf):\n\n```json\n{\n  \"mcpServers\": {\n    \"memlab\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"@memlab/mcp-server\"],\n      \"env\": {\n        \"NODE_OPTIONS\": \"--max-old-space-size=8192\"\n      }\n    }\n  }\n}\n```\n\n### Option 3: From source\n\n```bash\ngit clone https://github.com/facebook/memlab.git\ncd memlab\nnpm install\nnpm run build\n```\n\nThen configure (`~/.claude.json` for Claude Code, or `.mcp.json` for Cursor/Windsurf):\n\n```json\n{\n  \"mcpServers\": {\n    \"memlab\": {\n      \"type\": \"stdio\",\n      \"command\": \"node\",\n      \"args\": [\"--max-old-space-size=8192\", \"/path/to/memlab/packages/mcp-server/dist/index.js\"]\n    }\n  }\n}\n```\n\n## Auto-Approving Tool Permissions\n\nBy default, Claude Code prompts you to approve each MCP tool call. Every MemLab tool except `memlab_eval` and `memlab_for_each` is strictly read-only heap analysis and safe to auto-approve.\n\n> [!CAUTION]\n> **Do not auto-approve `memlab_eval` or `memlab_for_each`.** They execute arbitrary JavaScript with the full privileges of the MCP server process (see the warning under [`memlab_eval`](#memlab_eval)). Leave them on manual approval so each invocation is reviewed. Avoid the `mcp__memlab__*` wildcard, which would auto-approve them too.\n\nTo auto-approve the read-only tools while keeping the two code-execution tools on manual approval, allowlist the read-only tools explicitly in your `~/.claude/settings.json` (user-level) or `.claude/settings.json` (project-level):\n\n```json\n{\n  \"permissions\": {\n    \"allow\": [\n      \"mcp__memlab__memlab_load_snapshot\",\n      \"mcp__memlab__memlab_snapshot_summary\"\n    ]\n  }\n}\n```\n\n## How It Works\n\nThe server holds loaded `IHeapSnapshot` graphs in memory across tool calls (loading is\nexpensive for large heaps). Several snapshots can be resident at once (`keep_previous: true`);\ntools read the active one, which `memlab_snapshots` switches. When a load's projected working\nset exceeds the free old-space budget, the least-recently-used resident snapshot is evicted\nbefore the load is refused. All tools are read-only \u2014 they analyze the heap but never modify it.\n\n## Getting a Heap Snapshot\n\n### Chrome DevTools\n\n1. Open DevTools (F12) > Memory tab\n2. Select \"Heap snapshot\" and click \"Take snapshot\"\n3. Right-click the snapshot in the left panel > \"Save...\"\n4. Save the `.heapsnapshot` file\n\n### Node.js\n\n```js\nconst v8 = require('v8');\nconst snapshot = v8.writeHeapSnapshot();\nconsole.log(`Heap snapshot written to ${snapshot}`);\n```\n\n## Tools Reference\n\n### `memlab_load_snapshot`\n\nLoad and parse a `.heapsnapshot` file. Builds indexes, computes the dominator tree, and calculates retained sizes. `file_path` may be a local absolute path, a `manifold://bucket/key` URL, or a bare snapshot filename (resolved against the `nest_server_nodejs_heap_snapshots` bucket and fetched via `manifold get`). Pass `keep_previous: true` to keep earlier snapshots resident for diffing/comparison (each gets a handle; manage with `memlab_snapshots`). `quiet` / `suppress_suggestions` set session-wide output controls to trim repeated boilerplate.\nPass `light: true` for a count-only load that skips the dominator / retained-size /\nshortest-path pass; tools needing retained sizes, dominators or retainer paths then return an\nerror naming the light-safe tools instead of reporting zeros.\n\n```\nInput:  { file_path: \"snap.heapsnapshot\" | \"/abs/path\" | \"manifold://bucket/key\",\n          alias?: \"before\", keep_previous?: false, quiet?: false,\n          suppress_suggestions?: false, light?: false, max_file_size_mb?: 900 }\nOutput: { status, file_path, node_count, edge_count, total_size, handle }\n```\n\n### `memlab_snapshot_header`\n\nPeek a `.heapsnapshot`'s header (node/edge counts, capture time, file size) **without** loading it \u2014 no dominator pass, so it can never wedge or OOM the server the way a full `memlab_load_snapshot` can. Reports whether the capture fits under the current auto-scaled load ceiling, this app's node/edge density, and \u2014 when it doesn't fit \u2014 the estimated largest same-app capture that *would* fit, so you can pick a loadable snapshot in one step instead of attempting an oversized load and retrying. `file_path` accepts the same three forms as `memlab_load_snapshot`; a Manifold fetch is reused (cached) by a subsequent load.\n\n```\nInput:  { file_path: \"snap.heapsnapshot\" | \"/abs/path\" | \"manifold://bucket/key\" }\nOutput: file size, node/edge counts, capture date, current ceiling, and a\n        loadable \u2713 / over-ceiling \u2717 verdict with a density-based max-loadable-MB hint\n```\n\n### `memlab_snapshots`\n\nManage the multi-snapshot session and session output controls.\n\n```\nInput:  { action?: \"list\"|\"switch\"|\"unload\", handle?: \"before\",\n          quiet?: bool, suppress_suggestions?: bool }\nOutput: resident snapshots (active one marked), or switch/unload result\n```\n\n### `memlab_batch`\n\nRun several tools against ONE snapshot load and return all their outputs together, instead of\nre-paying the multi-minute parse on every call. Steps run in order against the resident snapshot\nand see each other's side effects. An unknown tool name is rejected before any step runs, and by\ndefault a failing step is recorded and the batch continues.\n\n```\nInput:  { load?: { ...memlab_load_snapshot args }, steps: [{ tool, args? }],\n          stop_on_error?: false }\nOutput: a per-step output block for each step, headed by a run/failed step count\n```\n\n### `memlab_property_distribution`\n\nFor a class/shape and a property, report value cardinality plus the top-K most frequent values. The key tool for diagnosing cardinality explosions (OTel metric attributes, cache keys, per-record fields).\n\n```\nInput:  { property: \"http.route\", class_name?: \"Object\", shape?: [\"a\",\"b\"],\n          top_k?: 15, min_count?: 1 }\nOutput: { scanned, distinct_values, top_values: [{ value, count, pct }] }\n```\n\n### `memlab_growth_signals`\n\nSingle-snapshot heuristic that flags likely unbounded growth: Maps/Sets keyed by timestamps or sequential integers, and large ever-growing Arrays. Confirm with a later snapshot + `memlab_diff_snapshots`.\n\n```\nInput:  { limit?: 15, min_entries?: 200, min_retained_size?: 262144 }\nOutput: candidates with kind, entry count, retained size, sample keys\n```\n\n### `memlab_sequence_analysis`\n\nTrend analysis across an ordered sequence of 3+ snapshots. Loads each transiently (does not change the active snapshot), reports each class's count at every step, and labels \"\u2191 every step\" (leak signal) vs \"grew net (noisy)\". Lists classes new since baseline.\n\n```\nInput:  { paths: [\"a\",\"b\",\"c\"], limit?: 25, min_growth_count?: 50,\n          monotonic_only?: false, max_file_size_mb?: 900 }\nOutput: per-step heap totals + growing classes with per-step counts and verdict\n```\n\n### `memlab_dev_artifacts`\n\nBrowser snapshots: classify large retainers as production vs. dev-only (retained solely via `__REACT_DEVTOOLS_GLOBAL_HOOK__`, `__REDUX_DEVTOOLS_EXTENSION__`, `window.Debug`, \u2026) and total the bytes to exclude from leak headlines. `memlab_detached_dom` also reports the dev-only share inline.\n\n```\nInput:  { limit?: 25, min_retained_size?: 524288, only_dev?: false }\nOutput: dev-only byte total + per-object classification (production | dev-only via <global>)\n```\n\n### `memlab_event_registry`\n\nDetector for per-model event registries (Backbone/observer): objects mapping event names to arrays of `{callback, context}`. Reports top event names by listener count, listeners-per-host distribution, and a structural-vs-leak verdict.\n\n```\nInput:  { min_events?: 2, limit?: 20, timeout_ms?: 45000 }\nOutput: registry stats + top events + verdict (structural O(hosts) vs re-subscription leak)\n```\n\n### `memlab_server_status`\n\nCheap liveness/health check \u2014 returns instantly with process RSS, uptime, and resident snapshots. Use to confirm the server is responsive (vs. stuck behind a heavy scan) and to watch RSS against the snapshot-size ceiling.\n\n```\nInput:  {}\nOutput: status, uptime, RSS, resident snapshots\n```\n\n### `memlab_snapshot_summary`\n\nOverview stats: total nodes/edges, total size, breakdown by node type with dominator-aware aggregate retained sizes.\n\n### `memlab_largest_objects`\n\nTop N objects by retained size, filtering out internal/meta nodes.\n\n```\nInput:  { limit?: 20 }\n```\n\n### `memlab_get_node`\n\nLook up a single node by numeric ID with full details (size, type, detachment status, dominator, location, string value).\n\n```\nInput:  { node_id: 12345 }\n```\n\n### `memlab_find_nodes_by_class`\n\nFind all objects with a given constructor/class name, sorted by retained size.\n\n```\nInput:  { class_name: \"FiberNode\", limit?: 20 }\n```\n\n### `memlab_get_references`\n\nOutgoing edges from a node (what it points to), sorted by target retained size.\n\n```\nInput:  { node_id: 12345, limit?: 30 }\n```\n\n### `memlab_get_referrers`\n\nIncoming edges to a node (what points to it), sorted by source retained size.\n\n```\nInput:  { node_id: 12345, limit?: 30 }\n```\n\n### `memlab_retainer_trace`\n\nShortest path from a GC root to a node. Shows why the object is retained in memory.\n\n```\nInput:  { node_id: 12345 }\n```\n\n### `memlab_detached_dom`\n\nFind detached DOM elements still retained in memory (common memory leak source). Supports count-only and ids-only modes for large result sets.\n\n```\nInput:  { output_mode?: \"full\"|\"count\"|\"ids\", limit?: 20 }\n```\n\n### `memlab_duplicated_strings`\n\nFind duplicated string instances ranked by total retained size.\n\n```\nInput:  { limit?: 15 }\n```\n\n### `memlab_stale_collections`\n\nFind Map/Set/Array collections holding detached DOM or unmounted Fiber nodes.\n\n```\nInput:  { limit?: 15 }\n```\n\n### `memlab_global_variables`\n\nNon-built-in global variables on the Window object, sorted by retained size.\n\n```\nInput:  { limit?: 20 }\n```\n\n### `memlab_search_nodes`\n\nGeneral-purpose search combining filters: name pattern (regex), node type, size thresholds, detachment status.\n\n```\nInput:  { name_pattern?: \"Regex\", type?: \"object\", min_retained_size?: 1000000, limit?: 20 }\n```\n\n### `memlab_get_property`\n\nLook up a specific property of a node by name and return the target node with full details.\n\n```\nInput:  { node_id: 12345, property_name: \"stateNode\" }\n```\n\n### `memlab_object_shape`\n\nShow all named properties of an object with target types and sizes.\n\n```\nInput:  { node_id: 12345, include_internal?: false, limit?: 50 }\n```\n\n### `memlab_class_histogram`\n\nInstance count and total retained size per constructor name, sorted by aggregate retained size (dominator-aware). The Chrome DevTools \"Summary\" view equivalent.\n\n```\nInput:  { limit?: 30, min_count?: 1, node_type?: \"object\" }\n```\n\n### `memlab_dominator_subtree`\n\nShow objects dominated by a given node \u2014 what would be freed if it were garbage collected.\n\n```\nInput:  { node_id: 12345, limit?: 20 }\n```\n\n### `memlab_closure_inspection`\n\nInspect a closure's captured variables, source location, and scope context. Critical for diagnosing closure-based memory leaks.\n\n```\nInput:  { node_id: 12345 }\n```\n\n### `memlab_find_by_property`\n\nFind all objects that have a specific property name. Useful for React internals (`__reactFiber$`), custom markers, or framework-specific patterns.\n\n```\nInput:  { property_name: \"__reactFiber$\", limit?: 20 }\n```\n\n### `memlab_aggregate`\n\nAggregate heap nodes by type, name, or name prefix. Returns grouped statistics with dominator-aware retained sizes (no double-counting).\n\n```\nInput:  { group_by: \"type\"|\"name\"|\"name_prefix\", name_pattern?: \"...\", limit?: 30 }\n```\n\n### `memlab_reports`\n\nRun curated memory analysis reports. Use `\"list\"` to see available reports, pick one by name, or use `\"full_analysis\"` to run all reports for comprehensive triage.\n\n```\nInput:  { report: \"list\"|\"full_analysis\"|\"detached_dom\"|\"duplicated_strings\"|..., limit?: 10 }\n```\n\n### `memlab_eval`\n\nExecute arbitrary JavaScript against the loaded heap snapshot. Has access to `snapshot`, `utils`, and `helpers`.\n\n> [!WARNING]\n> **This tool runs arbitrary code with the full privileges of the MCP server process.** It uses `node:vm` to scope the globals it injects, but [`node:vm` is not a security sandbox](https://nodejs.org/api/vm.html) \u2014 code can reach the host realm (e.g. `Object.constructor('return process')()`) and from there touch the filesystem, network, and shell. Treat calling `memlab_eval` as equivalent to running code on your machine. The same applies to `memlab_for_each`, whose `filter`/`map`/`reduce` code strings are executed the same way. Do not auto-approve these two tools, and be aware that heap snapshot contents are attacker-influenceable input \u2014 a prompt-injection could steer the model into running hostile code here.\n\n```\nInput:  { code: \"...\", timeout_ms?: 30000 }\n```\n\n### `memlab_for_each`\n\nStructured map/filter/reduce over all heap nodes with code predicates.\n\n```\nInput:  { filter_code: \"node.type === 'closure'\", map_code?: \"...\", reduce_code?: \"...\", limit?: 100 }\n```\n\n## Investigation Skill for AI Assistants\n\nThe [MCP Investigation Skill](./MCP_SKILL.md) provides a structured\nmethodology for AI coding assistants to systematically investigate memory\nissues using the MCP tools. It covers:\n\n- **Step-by-step triage** \u2014 load, diagnose, and prioritize findings\n- **Investigation paths** \u2014 guided workflows for string waste, DOM leaks,\n  object accumulation, closure leaks, global bloat, listener accumulation, and\n  repeated errors, each with triggers, tool sequences, and common fixes\n- **Tool selection reference** \u2014 a quick-reference table mapping investigation\n  goals to the right MCP tool\n- **Token efficiency tips** \u2014 how to minimize token usage with compact modes\n  and parallel tool calls\n\n## Example Workflow\n\nA typical memory investigation:\n\n1. **Load the snapshot**: \"Load the heap snapshot at /tmp/my-app.heapsnapshot\"\n2. **Get an overview**: \"Show me a summary of the heap\"\n3. **Find the biggest objects**: \"What are the largest objects by retained size?\"\n4. **Investigate a specific object**: \"Show me the retainer trace for node 48231\"\n5. **Check for common leak patterns**:\n   - \"Are there any detached DOM nodes?\"\n   - \"Show me duplicated strings\"\n   - \"Are any collections holding stale objects?\"\n6. **Drill into references**: \"What does node 48231 reference?\"\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/facebook/memlab.git"
+  },
+  "time": {
+   "2.0.0": "2026-03-23T21:21:24.871Z",
+   "2.0.1": "2026-04-16T22:09:41.524Z",
+   "2.0.2": "2026-04-26T21:24:37.636Z",
+   "2.0.3": "2026-05-08T01:24:23.614Z",
+   "2.1.0": "2026-05-19T19:29:09.442Z",
+   "2.1.1": "2026-05-27T20:27:13.368Z",
+   "2.18.1": "2026-07-11T17:04:45.497Z",
+   "2.3.0": "2026-06-10T21:03:47.881Z",
+   "2.52.0": "2026-08-18T03:55:01.187Z",
+   "2.86.0": "2026-08-29T18:07:33.015Z",
+   "created": "2026-03-23T21:21:24.583Z",
+   "modified": "2026-08-29T18:07:33.212Z"
+  },
+  "versions": {
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.0.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.0.0_1774300884727_0.7255337349714688"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.0",
+     "@memlab/heap-analysis": "^2.0.0",
+     "@modelcontextprotocol/sdk": "~1.12.1",
+     "zod": "~3.23.8"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 107,
+     "integrity": "sha512-sedtSp00L1SNmE4zZEkDPjm7GFLWKthzymbfCEHax9crKgIycoMzzd/l8qZEkUpv4WdYxe0RG9epOl12X4cNVg==",
+     "shasum": "2970c833a867568b3998a31e9ff2a4f7bd1d9864",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBULl6RIayici5WTcD4/oMC9EXax0a1/Hh6SYgObDRl6AiBCuhYEkGUBk3zfl4GUwWrVI8BFTS/azVWghjxZ7ySQHQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.0.0.tgz",
+     "unpackedSize": 219955
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "007cd370cb2ecdf58408961e29e43483e6102212",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.0.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.0.1_1776377381354_0.5658096098285195"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.1",
+     "@memlab/heap-analysis": "^2.0.1",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 107,
+     "integrity": "sha512-rZRmZEVR3jN1cIPIBWxOnV1CD6DRh0QmqzRlErjovWNkMUK7MNpVo4uBHfa0NF1TBKItWi7Jhpa7IqbUtch+DQ==",
+     "shasum": "17a4308c7a92a8af43fed42e993da049d308930c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIElWHnnOFvJIE8YRXxUKRHeFAwwyaD4yd7VjxKxVN2kbAiEAkwZpYbAtZ4d5WxfZFLaBh6rV6ghXno49ISl6NMIpNus="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.0.1.tgz",
+     "unpackedSize": 219956
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "0a81d9b1a0a28cb51514661312614ab57e698446",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.1"
+   },
+   "2.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.0.2",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.0.2_1777238677491_0.07178500604239835"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.1",
+     "@memlab/heap-analysis": "^2.0.1",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 107,
+     "integrity": "sha512-E4IEL9yQaE5R4wfdrHT0/BYJLpfiIDEmojR+4g8dh+vjwqeEkS4BEUbzIy6fKs2LPd0KJjZ0n8u0ulPOkHKW/g==",
+     "shasum": "69313989469929905caf774a2016cf1f1d202cc6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCZxDOkBIRYyxO4HeQ999WekazcUZA36Dm4mT41uz0IhwIhALdJ9qP3nKPmj1y36QUGT4pdNg7HdNTW5Xaw6gUCUznh"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.0.2.tgz",
+     "unpackedSize": 221770
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "039e32c6d05a6142fbb9c5871e8ae211b7032bd0",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.2"
+   },
+   "2.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.0.3",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.0.3_1778203463439_0.6954074918807731"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.1",
+     "@memlab/heap-analysis": "^2.0.1",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 107,
+     "integrity": "sha512-FbXhWA6aR4ihqOM6hzUmV9fwc7kBRWKplfQB+loh1x11YY32OVUJMDKoBjg6jB+7de+LgNw5Emejo+hDCXPKWw==",
+     "shasum": "04de52d65f74252c9ca3d3617f793ec004eceaa5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCPSnLu7v7Z35PFkwsUzmGzO+joHw1TfpTLJa5ZblNz3AIgd//i2NWp8VPaomKBTTx41aOh89qjvHlaAnQd+WpREUM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.0.3.tgz",
+     "unpackedSize": 222500
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "df2afce930335393d30dfcb12ef3fa13fbf24f86",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.3"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.1.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.1.0_1779218949250_0.23599738073414311"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.1",
+     "@memlab/heap-analysis": "^2.0.1",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 159,
+     "integrity": "sha512-fMg32lTsu+gzrJnE92rbLUzcUPS1ssSce9vLJzzW4R5r2/QHRdCdLcp925v4RqGhIZxd/0mebGA2/xsau/Fbjg==",
+     "shasum": "8de7cdef3f0c976763c4fafcb9d147ac0ac1da83",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCsjvjvF26yGsq5UYRHgL/h6xfu2DLcAzPInPPVe0+wqQIhAJCS2hlSn5DbvWtTQoLTkFrXlH+KFqvLfatnycJX9zLn"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.1.0.tgz",
+     "unpackedSize": 562391
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "a599e881071be6795d1c06c4cd8552ca8f59c4d4",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.1.0"
+   },
+   "2.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.1.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.1.1_1779913633136_0.3407201507715505"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.1",
+     "@memlab/heap-analysis": "^2.0.1",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 159,
+     "integrity": "sha512-Wm7uWsh7E0QC9jDYmEmK5F0gjLYkzk4WqUKNgrEy1HVO5cHUykdbqqSmJdSqRZmqldz9gLlLi83PN7rHNY0nhQ==",
+     "shasum": "411ddd23f7c4d6afe0d20e1f637b73b4ccf646da",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGBKpVz1XXqbK1KmEHPE1G2lRcEUKZsj58GukDzhAzQhAiEA4KqT/8UW/nEqlAUd08kutLXhcY2z3k8sLtg58OA3Wtc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.1.1.tgz",
+     "unpackedSize": 563129
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "ecd8f97eb511b8b2fd2b9f443e417d9099d568a3",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.1.1"
+   },
+   "2.18.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.18.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.18.1_1783789485319_0.6720509531047567"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.3",
+     "@memlab/heap-analysis": "^2.0.3",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 231,
+     "integrity": "sha512-WGaf3ev+rGyWXCy6DxoxttCnIYAhlQpnXo6H/sOma44XdzLtXYlOG5wc3hoyOCRptfyGwWPtW5h4NKkrQE/egw==",
+     "shasum": "9ea5089529ec3e3f45c7920a5d4d24f442ee9370",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGVD2ac9HRLepNMWpvSLL39vCEgoiI4BawrAiBdeaObiAiA9Je9mChnDrZpme6hL4hRiUzDvGX8oy1nK90XdXM4vJw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.18.1.tgz",
+     "unpackedSize": 1334573
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "e2c477f13914cf4a15b2d6ff0bb1809c1f5c301a",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.18.1"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.3.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.3.0_1781125427682_0.3053920692674097"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.3",
+     "@memlab/heap-analysis": "^2.0.3",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 227,
+     "integrity": "sha512-A3qm/JqfwxBH/nkMKUQ+1/xg0InYPzBjIMw/6DfqVhoF5SSU98O2GXThHCYdOjhlGGJfVs85yEvtkHFIjSi4gQ==",
+     "shasum": "b44a74881b07a6489b8360bcbc97b47b93300301",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAko1Xy5jIoX2VFPFEDbM4R5FDtCjhsaD4AKvZgIjOyEAiAfkiQM/DZ2Agy01ic8FXhjLhA0dbSCQyvynfXxkZag0Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.3.0.tgz",
+     "unpackedSize": 1185617
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "9e43125866ef8a866553a90dbbe9d54219ba695a",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.3.0"
+   },
+   "2.52.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.52.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.52.0_1787025301047_0.021017674877841896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-cli": "bin/memlab-cli.js",
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.4",
+     "@memlab/heap-analysis": "^2.0.4",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 333,
+     "integrity": "sha512-WkIe+HLxOYy5KynNvcqrfOskjmrsrfIlDgiycEAOLJXMBFO0fxwV1dhrxpZKeDO5+4UZ2V9jTkdolnpozj9vUw==",
+     "shasum": "a695320c4139ffc9b56c9ad31ac7f0eda87e40df",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICnDLAdEJ4PD9obRG4i+khFax/TA4GvKY6Pua7oqjMjGAiEAq5Ze8V2t9k0NIy0FcnQHM2XtBbIk5wVNU6sjBSahU9U="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.52.0.tgz",
+     "unpackedSize": 2059938
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "67f983bf11ee74a9b7ebc409840d9c7a324dcd2d",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "echo 'no tests yet'"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.52.0"
+   },
+   "2.86.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@memlab/mcp-server@2.86.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_2.86.0_1788026852739_0.4842299640742964"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:5b75beaa076b]",
+     "name": "jacksongl"
+    },
+    "_npmVersion": "11.2.0",
+    "author": {
+     "email": "[redacted-email:894a695cda8e]",
+     "name": "Liang Gong"
+    },
+    "bin": {
+     "memlab-cli": "bin/memlab-cli.js",
+     "memlab-mcp": "bin/memlab-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/facebook/memlab/issues"
+    },
+    "contributors": [],
+    "dependencies": {
+     "@memlab/core": "^2.0.4",
+     "@memlab/heap-analysis": "^2.0.4",
+     "@modelcontextprotocol/sdk": "^1.27.1",
+     "zod": "^3.25.76"
+    },
+    "description": "MCP server for MemLab heap snapshot analysis \u2014 gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
+    "devDependencies": {
+     "@types/node": "^22.15.3",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 485,
+     "integrity": "sha512-2PFA3reEDzkkBEUMAPPvtgqfhYxLq8B2HLixaU4gEvoouHixVqgSR8xXfVB7F15jYgq/VTJyNTm+4/z0ow1d2w==",
+     "shasum": "cd644acd37fec714ec909414d8a3f2224e2daf7a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGbY9kqgLUq+tq7Gcoj1GtMKPv7KfGZFNo6jCOFF4QNbAiEA+R1GMWmOSfIxgHTatRz1jn9MMxTrkumWg0Z4WipdOs4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-2.86.0.tgz",
+     "unpackedSize": 3096398
+    },
+    "engines": {
+     "node": ">= 18.0.0"
+    },
+    "gitHead": "d454ded1a8175a8754ac171b501da249f344d362",
+    "homepage": "https://github.com/facebook/memlab#readme",
+    "keywords": [
+     "mcp",
+     "memlab",
+     "memory",
+     "leak",
+     "heap",
+     "snapshot",
+     "analysis",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:cd5e3215527f]",
+      "name": "npm-memlab"
+     },
+     {
+      "email": "[redacted-email:5b75beaa076b]",
+      "name": "jacksongl"
+     },
+     {
+      "email": "[redacted-email:fa0abf447193]",
+      "name": "meta-memlab"
+     }
+    ],
+    "name": "@memlab/mcp-server",
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/facebook/memlab.git"
+    },
+    "scripts": {
+     "build-pkg": "tsc",
+     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo",
+     "publish-patch": "npm publish",
+     "test-pkg": "node scripts/check-tool-docs.mjs && node scripts/check-tool-index.mjs && node scripts/check-version-sync.mjs"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.86.0"
+   }
+  }
+ },
+ "name": "@memlab/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@memlab%2Fmcp-server"
+}

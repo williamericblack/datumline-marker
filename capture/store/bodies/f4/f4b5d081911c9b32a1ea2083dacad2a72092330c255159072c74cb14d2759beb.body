@@ -1,0 +1,2740 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "3.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:19747db7581f]",
+    "name": "roshan84ya"
+   },
+   {
+    "email": "[redacted-email:4d96432939fd]",
+    "name": "pdogra"
+   },
+   {
+    "email": "[redacted-email:71dd8fba1b0c]",
+    "name": "pratiknarola"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.10.0",
+   "0.2.0",
+   "0.3.0",
+   "0.4.0",
+   "0.5.0",
+   "0.6.1",
+   "0.7.0",
+   "0.9.0",
+   "0.9.1",
+   "1.0.0",
+   "1.0.1",
+   "1.1.0",
+   "1.1.1",
+   "1.1.2",
+   "1.1.3",
+   "1.2.3",
+   "1.3.0",
+   "1.4.0",
+   "1.4.1",
+   "2.0.0",
+   "2.0.1",
+   "2.0.2",
+   "2.0.3",
+   "2.0.4",
+   "2.1.0",
+   "2.2.0",
+   "2.3.0",
+   "2.3.1",
+   "3.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@nexus2520/bitbucket-mcp-server",
+  "_rev": "31-987dabb46fa3696f3fcba4435eec5786",
+  "author": {
+   "name": "Parth Dogra"
+  },
+  "bugs": {
+   "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+  },
+  "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+  "dist-tags": {
+   "latest": "3.0.0"
+  },
+  "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "bitbucket",
+   "api",
+   "model-context-protocol",
+   "bitbucket-server",
+   "bitbucket-cloud",
+   "pull-request",
+   "code-review"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:19747db7581f]",
+    "name": "roshan84ya"
+   },
+   {
+    "email": "[redacted-email:4d96432939fd]",
+    "name": "pdogra"
+   },
+   {
+    "email": "[redacted-email:71dd8fba1b0c]",
+    "name": "pratiknarola"
+   }
+  ],
+  "name": "@nexus2520/bitbucket-mcp-server",
+  "readme": "# Bitbucket MCP Server\n\n[![npm version](https://badge.fury.io/js/@nexus2520%2Fbitbucket-mcp-server.svg)](https://www.npmjs.com/package/@nexus2520/bitbucket-mcp-server)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)\n\nMCP server for Bitbucket \u2014 built for AI coding agents that need to work with remote repositories **as if they were local clones**: grep-fast code search, windowed file reads, compact token-efficient responses, and a transport layer that never trips Bitbucket's rate limits.\n\nSupports **Bitbucket Server / Data Center** (primary target) and Bitbucket Cloud.\n\n## Why v3\n\n| | v2 | v3 |\n|---|---|---|\n| Content search in a repo | 1 listing + up to 3,000 file GETs | **1 archive call cold, 0\u20131 calls warm** |\n| Search completeness | silently partial under server throttling | complete, with every cap reported |\n| PR diff tokens | per-line JSON (~4\u00d7 larger) | raw unified diff |\n| Read a 100-line window | 2 calls, full file transferred | **1 call, window only** |\n| Blame a window of a huge file | up to 100 calls | **1 call** |\n| Rate-limit safety | none (burst \u2192 429/403) | client-side pacing sized to DC's limiter |\n| Tools | 33 | **25** (~30% less definition context) |\n\nMeasured on a live Data Center instance: a repeated content search went from **519 API calls / ~7s** (finding 1 of 8 real matches under burst throttling) to **0 API calls / 24ms** finding all 8. Full design and verified API research: [`REVAMP_PLAN.md`](REVAMP_PLAN.md).\n\n## Tools (25)\n\n### Search (`search`) \u2014 Server/DC only\n- **`grep`** \u2014 search file contents with **full regex, any branch**, like ripgrep on a local clone. One `archive` download per repo+commit, streamed in constant memory, cached in-process, freshness-checked every call (responses carry `as_of <commit>`). Omit `query` for filename-only glob listing. Modes: `content`, `files`, `count`; `glob`, `path`, `context`, `case_insensitive`, `max_results`.\n- **`search_code`** \u2014 index-backed exact-term search across a whole **project** in one call (default branch only, case-insensitive, no regex, files <512 KiB, ~1000-result window). Best for cross-repo identifier lookups; use `grep` for everything else.\n- **`search_repositories`** \u2014 find repos by name/description.\n\n### Pull requests (`pr_core`)\n- **`get_pull_request`** \u2014 metadata + reviewer status + merge info in **1 call**; `include_comments` / `include_file_changes` (default true), `include_tasks`, `comment_limit`. Returns `version` for follow-up mutations.\n- **`list_pull_requests`** \u2014 repo-scoped; omit `repository` (Server) for **your PRs across all repos** in one call (`role` filter).\n- **`create_pull_request`**, **`update_pull_request`**, **`merge_pull_request`**, **`decline_pull_request`** \u2014 all mutations accept `version` from a prior read (saves a fetch; auto-refetch + retry once on 409 conflicts).\n\n### Comments & tasks (`pr_comments`)\n- **`add_comment`** \u2014 general, threaded reply, inline (`file_path` + `line_number`, or `code_snippet` auto-resolution), code `suggestion`, or **task** (`severity: \"BLOCKER\"`, Server). Attachments upload via the `attachments` param (Server).\n- **`manage_comment`** \u2014 `edit` / `delete` / `resolve` / `reopen` / `to_task` / `to_comment` on any comment or task, one call with `version`.\n\n### Review (`pr_review`)\n- **`get_pull_request_diff`** \u2014 raw unified diff text; scope with `file_path` (server-side), `include_patterns`/`exclude_patterns`, `context_lines`, `ignore_whitespace`.\n- **`set_review_status`** \u2014 `APPROVED` / `NEEDS_WORK` / `UNAPPROVED` (mutually exclusive; one call).\n\n### Commits (`commits`)\n- **`list_pr_commits`**, **`list_branch_commits`** (server-side `since`-rev/`merges` filters; bounded page-walk for client-side `author`/`until`/`search`), **`get_commit_detail`** (unified diff, or `detail: \"files\"` for the changed-file list without bodies).\n\n### Branches (`branches`)\n- **`list_branches`**, **`get_branch`** (branch + its PRs), **`delete_branch`** (`expected_head` skips the lookup call).\n\n### Files (`files`)\n- **`get_file_content`** \u2014 **windowed server-side**: `start_line`/`line_count` transfer only that window (\u22645000 lines/call). `full_content` / negative `start_line` for whole-file or tail reads.\n- **`get_file_blame`** \u2014 commit-span blame for a line window in **1 call** (Server).\n- **`list_directory_content`** \u2014 paginated, compact.\n\n### Attachments (`attachments`, Server) / Discovery (`discovery`)\n- **`manage_attachments`** (`download` capped, `delete`), **`list_projects`**, **`list_repositories`**.\n\n## Output conventions\n\n- Bulk content (diffs, files, grep results) is **plain text**, not JSON-escaped strings; lists are compact JSON without pretty-printing. Dates are ISO-8601.\n- Content-derived responses carry `as_of <commit>` so the agent knows exactly which state it saw.\n- **Truncation is never silent** \u2014 every cap produces an explicit warning with continuation guidance (`next_start`, \"narrow the glob\", etc.).\n- Mutable entities include `version`, so mutations don't need a re-read.\n\n## Installation\n\n### Using npx (recommended)\n\n```json\n{\n  \"mcpServers\": {\n    \"bitbucket\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@nexus2520/bitbucket-mcp-server\"],\n      \"env\": {\n        \"BITBUCKET_USERNAME\": \"your.username\",\n        \"BITBUCKET_TOKEN\": \"your-http-access-token\",\n        \"BITBUCKET_BASE_URL\": \"https://bitbucket.yourcompany.com\"\n      }\n    }\n  }\n}\n```\n\nFor Bitbucket Cloud use `BITBUCKET_APP_PASSWORD` instead of `BITBUCKET_TOKEN` (and omit `BITBUCKET_BASE_URL`).\n\nCredential walkthroughs: [Cloud app password](SETUP_GUIDE.md) \u00b7 [Server/DC HTTP token](SETUP_GUIDE_SERVER.md).\n\n### From source\n\n```bash\ngit clone https://github.com/pdogra1299/bitbucket-mcp-server.git\ncd bitbucket-mcp-server\nnpm install && npm run build\n# point your MCP config at: node <repo>/build/index.js\n```\n\n## Configuration\n\nEvery numeric policy is environment-tunable \u2014 nothing is hard-coded. The full table lives in [`src/config/index.ts`](src/config/index.ts) (`CONFIG_REFERENCE`). The ones that matter most:\n\n| Variable | Default | Purpose |\n|---|---|---|\n| `BITBUCKET_RATE_LIMIT_RPS` | `5` | Client-side sustained request rate (DC's per-user refill is 5/s). `0` disables pacing \u2014 set this if your account has an admin rate-limit exemption |\n| `BITBUCKET_RATE_LIMIT_BURST` | `50` | Burst capacity (DC's server bucket is 60) |\n| `BITBUCKET_GLOBAL_MAX_CONCURRENCY` | `8` | Max in-flight requests across all tools |\n| `BITBUCKET_SNAPSHOT_MAX_MB` | `256` | In-memory grep cache budget. `0` = pure streaming (no retention, still 2 calls per search) |\n| `BITBUCKET_SNAPSHOT_MAX_FILE_KB` | `2048` | Files larger than this are scanned but not cached |\n| `BITBUCKET_REF_RESOLVE_TTL_MS` | `15000` | Branch\u2192SHA freshness memo; `0` = validate on every single call |\n| `BITBUCKET_STREAM_ABORT_MB` | `2048` | Abort archive scans past this many extracted MB (falls back to bounded per-file scan) |\n| `BITBUCKET_HTTP_TIMEOUT_MS` | `30000` | Per-request timeout |\n| `BITBUCKET_TOOL_GROUPS` | all | Comma-separated groups to expose (validated, enforced at dispatch, fails closed) |\n\n### The grep engine's guarantees\n\n- **Memory-bounded**: the archive is streamed, never buffered whole; the cache is a hard byte budget with LRU eviction and content-hash dedup across branches. Worst case = budget + a few MB transient.\n- **Fresh**: every query re-resolves the branch head; a moved branch can never serve stale results. Merges/deletes made through this server invalidate immediately.\n- **Complete**: cache limits never reduce scan coverage \u2014 oversized files are still scanned; only true binaries are skipped, and they're counted in the output.\n\n### Rate limiting\n\nAll requests flow through a token bucket sized to Bitbucket DC's per-user limiter, so 429s are avoided rather than retried-after. If your instance throttles hard anyway, the error message says exactly what to do \u2014 the durable fix is asking a Bitbucket admin for a **rate-limit exemption** for the service account (Admin \u2192 Rate limiting \u2192 Exemptions), then setting `BITBUCKET_RATE_LIMIT_RPS=0`.\n\n## Migrating from v2\n\nRemoved tools and their v3 equivalents (same capabilities, fewer tools):\n\n| v2 | v3 |\n|---|---|\n| `find_in_files` | `grep` with `query` |\n| `search_files` | `grep` without `query` (use `glob`) |\n| `list_pr_tasks` | `get_pull_request` + `include_tasks: true` |\n| `create_pr_task` | `add_comment` + `severity: \"BLOCKER\"` |\n| `update_pr_task` | `manage_comment` `action: \"edit\"` |\n| `delete_pr_task`, `delete_comment` | `manage_comment` `action: \"delete\"` |\n| `set_pr_task_status` | `manage_comment` `action: \"resolve\"` / `\"reopen\"` |\n| `convert_pr_item` | `manage_comment` `action: \"to_task\"` / `\"to_comment\"` |\n| `set_pr_approval` | `set_review_status` `status: \"APPROVED\"` / `\"UNAPPROVED\"` |\n\nUpdate Claude Code permission allowlists (`mcp__bitbucket__*`) accordingly. Diff tools now return unified diff text instead of per-line JSON \u2014 line numbers come from `@@` headers. Full details in [`CHANGELOG.md`](CHANGELOG.md).\n\n## Development\n\n```bash\nnpm run build   # tsc \u2192 build/\nnpm test        # build + node --test (unit + snapshot-engine tests)\n```\n\nArchitecture: `src/config` (all policy) \u00b7 `src/core` (transport, snapshot engine, caches) \u00b7 `src/handlers` (tool logic) \u00b7 `src/tools` (definitions, guards, registry) \u00b7 `src/formatting` (compact output) \u00b7 `src/types` (single barrel).\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+  },
+  "time": {
+   "0.10.0": "2025-07-07T06:30:08.524Z",
+   "0.2.0": "2025-06-04T15:41:28.672Z",
+   "0.3.0": "2025-06-05T09:21:36.655Z",
+   "0.4.0": "2025-06-21T10:55:13.854Z",
+   "0.5.0": "2025-06-21T11:56:44.972Z",
+   "0.6.1": "2025-06-26T13:13:43.183Z",
+   "0.7.0": "2025-06-26T14:48:51.202Z",
+   "0.9.0": "2025-06-26T20:57:20.079Z",
+   "0.9.1": "2025-06-27T14:28:13.804Z",
+   "1.0.0": "2025-07-25T12:22:01.150Z",
+   "1.0.1": "2025-08-08T11:10:04.092Z",
+   "1.1.0": "2025-10-14T11:53:27.801Z",
+   "1.1.1": "2025-10-14T12:02:21.819Z",
+   "1.1.2": "2025-10-14T14:29:09.444Z",
+   "1.1.3": "2026-01-08T13:50:38.486Z",
+   "1.2.3": "2026-01-20T09:26:18.232Z",
+   "1.3.0": "2026-01-25T18:50:56.131Z",
+   "1.4.0": "2026-01-28T08:52:58.951Z",
+   "1.4.1": "2026-02-23T07:45:58.235Z",
+   "2.0.0": "2026-03-07T10:02:15.639Z",
+   "2.0.1": "2026-03-07T10:09:56.523Z",
+   "2.0.2": "2026-03-28T19:01:16.098Z",
+   "2.0.3": "2026-04-08T12:48:33.274Z",
+   "2.0.4": "2026-04-21T08:04:02.678Z",
+   "2.1.0": "2026-05-10T16:41:09.175Z",
+   "2.2.0": "2026-06-05T12:53:32.977Z",
+   "2.3.0": "2026-07-03T07:54:21.017Z",
+   "2.3.1": "2026-07-05T12:31:02.132Z",
+   "3.0.0": "2026-07-09T10:23:31.348Z",
+   "created": "2025-06-04T15:41:28.418Z",
+   "modified": "2026-07-09T10:23:31.457Z"
+  },
+  "versions": {
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.10.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.10.0_1751869808365_0.31540428649471086"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-Msa7rWkwDIbdmIYfZiMQAy2503qzoLoBJPYipDAsB+57NZSp+ytJ/u+idBJUxE6Q22gjwT8hMMPRvah1SJuEBQ==",
+     "shasum": "a6555a4da9439a9d2b19d3fa754840efa6d0e202",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD/9u2TzU7W1skxNScBoet/aaUIw+l7KbnqjmmnWv1rxQIgbegqRlp1dEVSgD9dsOLCwwtHiaN5I51ZF1+4J3Y7czQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.10.0.tgz",
+     "unpackedSize": 368940
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "e5da36e51549141c4446654536720f608d0994c2",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.2.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.2.0_1749051688516_0.5495986665134045"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 8,
+     "integrity": "sha512-uP1fSUYEtTFPHR//8UPG58VE/RNwVcZrIYKOOfKjsFG7TYWsLlGba0rFRyfK/i2Lfi25i9lMwwvp1GDw44KoYA==",
+     "shasum": "66ec31c50245e60467ae21b97e4ba4aa250ebaf2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGIktchU4iEVs6w4/pDSGB1y1FJtR9XELFcWw0d/yykkAiA3SLjcABsw6+ISR+GRTLZAbZqJJtfscmfB4daH0uGFog=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.2.0.tgz",
+     "unpackedSize": 124536
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "6abca3e7d046efbed372e5c32eaf106882a6af9a",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.3.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.3.0_1749115296466_0.7988198192288283"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-NhfFW7OhLHgmOwpsnC04taH/YdKPU+QwW+CEXSq40dsEMhUb9ij7d/cQcKAD17j4VmveS6Cqrg8kU6O+ZSpT4Q==",
+     "shasum": "5822ac0afd70cf2d1efed95428b482b4ee4b8a47",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFU5xvrJgXW1W6oGmtd5wEeg+ptm7ZUACk9qfzQGoMF3AiEAvlEx9b4w87P6OEk3cfLpWBIyUomk0ebAvyQZuhMoYrY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.3.0.tgz",
+     "unpackedSize": 163022
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "75c4192815594156ae4df5eb289ac4273c6c93f9",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.4.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.4.0_1750503313670_0.9576915989225774"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 40,
+     "integrity": "sha512-U0DZ94bW0Gt/oJ1Kj8gXHZzWTr8oFlNnhnwGOUtd6b8F3pI1/xNOHFNR+PPVUBIxlLJ2uyCvYn2ydDetYDjLjQ==",
+     "shasum": "5a2fd5e2343e4ad520101650b138e80dec45b50a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGtwsqMSrYT90lvJJmGXwKU7yPunBFMO8S+P84mR8FFLAiEA12MQmjQtQcep3NOOmLUGur+Ul2KCbVEouZcIbTBm368="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.4.0.tgz",
+     "unpackedSize": 188743
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "b1a25d2a053536c4f7c94fb8252da4dff0df3ffb",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.5.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.5.0_1750507004743_0.05944277823228883"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 44,
+     "integrity": "sha512-JHnCVpDKRaMBnt8Tm/i1PzgkgGgK8rGZficeHy8btiZqxZzed2lvhWIkH3ZKYkjB6vK6B08R/5Vrs6O8BAhfGw==",
+     "shasum": "361fe8d0ef8b327510bf1093457d1f023df38c36",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCNicGVwIEoWOY+01zK3RjnNrOSVETLHZme/rOznjZ8kwIhANlcfJpn5ZRzFM6D9FY+gGQRtlGVY6kw1Vj6PcgXffqc"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.5.0.tgz",
+     "unpackedSize": 232256
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "c6d5b0a6f5525bf9850ff2b34007777a7c5ed2c4",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.6.1",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.6.1_1750943623010_0.6159191814620693"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 44,
+     "integrity": "sha512-jROzLmR5IHR26X3vl0gD5AiAtxJbC/DTiEUKSW9H6lvP23qr05EjjClukhuRBedFr31/YhcEyGLRe0oFRvA6KQ==",
+     "shasum": "d51cf689a5e848e03dbe6eb2c76832307f7464f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCrAm+GmbZEFJ89NJr79IKCzct/XJeynaeXOJDm2d+ZugIgG8fkDVSFqvPH3VCOn16/oIAQ5PWl+I9Mn/Q814pzWYU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.6.1.tgz",
+     "unpackedSize": 256676
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "793355bdaad2d08c1bb9bf266bdd08fe0c8a9db0",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.7.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.7.0_1750949330987_0.3449024218127301"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.9.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 48,
+     "integrity": "sha512-MXTqUVBhC2hqjiTUMPPKgqH6HHNRaElMDaPMLqKt8Tz1CnCOMDipllbq71AlXXdT1Arantx73Z8tT5jQ8k1MRA==",
+     "shasum": "1225eb30c26506398041ac225aac791f82388000",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEMpTwHT+vQxppQsu278m62JVxUlVxcDvV/0liVyY5BXAiEA8yhaf0I8NWBKcdI1ZwL3GF4nx9wA9LhZDmhjGfDbNLM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.7.0.tgz",
+     "unpackedSize": 280309
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "d649a116fe5504b7935eda5a5469e87bf169b121",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.9.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.9.0_1750971439898_0.06711336156283965"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-TC9Y3V5nEYqyaKEzOePgmxmWcK8/AE5lngsOqsnPq+nrOpU07BPY3iSBS0x1gkMnVEtSVqE+ZXf8rpuiMQYZHw==",
+     "shasum": "85c0940c70b966e7232640277be50e8d562dc054",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD5vUf7ym6uZ4HvVGWLHQwpnm5ZPP99pGQhyn0AR7bstwIgPaWyIGiEQTZnpIHgJ+lOCVLgnvCcKi2zIbtlZuhqPhw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.9.0.tgz",
+     "unpackedSize": 320478
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "f602840c971b646730c914255d6e20cc1887d0f8",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.9.0"
+   },
+   "0.9.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@0.9.1",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_0.9.1_1751034493508_0.04227683376702562"
+    },
+    "_npmUser": {
+     "actor": {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra",
+      "type": "user"
+     },
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 52,
+     "integrity": "sha512-t5STEx+h4Bg+WfrTvka3PpGFrFFnVuep0w/4CvLa/4bRh1XHhjaDJVhNUsqGmZWZS0aZAqe4WJLPxrPAdNeDBA==",
+     "shasum": "301370d7d93f4e54c1f01308a3eb1f83c8cf5ec2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDKgz3a5gIlCIKaB25SBfaqmbbMUk4OgXN5fMhltOzvzwIhANE4GFbqIVr0xz3RsbtMAizyne6UdqrHXidDQErmqWHk"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-0.9.1.tgz",
+     "unpackedSize": 323414
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "e21f2dcfe86054677c889332b989461aede9b06e",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "0.9.1"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.0.0",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.0.0_1753446120945_0.6399357961230159"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 56,
+     "integrity": "sha512-qge8Kdf8ph4CI6xBS5b6nRVQWPFrpiaUkJfsppN9s6SgZPV/px2Gj/4XW6moTDdG5i4gFCzBLjYul8wWRCebfg==",
+     "shasum": "5265a84858f9ddf624f5f95d79ccf3403f96f59b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCtSC27ERDZam0SsOevmTPd1yP6Y5mR+sHm0/Xo58R0wAIhAKWgLxpugwjsh3E4Ls1jz2WCknEwuHqqsnd7DuurF0c1"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.0.0.tgz",
+     "unpackedSize": 397337
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "5a088ecf0d100fd50c0ecbf91543704a7fab8807",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.0.1",
+    "_nodeVersion": "18.19.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.0.1_1754651403776_0.27270830190119644"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "9.2.0",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 56,
+     "integrity": "sha512-L4xwvnayjzLOIB6Sc2wJCSRZ39T9Di//QU7X4RKsDTci5T5XV6sYcCnHuic575QIaQvbwbu4l0hGOfsHGMzMTA==",
+     "shasum": "b7985ebf6b9227f15f8c4f1b6a3f20b833d4369b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHRupP0Wq7iSz+9T2PuG2G4tPYa64nPjxH2cL2216mzbAiBBWXbRQLo32Z1aDhhK+dJeTMFdEuZFAZCvwCakUXNaHw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.0.1.tgz",
+     "unpackedSize": 404150
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "749b0e99862c5ba3958c3a3776fce688a6c5cc32",
+    "homepage": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "https://git.pratiknarola.com/Pdogra/bitbucket-mcp-server"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.0.1"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.1.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.1.0_1760442807601_0.6933895469490623"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-6PIqSjfcyawv9/IpJ93wPB9bjH3WClqS0Ve1k/RUIdueZJSi2Lzn6LeOSeBZJXdTaCsCJZgx1zqkQkvZU/0VMQ==",
+     "shasum": "0ac27f5080af2923f2eda2c723027ea5aff0f7a3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFDlH1ceBhINAKU/Fkoz/tI6I1G8F1NDMbQWr2rqapUGAiBGNNRPB4/xdkj6jT1pCGehNmiHerCzvzp2pmvO93UMpA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.1.0.tgz",
+     "unpackedSize": 446256
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "9ed887c3dc5c593fa238e9ba24a1f9cc36179bf8",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.1.0"
+   },
+   "1.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.1.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.1.1_1760443341637_0.3108351130446707"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-hyg6BBOnt7nEBSo2X842nfGvFDPs2RWY5dqioi9VBCDu5LqI0DZ6QSSkEdrXmVayjkXf6rKKSQYnn8OH1goFdA==",
+     "shasum": "8fca5a07a5bfbe36ffb8bf997ac23b8340e16035",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAdEWgv6sPGz0JG5TDPQ6k33n6dxhrFuOeEeqt8ngl2dAiEA2mRPLbgpK6ovYGgWyEQWQP8JXNMn5af8ufBSssjFO8I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.1.1.tgz",
+     "unpackedSize": 452487
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "a623ff630a17796a672ceb88db79406c16b3e7b2",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.1.1"
+   },
+   "1.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.1.2",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.1.2_1760452149257_0.09499845551444674"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-YQXmW6Czih/KNzB34FtfOFCglRB/uNXPVlMdG0BV0MZ3luAjAzQzQBaopSfmJe9VGsXI3+G1KCA1cUXPSCh4vg==",
+     "shasum": "a1e25c07a479e87eb27bf518ae64bd59d831d523",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7KDbJ6b0x1NRZAqlWJXK4CS6fbw/781lNbYI5xO/crQIgCkqBVeajA5Vm+3qOoFiA6ZD0qbrxIti26fEHtTL3k3Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.1.2.tgz",
+     "unpackedSize": 456553
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "620b398825e0811f1ef94c4acf4566fcf1c63cb4",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.1.2"
+   },
+   "1.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.1.3",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.1.3_1767880238226_0.20397127193838527"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-cxJz0y8gfg0sZX1ekyiY0g6F5PnK2qH6EWl7oLJiBXiOdFAdJvpXRBKYh3s63cTCxufVRTio8wfMZufrDCQTpg==",
+     "shasum": "f94ea7f65ebd88aad684cf492db1f455497eeae3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHguIDTNYcvPsFTB43O3YwqOxvfnj3VRCIoi+JTT7mb6AiEA72wd/kQ8Y14LfJbhBYbxrTUAlMXPjDITPc7njjwE/WM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.1.3.tgz",
+     "unpackedSize": 457111
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "074e5927f76f3a7e9d68581c02bea1fb0bf76143",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.1.3"
+   },
+   "1.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.2.3",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.2.3_1768901178025_0.5121189704823723"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-AJIqR85IqpkRqLhLVNHC9IuimcqDBz9FAMB2ZdA18PftVfhXVepEIVvi9GSckyAc5FfpKNisR0Uf6LdQ85fycA==",
+     "shasum": "3ec19c067f7fb6822500b2175d4baf8125f5b4fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDYoLwwd2B4HHz+kXFnpD82nhw5uLRr//YsoL6uoKF6SAiEA/OSNcJ03SMVbi5LaxMYEsOgJ53IJNM4wpMZ4uYpYZn4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.2.3.tgz",
+     "unpackedSize": 472538
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "580abd40d1120e7bc6247d27592a3e69bf6cb573",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.2.3"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.3.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.3.0_1769367055944_0.2652022794853377"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-Fuqma11Aksoupz50oRiTM6uH7hCYbflxBx3YyNoTgUKLMaZ3V5VfChD4gyMBC7/ot8hqwdinIkzIU5+jHvDRzA==",
+     "shasum": "7dc0a399c8ff663eb088a44108ef28850df309f8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCVVAKm4jQ9GYlEB5Pt13zBgCxL8C3J4lGgTqTWxBLnbQIhAOtktKmSVCi4Qkrx4Jd1MtRRVgk08jBsAgS9VxtnETef"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.3.0.tgz",
+     "unpackedSize": 559690
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "09565a7ce7ba943247ea12e8c14d9ead0c5107ec",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.3.0"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.4.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.4.0_1769590378783_0.801008659122376"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "^9.0.3"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-Pdu0T5XWcjHoPt4OSVUDGnvt2LhqG7h3hvdVYi1F2p8h7XFAdvBf40Q8q+Wknp08tdKOI5MIOsYaTuHF8rr9vw==",
+     "shasum": "5e4a7d238cd49fb400f9a7e4aced85fbd868034f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDAZNgqQgScsMVvJ2g4IzXpWVBj0UYPAy51F8IT7/wSgQIhAP8lINufobjy13nd6p/7G8djohgkMkh9hhZdFs1Ee9tu"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.4.0.tgz",
+     "unpackedSize": 577541
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "62ea384c325d1f31e6a29d735329792a0a8a29d1",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.4.0"
+   },
+   "1.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@1.4.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_1.4.1_1771832758071_0.2795776752720054"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-HhdJjH3NX0ElV7pNm1OEBmJns2ODVggXYs08Hi/Q7bwj+kbp5WSLnRZanvpkQDR6g/5PIi2juxTvGY0D4nj0uQ==",
+     "shasum": "d568d642591bfe16bb6d4f882e29cad632e2c0b6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCFh28f6hTvNwRwKMF+c79Th00T2kce0Z5PDEBItHb/FAIhAMjIOlqqChESVdJDAlGUbXF9EV/2PTxjSlSYvHFBZ5wT"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-1.4.1.tgz",
+     "unpackedSize": 577735
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "73550137ec113471d7f27905f5db677682267c93",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "1.4.1"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.0.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.0.0_1772877735471_0.5416291676222231"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-Aliwl+owh/WQHs2KuQAbtwQQq9kMezANb4uQN3z61tQ3YPhlV8MhAmNrdFKO9sgTluVSxHTUUQttQ8gBUpfaXQ==",
+     "shasum": "960e87644d51fe8ed21f95fac686994b90d51afd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIASR2p2LQkPyK/liEO6H6HmIYPcK8T23XLkbLfEFrltQAiEA8eIoyBcV0y8q4M7mw5T5w56gHNKcVJww4etLEIo77es="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.0.0.tgz",
+     "unpackedSize": 494130
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "af5b28e0e2dc3c1ea497a5b6016c9fca2f2fabf5",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.0.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.0.1_1772878196363_0.39206456928747024"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-W0qdm7AqmOwm8ubOIY42gzip9RmLRsuchiuKkrUQyf1UxLxnAGWZvN3NtsINxTkOTkJ2ftGG4icWJSySGJ8GXg==",
+     "shasum": "c3b375d96f78914e671e4a42369051cd0c97efa3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGMgRJozf4b1DNPElMV1/Av0qV4/TKylpNvQfcK0evArAiEAgByjR1+1Hyd0t61lFAhGE1BW2N9/R/L8jvXEsMSacGg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.0.1.tgz",
+     "unpackedSize": 494225
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "8c4a9a5557a1a9a71890848e14a54a4dc5a01ba8",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.0.1"
+   },
+   "2.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.0.2",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.0.2_1774724475948_0.08456432324845098"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-ZxsbVavwpki7D2dWBz6a/mwWuqMog5F/fG7hMdDQDrQvfkkJYpQt70ORIeCNrlcg22+agupoTFSMg6hldgp3nA==",
+     "shasum": "edd3130220b378bc759ac71664eb107c7035a0b7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCdJc2nHuV9jxFfjjCHZxXfwQFqRniXydFbTn9hH8Ci+wIgIlUcVAJE0xjuBL4Tx/72VDwvwlOSKwU6bO+OwDTIt84="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.0.2.tgz",
+     "unpackedSize": 495382
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "1e33276fb9c6eef509dd4cfb0ac746975c79ebb9",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.0.2"
+   },
+   "2.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.0.3",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.0.3_1775652513096_0.625544159630993"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-xJ2qcDwbYnXYXzkcFzWcaT2s0RJX+Se48vZg15ofY6HWd8jqh4FomVyfYT02QUgfmDIsdXEGYvR+EQ+E6Oe9Hw==",
+     "shasum": "3933bd6af4c6f0362d5f240710584f0db9f8eeda",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDMLy4RYvvEqy9rH9an2JZshOxkCQtZIR6qkZ2sQkQhsgIgGRMCNkTyX2jXHaXDYzNGGaE/3Su4M2GH+YJOZDWmxGU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.0.3.tgz",
+     "unpackedSize": 517648
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "1836193afa637e9427a747b5244d7a576b380f92",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.0.3"
+   },
+   "2.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.0.4",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.0.4_1776758642381_0.09139932755457947"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 60,
+     "integrity": "sha512-n0DG3mj9XSo6jzG0yGGLLdXmZ4Dm+hZ1n3/dU4cjH833GmOGoTVgtFxm9Vzp3yMm93pa6FBp9m7QnfYNwjwqQQ==",
+     "shasum": "bf5be6d23b51805a7bf68c06c83c99f03cb4fe18",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFRY5IXQgGKP3Qkde84uxcEb96e62xM8e1OdqsA5QOFSAiEA0Rs7p/1roiozcd19ShY+Y3dKSTtvcoPmdju5GIHw0ig="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.0.4.tgz",
+     "unpackedSize": 538933
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "eba08095a24ad7f542040dfa039035b9306a2fa9",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.0.4"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.1.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.1.0_1778431269039_0.6655233550432504"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 64,
+     "integrity": "sha512-2Mm6MKtKxAmWEXru9GsNTEjMBA18zpTjRix+UOCvcHKnJML5tw2XqYmUi1r/m9OCu/h32GQpm/h/G4Zuwxmq7A==",
+     "shasum": "ae59afd43fae1824acf5d9b889a2852d2f55b436",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDakcW6MR/WYv73yyGL39qhK0AltDQUNeUSOKDdTfLxaAIhANVu+ly6SNPpM1JdDkvJZeXeY+2QxXdxVIumODEfKmPa"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.1.0.tgz",
+     "unpackedSize": 592229
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "5710863a95cda43cb9df8d9f71aa5caac16fa935",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.1.0"
+   },
+   "2.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.2.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.2.0_1780664012809_0.15102579846405262"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "form-data": "^4.0.4",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 72,
+     "integrity": "sha512-XypPD5ldraIVA/KND72bhFMieCJFzq7kiyj6SkowYbV8Kl/2EMIKpyrBPpifBBY6E+onBJaJDaBQs0IXVqwnRQ==",
+     "shasum": "c3768b85e3d7c376f867652b9874d0344f4217e3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDrOOQOb2ufVoE/YegkENnqkMT4vU549uB+g3uGe+7w+QIgGj496/sc5tXD3Stf3MwoP8W7wDyqXXiyrkxjr8I3Oy8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.2.0.tgz",
+     "unpackedSize": 633911
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "dd9ac9ffd084afa905d63a12494e4543344faee6",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.2.0"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.3.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.3.0_1783065260870_0.3200396795584184"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "form-data": "^4.0.4",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 76,
+     "integrity": "sha512-KYOCoCKBgV4GkNd3Cs+epKwVXxxrEVVTUIMDLruk5+ckkP0YyeSKBv9FkuHKXy4zxbXiGhUFp0dn8Pv159Ob3Q==",
+     "shasum": "16f144e439198e2788c0f872d6aa527583757393",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCDw+/3X91uL33Na/X1oWHBb/rnxhQthpCzhEpJGKeWPwIhAK2oqz4Sqo2yJMs4SZ92EMD785DyTv8xnVllc5M7WITr"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.3.0.tgz",
+     "unpackedSize": 651054
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "e28a2dca71d9b8f8e92b1acbe6464591a41de7ae",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.3.0"
+   },
+   "2.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@2.3.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_2.3.1_1783254661991_0.22294045130261964"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "form-data": "^4.0.4",
+     "minimatch": "9.0.5"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 76,
+     "integrity": "sha512-gWaxuP7TF82PyErt6lB+ebqyYvZezf35NOwZI2bRI5aO+1Kw+lv2u/Y/zM1Xl/JHnlspNXQeTlm6i7KttB/spw==",
+     "shasum": "1fad6150bf3784204fb5e65dbd19e342a305d9ba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDiuwTJr2e10SCf++voJVleTdgqS2Y1AfYdT9M+xnM9zgIgFWRCh3IqMfhwcPBK3D2LffMztU5wb1be6TuLhy0oekM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-2.3.1.tgz",
+     "unpackedSize": 652297
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "b7f4702efede8dc1d09860e35573e75141b826b0",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "2.3.1"
+   },
+   "3.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@nexus2520/bitbucket-mcp-server@3.0.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/bitbucket-mcp-server_3.0.0_1783592611179_0.7666538191895655"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:4d96432939fd]",
+     "name": "pdogra"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "Parth Dogra"
+    },
+    "bin": {
+     "bitbucket-mcp-server": "build/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/pdogra1299/bitbucket-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.12.1",
+     "axios": "^1.10.0",
+     "form-data": "^4.0.4",
+     "minimatch": "9.0.5",
+     "tar-stream": "^3.2.0"
+    },
+    "description": "MCP server for Bitbucket API integration - supports both Cloud and Server",
+    "devDependencies": {
+     "@types/minimatch": "^5.1.2",
+     "@types/node": "^22.15.29",
+     "@types/tar-stream": "^3.1.4",
+     "typescript": "^5.8.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 144,
+     "integrity": "sha512-+5/YcHPAmsHmSpd6DQ8n06WFdsPvAkXZAvCi6OO1dU2jRv4kqbFmwwHJmLRax2tk0wvGCJc6cZuHEHN3l+cn5g==",
+     "shasum": "1d86f02d9dfdef3d51440794504fd7c9c11d42ae",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEpebaxHMSJ1QsFDLUuNi9Qtmxr75+dLsR3Qv2TUkwipAiEAiXRUVuyToWHqDXZz+wPrLTRTI+wumN43Rr62kx9qigk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@nexus2520/bitbucket-mcp-server/-/bitbucket-mcp-server-3.0.0.tgz",
+     "unpackedSize": 649704
+    },
+    "engines": {
+     "node": ">=16.0.0"
+    },
+    "gitHead": "a30182a6c1cc30e7d543089b2b918c9792cc9425",
+    "homepage": "https://github.com/pdogra1299/bitbucket-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "bitbucket",
+     "api",
+     "model-context-protocol",
+     "bitbucket-server",
+     "bitbucket-cloud",
+     "pull-request",
+     "code-review"
+    ],
+    "license": "MIT",
+    "main": "./build/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:19747db7581f]",
+      "name": "roshan84ya"
+     },
+     {
+      "email": "[redacted-email:4d96432939fd]",
+      "name": "pdogra"
+     },
+     {
+      "email": "[redacted-email:71dd8fba1b0c]",
+      "name": "pratiknarola"
+     }
+    ],
+    "name": "@nexus2520/bitbucket-mcp-server",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/pdogra1299/bitbucket-mcp-server.git"
+    },
+    "scripts": {
+     "build": "rm -rf build && tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node build/index.js",
+     "test": "npm run build && node --test build/tests/"
+    },
+    "type": "module",
+    "types": "./build/index.d.ts",
+    "version": "3.0.0"
+   }
+  }
+ },
+ "name": "@nexus2520/bitbucket-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@nexus2520%2Fbitbucket-mcp-server"
+}

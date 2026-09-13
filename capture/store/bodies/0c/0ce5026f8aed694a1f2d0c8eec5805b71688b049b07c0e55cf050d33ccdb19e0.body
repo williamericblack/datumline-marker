@@ -1,0 +1,2496 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.22.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:322ad8a6af53]",
+    "name": "amirhosseinnateghi"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.1.6",
+   "0.1.7",
+   "0.1.8",
+   "0.1.9",
+   "0.10.0",
+   "0.11.0",
+   "0.12.0",
+   "0.14.0",
+   "0.15.0",
+   "0.15.1",
+   "0.15.2",
+   "0.16.0",
+   "0.16.1",
+   "0.17.0",
+   "0.17.1",
+   "0.17.2",
+   "0.17.3",
+   "0.19.0",
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.20.0",
+   "0.21.0",
+   "0.22.0",
+   "0.3.0",
+   "0.3.1",
+   "0.4.0",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@amirhosseinnateghi/vibed-mcp",
+  "_rev": "38-0681fe00db5e191b97a7fb95d49b7e1e",
+  "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+  "dist-tags": {
+   "latest": "0.22.0"
+  },
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:322ad8a6af53]",
+    "name": "amirhosseinnateghi"
+   }
+  ],
+  "name": "@amirhosseinnateghi/vibed-mcp",
+  "readme": "# @amirhosseinnateghi/vibed-mcp \u2014 vibed MCP server\n\nThe **universal** vibed connector: a Model Context Protocol server that lets any\nMCP client (Codex, Cursor, Gemini CLI, Claude Desktop, \u2026) \"make it vibed\" as\nnative tools \u2014 no per-platform skill, no shelling out.\n\nIt reuses the exact engine of the [`vibed` CLI](../cli), so the \"vibeable\" rules\nand publish behavior never diverge. Zero runtime dependencies (the MCP stdio\nprotocol is implemented directly and the engine is bundled), so `npx @amirhosseinnateghi/vibed-mcp`\nneeds no install.\n\n## Tools\n\nAll ten, in the order the server registers them\n([`src/protocol.ts`](src/protocol.ts) is the authority \u2014 it holds the tool\ncatalog and the JSON-RPC dispatcher, while [`src/index.ts`](src/index.ts) is\njust the stdio transport, so the contract can be tested without stdin):\n\n| Tool | What it does | Key params |\n|---|---|---|\n| `vibed_storage_guide` | Prints the persistence primer. A vibe is one sandboxed file \u2014 `localStorage`/`indexedDB`/cookies and backend calls are **blocked** \u2014 so saves, leaderboards, votes and shared state go through the injected `window.vibed.storage` SDK (`local` = per-viewer, `shared` = per-post). Call it before writing any save feature, or when `vibed_check` warns `BROWSER_STORAGE`. | \u2014 |\n| `vibed_remix_guide` | Prints the remix-friendly authoring rules \u2014 one `CONFIG` block at the top, data separated from logic, plain code, and one English `STRINGS` dictionary read through `t()` (what makes a vibe auto-translatable). Call it **before** writing a vibe. | \u2014 |\n| `vibed_ideas` | The platform's idea pool: a label plus a ready-to-use prompt per idea, each guaranteed to fit the sandbox. Show the labels and let the user pick. | `about` (needs sign-in), `count` (1\u201312, default 6), `lang` (any shipped locale, default `en`) |\n| `vibed_check` | Bundle + validate against the sandbox rules (read-only, no auth). Also refuses a file that can't be **remixed** (minified, no `CONFIG`) or **translated** (no `STRINGS`/`t()`, non-English text). Every finding prints its fix \u2014 apply them to the source and re-run until it passes. | `path`, `entry`, `build` |\n| `vibed_whoami` | Is this machine signed in, and as whom? | `api` |\n| `vibed_login` | Start browser-approved device login; returns the approve URL + code. Never ask the user for a password or token. | `api` |\n| `vibed_login_wait` | Block until the user approves the pending login; saves the token. | \u2014 |\n| `vibed_draft` | **The default for \"make it vibed\"**: bundle + upload a PRIVATE draft and return a hosted sandboxed preview link (`\u2026/p/<id>/`) plus a `draftKey`. Publishes nothing \u2014 it's in no feed, profile, or search. Give the user the link and stop. Requires sign-in; refused while `vibed_check` reports blockers. | `path`, `entry`, `build`, `api` |\n| `vibed_publish` | Make a draft **public**. Only after the user explicitly says to publish \u2014 \"make it vibed\" and \"looks good\" are not publish instructions. Pass `draftKey` to promote the previewed draft (preferred); passing `path` bundles + publishes in one shot and **skips** the preview. | `draftKey`, `path`, `title`, `tags`, `unlisted`, `remixable`, `entry`, `build`, `api` |\n| `vibed_delete` | Delete one of your posts by experience id or `\u2026/e/<id>` URL. Owner-only, destructive \u2014 confirm the specific post first. | `target` (required), `api` |\n\n`vibed_publish`'s `tags` is a real enum in the tool schema: `maxItems: MAX_TAGS`\n(**5**) over the curated `TAGS` set \u2014 `game, puzzle, quiz, simulation, music,\nart, animation, story, travel, invitation, love, fun, food, sports, education,\nscience, news, tool`. Both constants are imported from\n[`@amirhosseinnateghi/vibed-cli/lib`](../cli/src/lib.ts) (which re-exports\n`@vibed/shared`), so the enum can't drift from the platform's taxonomy. There is\n**no `caption`** and **no `category`** parameter \u2014 tags replaced the category.\n\n## Configure your client\n\nThe server runs over stdio. Point your client at `npx -y @amirhosseinnateghi/vibed-mcp@latest`.\n\n**Codex** \u2014 `~/.codex/config.toml`:\n```toml\n[mcp_servers.vibed]\ncommand = \"npx\"\nargs = [\"-y\", \"@amirhosseinnateghi/vibed-mcp@latest\"]\n```\n\n**Cursor** \u2014 `~/.cursor/mcp.json` (or project `.cursor/mcp.json`):\n```json\n{ \"mcpServers\": { \"vibed\": { \"command\": \"npx\", \"args\": [\"-y\", \"@amirhosseinnateghi/vibed-mcp@latest\"] } } }\n```\n\n**Gemini CLI** \u2014 `~/.gemini/settings.json`:\n```json\n{ \"mcpServers\": { \"vibed\": { \"command\": \"npx\", \"args\": [\"-y\", \"@amirhosseinnateghi/vibed-mcp@latest\"] } } }\n```\n\n**Claude Code** (the plugin is the primary path, but MCP works too):\n```bash\nclaude mcp add vibed -- npx -y @amirhosseinnateghi/vibed-mcp@latest\n```\n\nFor a local/self-hosted vibed, set the API base via env in the same config, e.g.\n`env = { VIBED_API = \"http://localhost:3200\" }` (TOML) or\n`\"env\": { \"VIBED_API\": \"http://localhost:3200\" }` (JSON).\n\nThe same config is where you turn crash reporting off \u2014 `VIBED_NO_TELEMETRY=1`\n(or `DO_NOT_TRACK=1`). When a tool call throws, the server answers the client\nfirst and then reports the crash; nothing is sent otherwise, and paths and\ncredentials are stripped before it leaves the machine. See\n[docs/connector.md](../../docs/connector.md#crash-reporting-and-how-to-turn-it-off).\n\n## Dev\n\n```bash\npnpm --filter @amirhosseinnateghi/vibed-mcp build     # \u2192 dist/index.js (bundled, standalone)\npnpm --filter @amirhosseinnateghi/vibed-mcp dev       # run from source over stdio\n```\n\nSee [docs/connector.md](../../docs/connector.md) for the full picture.\n\n### Generic multiplayer\n\nCall `vibed_multiplayer_guide` before building remote turn-based games.\n`vibed_multiplayer_example` returns the tested self-contained Ludo source.\nGuests can play without login; all game rules stay in the vibe.\n\n## Public and private multiplayer examples\n\nBoth Ludo and Backgammon offer Public play, Create private and Join with code.\nPublic entry uses `joinAvailable({capacity})`; private creation uses\n`createRoom({capacity})`, and `joinRoom()` asks for the code through the host.\nPrivate rooms are excluded from public allocation. The examples automatically\nready private participants and let only the host call `start()` once full, so\nplayers need no extra Ready/Start step. `snapshot.visibility` restores the mode\nafter reload. A code grants entry to anyone holding it; it is not an allowlist.\n\nGet complete examples with `vibed multiplayer --example --game ludo` or\n`--game backgammon`. MCP exposes `vibed_multiplayer_example({game:\"ludo\"})` and\n`vibed_multiplayer_example({game:\"backgammon\"})`. The plugin includes both HTML\nfiles under `skills/make-it-vibed/assets/`. Both use the same generic library;\ngame rules, dice and moves remain in the examples.\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-07-18T10:17:14.644Z",
+   "0.1.1": "2026-07-20T10:47:23.073Z",
+   "0.1.2": "2026-07-20T12:23:39.970Z",
+   "0.1.3": "2026-07-22T14:11:08.406Z",
+   "0.1.4": "2026-07-23T14:41:27.229Z",
+   "0.1.5": "2026-07-23T15:47:13.027Z",
+   "0.1.6": "2026-07-23T21:18:09.969Z",
+   "0.1.7": "2026-07-23T21:38:05.117Z",
+   "0.1.8": "2026-07-23T22:45:02.117Z",
+   "0.1.9": "2026-07-24T18:38:58.973Z",
+   "0.10.0": "2026-07-30T15:58:29.701Z",
+   "0.11.0": "2026-08-01T21:30:26.361Z",
+   "0.12.0": "2026-08-05T22:22:12.833Z",
+   "0.14.0": "2026-08-12T13:57:30.659Z",
+   "0.15.0": "2026-08-24T18:15:12.729Z",
+   "0.15.1": "2026-08-29T18:34:26.554Z",
+   "0.15.2": "2026-09-02T09:31:04.483Z",
+   "0.16.0": "2026-09-08T15:17:13.244Z",
+   "0.16.1": "2026-09-09T07:29:02.574Z",
+   "0.17.0": "2026-09-10T17:38:45.047Z",
+   "0.17.1": "2026-09-10T20:37:14.251Z",
+   "0.17.2": "2026-09-10T20:50:00.342Z",
+   "0.17.3": "2026-09-10T20:53:31.144Z",
+   "0.19.0": "2026-09-11T12:58:45.080Z",
+   "0.2.0": "2026-07-26T14:50:59.437Z",
+   "0.2.1": "2026-07-26T14:58:18.189Z",
+   "0.2.2": "2026-07-27T15:47:15.167Z",
+   "0.20.0": "2026-09-11T22:00:05.315Z",
+   "0.21.0": "2026-09-12T11:27:47.997Z",
+   "0.22.0": "2026-09-12T13:06:26.433Z",
+   "0.3.0": "2026-07-27T16:03:14.037Z",
+   "0.3.1": "2026-07-28T15:46:07.699Z",
+   "0.4.0": "2026-07-28T17:43:11.661Z",
+   "0.5.0": "2026-07-28T23:20:07.428Z",
+   "0.6.0": "2026-07-29T11:58:47.146Z",
+   "0.7.0": "2026-07-29T13:13:57.214Z",
+   "0.8.0": "2026-07-29T23:33:58.483Z",
+   "0.9.0": "2026-07-30T01:37:15.450Z",
+   "created": "2026-07-18T10:17:14.301Z",
+   "modified": "2026-09-12T13:06:26.584Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.0_1784369834492_0.506986447786804"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-mBB9Dxe82Mn1wpZD62AbPL5i/WR2Or8pM0gevJZyfEpRQhWkrFl5RtqxzIeHZ++Xts0lvOfyPE0Tjwvr8U30RQ==",
+     "shasum": "fdfec0588bf5df235e30e023161efdfc59f74f46",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDLcXGD1BJUU2vLnXcCxmjaJPG5cRJiP8fc7MBR2djvXQIgUkv0eaPUtWPSLuuxv2gZe/gOz92iXNmsNZbKzYiYAcA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.0.tgz",
+     "unpackedSize": 555649
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.1_1784544442942_0.043631797395305316"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-46P29WpJGsEvhgjjJkzkvReHHht4EvnoZy0w5JF5OA/m35Sp/yWLNIuKUHfro83oINFKwc+as2C5sD2ahuCSaQ==",
+     "shasum": "74d49b62c26d0238c9e4345c355d81ebb3bb20e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIADd12qeOvlrEQE76wqCjMHrW8KKf02o4Ebj4ATvMDcOAiBCvz2sTighDDrA+anM9AWaOeV3V52HDaz6peYPSb8eqQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.1.tgz",
+     "unpackedSize": 562132
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.2_1784550219843_0.29482923868293986"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-WuxE2svHvQH3Pcivk76la0WcvSoIZ6QKme+AQanl38YLMxkjJsbHE6dmEOJ2ZlEsiTa4IInyY13xfUnDQ/7WhA==",
+     "shasum": "1b9da751751405676e7b889beb8f517a2187ae14",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFV+jAW0n3WXVc4v0qtCOPMFlvPcZ1la+0nIx2yZhvFEAiEAuURkXTxKq7r2nY+uk+eNOF2O1F+5z4JXPThLEBcyetU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.2.tgz",
+     "unpackedSize": 562436
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.3",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.3_1784729468261_0.8430788643129343"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-xS8WbJsMszzIGlWlBeVyiNN/D4a+EEw67DITOGsOEmoP+eGFbO8D2qIvWvXhSXNSsRzrF9aawNO7tQE6a10xjA==",
+     "shasum": "5d4b6ba08edd41d80b62e3c68c7f81e830b4f303",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD9smDJz08LpFd1k9XBAUt7vOR0RPYwdFh80Uja74cR0wIgHYfaWMV2KSvSwRV9jHyyqzErSXpi+fpAbv2vNN4OzkM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.3.tgz",
+     "unpackedSize": 577528
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.4",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.4_1784817687101_0.8584240163226806"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-RWk/RISHX+OSl1ogL1w/RRV1nl/EaD6sUxmR8f+9Uc4l6g0gzThAiVjI6Khows7x4TlGDwa70DtX2qLOcBuwIA==",
+     "shasum": "9915eece8a964966b302dee8eeaeed6fdd19281e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEevRuBt9dyzNkJ9p1ioZgQ26Q7PNv04ikaGW5dqROmTAiEAzvTwfmyIkuPSfnoP560XlwLk5rXVnuRHU/0oTW47Gh0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.4.tgz",
+     "unpackedSize": 584897
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.5",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.5_1784821632829_0.33552633692925316"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-CYW7v+t/PemA09jHGL0MoVqdJqDx6tk4Jh2JTHuMaLXbV58wv2Cw8jPyzyCw+TIoY4AloCwWBQii9EBQqo8DxA==",
+     "shasum": "a9593cecca8a7c1ac2b3f7a9232b9c94aa0b1f9e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBFEU02BwK7+ThybH6AT0wAsHbMOGg9su/mPNk44gX83AiEAmP0m+zfMQfitDAsmoBdrCJD9TdR/0/Hh2+rgscigfOg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.5.tgz",
+     "unpackedSize": 584872
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.5"
+   },
+   "0.1.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.6",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.6_1784841489823_0.12204100036476162"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-qdkvibm3b961U4x+QHFF097C9uaKb0ENbHoCH+hfSLzIMw3/IShNJDxou8LTVCTVWpSzVJT5d80iUQ/VJZJl5w==",
+     "shasum": "79b273f638121f8c4920403e419a407cee3c9a24",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC/MgaFuyBtVPN1PzaauDYoRT++AMFj3MNrdC5G/DoGLwIgMXqaSREUkeJvWPcyr2edJZIRiIN/EhgtkaxwI0K0RbM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.6.tgz",
+     "unpackedSize": 585777
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.6"
+   },
+   "0.1.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.7",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.7_1784842684935_0.9819387209860053"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-cA/J8k2RIYilhxZnjD7szscBB0Z41efyYmB5+aEaWeJ2QZqCX7AEPMywDL/B0izKm2SM2Y/OTKMuL4XYn60Z+w==",
+     "shasum": "6509b185a16a9fd16a01edb714f0a93dc69855ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDWxA7thCv8edD9XYoU7b+S7IHuoOT/vKBGUx4surPTXwIhALyOguU5eKgCDZ1xcqLF1XugE9k9DWdeZ8tO9tNuzsJK"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.7.tgz",
+     "unpackedSize": 591288
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.7"
+   },
+   "0.1.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.8",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.8_1784846701930_0.350829003170922"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-xRj6OY8W1vBc7v6a3j3kr8xOVd/P87rcmu7X50JruwkcaPcnnLbTrDvrBLztasXyU7hrLYGcshocIQkapedYtQ==",
+     "shasum": "2193797387e07f7772c69079c2fb3b4818c7e338",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC2dDDwfukOPF+VQPmSlOQWR0uharxXKGB6Mc7t4Yg2NQIhAOK7N61XEUzjpn7WlnRLmwSbqheSDi6dNVTht6NvPQy+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.8.tgz",
+     "unpackedSize": 591908
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.8"
+   },
+   "0.1.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.1.9",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.1.9_1784918338809_0.75746095687184"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-juTGGHpyK1t0kyKq/8nsNm7Gfa6Q+LxW6xbHNHjYQvh+qx8oQbzRtjAzrTKviv1xptZsDAize/mp3pTiBpR3jA==",
+     "shasum": "c25ed5846de45e7fd4b05051d493b365649de069",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHEB1TJpKELZYSeU5LDwKlL1txtSDjFbE5auJMBJ4zUYAiEA+khKPYQxDtMYS4T22GujujKPeWTZhgKopC0U4zIWzbo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.1.9.tgz",
+     "unpackedSize": 592675
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.1.9"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.10.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.10.0_1785427109566_0.25213962372943266"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-7RrOfUAw8cIYZ/CnPFO0/4pebpuwsaUSxnLu1l2P2R+rXBYkVtygLVCoy+RM+wQMMScl6SdfGZchsD8ItKBeWA==",
+     "shasum": "4d6ddbb4b9811ac71c85d6c21bce354c6897827c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCMO7jgY8FKHE6eGZ42JXd2lQSICMeJJ1EZe5vrUclPvAIgfguCcbPEJ0/J30Q3Lew2kI2l+UG8Q5G13FsXLfdq+wg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.10.0.tgz",
+     "unpackedSize": 680346
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.11.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.11.0_1785619826205_0.7491601829337087"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-SMeR4sHDbHwVSLW0s5GyuPZ5qb+faRvvoTTSGRvWPLrTnjUx5BbuEulLLMtSY0BcryQ5tR4ls+kYnnxyD84kbw==",
+     "shasum": "fc7dde20028a6ce0ffeded08df0e50a59ade2249",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG/7MYijnO2k7kZ3aRUJj4LRfxd72QEURskmiS+o6E3uAiEA1Xf4dTOaizyLJT3LDb4goZorF8CYxKz2XFAninQ597c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.11.0.tgz",
+     "unpackedSize": 720328
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.11.0"
+   },
+   "0.12.0": {
+    "_from": "file:amirhosseinnateghi-vibed-mcp-0.12.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.12.0",
+    "_integrity": "sha512-QLY1TnjAhv0bTIgKLz/uSeVs2IHbh7umNqNgykrQN1l5mt9qr1lVRQnFs80xIcpcKCMfMoL/ByeDcLXKtr98Pw==",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.12.0_1785968532674_0.20667326066713465"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/private/var/folders/f7/nfwpt__n72j71bfspwlk3qd00000gn/T/0e60926b4c684b06112b838258c69592/amirhosseinnateghi-vibed-mcp-0.12.0.tgz",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "0.12.0",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-QLY1TnjAhv0bTIgKLz/uSeVs2IHbh7umNqNgykrQN1l5mt9qr1lVRQnFs80xIcpcKCMfMoL/ByeDcLXKtr98Pw==",
+     "shasum": "0e87c8c42134432cb7c85153068c79e86260a762",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEIzS9WhD+KlIbdsdf95ovrh2gjfsTocVkgTm+2GYOeeAiB2vdWp3uZbXERFwzqMETPNLNeAIJA2bG+LTyp2YvBH+w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.12.0.tgz",
+     "unpackedSize": 724316
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.12.0"
+   },
+   "0.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.14.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.14.0_1786543050492_0.5478041160483631"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-16xSqvXmYby8FuRaBwXzHy5Rhn/q7fA6R6gInbVUgBOSYafoUeC4tii+4gRnjHh+nn0Dehm9YKnibhcdrqctSQ==",
+     "shasum": "e47b19996196b70c35dd64cffb67ea73e38548f9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCG0gW36un6P5oWaF1i68+BpGvhm/ZFYhan2A76VPRFCAIhAJ752UEvHxXnMd0vk1SyOQjKAbzzVznOR9LkIaijdC8z"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.14.0.tgz",
+     "unpackedSize": 732154
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.14.0"
+   },
+   "0.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.15.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.15.0_1787595312586_0.34310727432253674"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-Y87QwnzFUn98cdyicJO7b9wccC8a0cNrsRDoROPuuy8IDe1RbhEs/fafp5tS9g2Z7spZAMcBXvjNf4umt5eIbA==",
+     "shasum": "412579bd5c934a8f2de379289ce3ac6f0d78481b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH0pcaGW5Vlubxwxs3egujmi78mW39sLXWl57v56OcKWAiEA4N9w8p55eZ7knRKbdgFlIsaQekJkrS8k20hKwzttn1Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.15.0.tgz",
+     "unpackedSize": 747583
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.15.0"
+   },
+   "0.15.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.15.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.15.1_1788028466402_0.507685741110304"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-SyuAg+vxDK/Jslqn+14fno683/57KoOYtBAsByZz9Xuk/unbhARf7/2ASjybVxmo74SlI8vExjTjStUVmTHIpw==",
+     "shasum": "a185679521745e3cc9385748add34b8136120a4a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDN5PWcf7HITFsxWd5BqV/IGdqtUeh+yuodzDQHkQxSqAIgIsFN+LZP3VeSmJBr9qT2s+H+rGdBcX9NbhWP4hFOenA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.15.1.tgz",
+     "unpackedSize": 756986
+    },
+    "gitHead": "c0c57cc14a07e1ffed68f4615c8e483c6179dfb5",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.15.1"
+   },
+   "0.15.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.15.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.15.2_1788341464340_0.4167556191500039"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-dfBq8EwhZwuLu1Tj9MjchclHhaivuGZFR7GxSnkzmFgl5Oq4wKanLVWqn7U71Pd9L2vEo3QRtoD2J13XCLrp9w==",
+     "shasum": "c83b177b47910af5d8a4044c0bbd5ca5d6c6a142",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAnpRPlAAlu7Nu1wn0Mx5xPA9layMaN1KCWHg1wEFS52AiAllvXRLDdUrgyg1JY8fQcpOrIzyHYbWu8WrXYojBvZWg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.15.2.tgz",
+     "unpackedSize": 763825
+    },
+    "gitHead": "a00223db11c2cec96140a4449af5bccef0a567df",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.15.2"
+   },
+   "0.16.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.16.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.16.0_1788880633136_0.9524554107666581"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-lFIcwX4DCY9T13dMnVpDxpTWsbII/9CIInuJKyfAE6aiuKXGkZiQA1QOG5bH07qvuOh/+KsyODSrPeSzcSvjzg==",
+     "shasum": "cd9abfd4e6d688a41249fe8fae94ab7e674c7ee1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGCSRaEVWRczQruD0btAT156q0zMwFK/LnmSpAipzfovAiEA/gR8eWOfdBlEBDQQ0RXrpw0N+rodBsNURdr7qaOh8uc="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDN6xey+VL0p6W/a85GijrE1O4IzJuPyYvh+13zw5rJLgIgS5wRP5ib1MXuXxClK05r7CXUsOnJuofdgR5TvJifsv4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.16.0.tgz",
+     "unpackedSize": 765503
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.16.0"
+   },
+   "0.16.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.16.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.16.1_1788938942478_0.4395314346613697"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-KvvsZj2b97TvqJpmVwoeNU2QCT0qa8zSnD6pBQgS9bJTo1k6IQQ5PWqoWq5S5rbXVEpscE4g2qcs/W9q0tJLLg==",
+     "shasum": "71c80b3aa707e659503238d13d68d7405a57f308",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCGR6Qbnm+9x7u6El3Oisx2AjG1hUWeeDbTdLnHLTOWIAIhAPHxYQAsiwVeyyvEcFzHWsS7HpVgxnvORFzCOuQsFM7B"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIESTYiEldOHtq1DagM5DQZbJtGxFvNjiM3X4jt/ql7hOAiEAjeZZZyU+/xFYQGbTlt4zZGedUeJZSypbPaAZU5Mvqk8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.16.1.tgz",
+     "unpackedSize": 1502716
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.16.1"
+   },
+   "0.17.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.17.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.17.0_1789061924956_0.08062357187426117"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-goksgSHVdJlQv25dQ+i9o3WRMiq4lfuiYETUKUXftENskwYU9XnlQaOWCJAqGKMa5DiG6bqvAgm412GgUipwxw==",
+     "shasum": "7a4b325a8354c0174bbef3681b8f0032f3c09538",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEGAnlVO+Rex5P5g0wtXj1wuuVZ7Bfrm/MIqb4R/wHixAiEAinAG5FZjNT7OTUFVTTHcgsp13CkcZZK4RX4KiTl63E0="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCEbl2VTKlzCa8jtbP0q+wGMQeXhuwuNhojo+ULeFCw3AIgYBIGIK8YRjl8X9/2WioEHe4kg6Itr4pRrVAU5yhTxXo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.17.0.tgz",
+     "unpackedSize": 1587304
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.17.0"
+   },
+   "0.17.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.17.1",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.17.1_1789072634152_0.029721147018023197"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-vYPQ/IM338KgRgOd96ELhQ0u5nayMvtNF90f2EGm/Pr7JV5xxpI98gXb1nJTjsn5vjNbLVJ7Q5ZPQSHSgGLszA==",
+     "shasum": "a4d84fdbe971f9db6e558d0022eb20fde2103c2a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCAS0ip1/UZlqMXKBDM6L31af1m4dQBYW1NseBVd50TTgIhAJcws3VmKj0M6TJJpL6hyHtfOKUCBZtMgTkwr9/obtyC"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB3Vp/3/+UpCUustWOdUioDW41KqfsKfrE1/TvIHWZe0AiEAqENfvFKTqnLGMPUUJe74flAOpcqzlJqpkwAo1kDJJo0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.17.1.tgz",
+     "unpackedSize": 1598767
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.17.1"
+   },
+   "0.17.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.17.2",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.17.2_1789073400227_0.18262427116202118"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-x1iLSAK1biAYUUnk7g3PQRzLDVaX0QM1rf+Lv5B/yx9UcfyWjpzLz9ofgX+kl3Rmja0wstHA4vZyUEwna8DGzQ==",
+     "shasum": "2801028463332d111e7b1781d0e2c8e983f08b2d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEqtGKEm1SARv2pgQY5QtqWNbSJqep0J6C3ziBa0Ku6JAiAuXB/QwxjwA8eWJx/rwyJkJ6m1NtbXuHGpscizAe+ftA=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIArMBNGHJMqUu1/EQ5x0RO1lSeytUGS3aB6JOkRWwUoYAiEAs7BsF49CcSgKymDHogtABQw6cSM/0h+fdK+Io+rvwcQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.17.2.tgz",
+     "unpackedSize": 1620279
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.17.2"
+   },
+   "0.17.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.17.3",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.17.3_1789073611060_0.288237083051162"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-JsNFCG88gRQVWvaFHzP1Bd4LwrsaAkBnLnbZg8Nz/CDpEuZ+/KIJX97s3FKdur+X3ipFxQkbBZIUlAGbubLB5A==",
+     "shasum": "f9c427b28d15e814d61e93e0b11f4aba9925c57c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCeigOrJi3mdAJY97i4/fxdu9FYLG4pzwFR3YF6Y0p4TQIhAIv1niDFZ6/qg0UbUIqOgqhW/WfBuS20tI1yzdwh/c+F"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDDwJwb97qAhbxDS3TN2xGVI97PKGILDfyASM1Y/bZtlgIhAOekMuPZriXQ1+w45wSUxPsk7oL7VAWVubQ6KLeEGJUb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.17.3.tgz",
+     "unpackedSize": 1620337
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.17.3"
+   },
+   "0.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.19.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.19.0_1789131524976_0.6389325004191211"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-c1TCxUcG1b8toZZTXKiWPzw6TDb4ejyC4iqnNS1WBwhj3Gh3qnmgpU1I9JjfDbdIXq1ZFVXiFydJcZCtpFpwRA==",
+     "shasum": "39568ca38ef44e775480d5bc5702998b1ee6c601",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCHScNxJgd+8a6gcr3tZmdKT0RF2cpdyTLm2o7KWNHTbgIhAJP8SXUwfqsB86EpNTuJVYIfR3QRShHQtZJLHE/uucqV"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCx4Mo/O6ERPiQS1668tqwbgkDS9QucuRS1tZ3sHLp+0gIhAM8ewnQEUXdNHHHryRF7gs7Tur873LlTz/SbIsfLWRwO"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.19.0.tgz",
+     "unpackedSize": 1665459
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.19.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.2.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.2.0_1785077459262_0.47191103921116717"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-z/P5G+fQuThG8827wanYXLcWk+uEqOkF8bXuA5iXFqBu7LijmI0ayAoNn6wKmfjlTEKFs/cxcnEfx/s4YZQD/g==",
+     "shasum": "efa2e49ddfd9c436416a65e7f624307286677650",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBP8L3O+bI6a3nQfvRWEwKcvKhdyJjp1Vnx792lPubOMAiEArNVGAKl5j32uVco2nv/IEU49KkV4S0nNNcPRvCLsC0E="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.2.0.tgz",
+     "unpackedSize": 603044
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__='\"0.2.0\"' --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.2.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.2.1_1785077898023_0.5988621562573175"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-IqDmCMAI0okqpZkdAtCw5YXna1WwJWP1pwTbuKjRVUjrYeyAYrHEX/PD4oqz8m+X9XtLT+co37jPDFreZ6eHSA==",
+     "shasum": "5f969874985a27f968b6e9cf3045ad2151c248a6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGZkBeQSSU4ObskRd+rwUc/DZIJ1r5r6vDt7c/IuOG0gAiEA/xgx7USRJACpVWUM2Q2CeTTSp5Hv53SEMHiZEIwpZ+M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.2.1.tgz",
+     "unpackedSize": 603044
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__='\"0.2.1\"' --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_from": "file:amirhosseinnateghi-vibed-mcp-0.2.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.2.2",
+    "_integrity": "sha512-ITM7mmCiWb5GcTVUKiIHLDAxERijyBQbJNkajn79iNBUbJr8jJXzEr3v8vKFBWI7AucS8VVmaxc6a8kiluuxWw==",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.2.2_1785167235000_0.31214861403452354"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/private/var/folders/f7/nfwpt__n72j71bfspwlk3qd00000gn/T/aa2c68cea57ac5b309ba83f54dd0ee95/amirhosseinnateghi-vibed-mcp-0.2.2.tgz",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "0.2.2",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-ITM7mmCiWb5GcTVUKiIHLDAxERijyBQbJNkajn79iNBUbJr8jJXzEr3v8vKFBWI7AucS8VVmaxc6a8kiluuxWw==",
+     "shasum": "4599ce35f10b26d5aa7a445708ca73df68386978",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGPH3v2kD/Nlq5XdHiBh/g2GbndMG4ODNpH+bRgXem/oAiBQLfAlsw5zwtzTPWRvY/z9XNjhOwtMMNxNQyP4hhWbyw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.2.2.tgz",
+     "unpackedSize": 619812
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__='\"0.2.2\"' --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.2.2"
+   },
+   "0.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.20.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.20.0_1789164005232_0.25719495419487015"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-nc/tL7fB6MfZYFIvm2a7hR5qleUV0EmaESAIdq9N78S27vyllDlzLltAj7dyqiUyT4SkBLg9qvRaQflSQyh/Ww==",
+     "shasum": "72badceb39f24c69a436716aa6fc4fe34901c833",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICpEvlczTpuk0O7oFm8BUZ5cEp6LJYK/z6Ssr2WGEzYYAiEAjI41NnqWATtmrFYSwg89qaP7rFxS0bTt1+iOHI8PBFM="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDr6cXey+dEsk2Nz+db2HXBPuXBOKySduWZpbeyPZqR3AiA8EqYG+Z3i8rljedB69YMrTfufJQPdkAFbPgSMcmQzqg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.20.0.tgz",
+     "unpackedSize": 1720759
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.20.0"
+   },
+   "0.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.21.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.21.0_1789212467887_0.51460533262351"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-qWwZuZndgu5fuup2cCyFebzO/iVe2mpba175jpAMzds4uovqt2ikxWDbu1ng8hBTqPvTHvPyhoN4xcb4pvI0IA==",
+     "shasum": "92ee1be605ee287cc8d15359a7996f1d3a6e64c5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCUMLIGeQzt/GEg2lpNKaUwL3siw5ePtLmp0SUFkPh6zwIgcBs7oT4yjlsIXdaL2j6ewfg8eucwpA4EJrbRe0t0RMA="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCjguimhkEyHHY2CBDrZsg/4bmEUjByZjiqCuAPD7chqgIhAMoYXTzIAHRJ6swvPo2g3O/AHLLljjKv8LKvPJh3GGgc"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.21.0.tgz",
+     "unpackedSize": 1721310
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.21.0"
+   },
+   "0.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.22.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.22.0_1789218386340_0.6793535190877786"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-2eWEamJqWP3Gzu73vGtHq097gEVkpQmkUx+KSx+rA3jeWFF1QUONRDKjgJRsAPdWM8PKJZ7y4KLKbaiaZn2DBw==",
+     "shasum": "978663eb0f28c25ab5254e35e1dcbabc9f58d8ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICvlT1v0gr4WwB0C6dswQAwvcHMeXT+xRxtDbOa5+68kAiEAsFnuE0BNitntKSYe5FCpL0lWvi4FksavAvFQpAISth4="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDM7PQZSboFmq0WuxvJ4ceSdXcBctmOFneSXgrTDRfrVgIhAN9QDdrQKKMVoceO9DcLzUjIgrQ6jIB9hH8NZ6nQZIQq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.22.0.tgz",
+     "unpackedSize": 1724779
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.22.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.3.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.3.0_1785168193794_0.97376567855192"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-vwtMnFySei2p4mj5rxX0vcQ9jUPODjwtb5GLSD+QzwQ1kYqDUp00ow7YLMw9odsh0elAdjZIiR0fCidtcL1Nlg==",
+     "shasum": "75f1ee39f86d56b2f7e1768ca6082fe712e911dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBoKBVxtPNGWzdBGt4WXYKu7Sd8xh/Sql+d6dC29pnzZAiEA00pVEbBqwaB6C5ySNWwUQVzahmOOtYJLVGBELGrklh0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.3.0.tgz",
+     "unpackedSize": 620418
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_from": "file:amirhosseinnateghi-vibed-mcp-0.3.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.3.1",
+    "_integrity": "sha512-0JPTPDgBmood2eMwVF3Ljod2RI7edACygKoN6GvQv906+df717iJILaISTbsAntZTw9LrKRrrgz9ak+ZoL2GRw==",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.3.1_1785253567569_0.45531429752116237"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "_resolved": "/private/var/folders/f7/nfwpt__n72j71bfspwlk3qd00000gn/T/b561ef7f143fc1195a45843b267fa47f/amirhosseinnateghi-vibed-mcp-0.3.1.tgz",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "0.3.1",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-0JPTPDgBmood2eMwVF3Ljod2RI7edACygKoN6GvQv906+df717iJILaISTbsAntZTw9LrKRrrgz9ak+ZoL2GRw==",
+     "shasum": "0c98c1c7858468c4e8d65bb9249e536214238091",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGJSOC852Xg8ATwuFZNJmxv/kG18VgohR1KI3dS4TvJtAiASkMu3snPY2Vf9TqlspaLV3QnK2RRN61oCPtKUbezLiA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.3.1.tgz",
+     "unpackedSize": 626293
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.4.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.4.0_1785260591515_0.24861806378028262"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-b5H1YSetsdRdLB9N5HK1yw2zklRdUj3gGcWQlhzceKxb0wphPQNOOtzaV/hagIqi1r3BZozK0HLPBsc8UaWu2Q==",
+     "shasum": "dd8dba0d153063b1fe2dda6c59e5cbf957aa8465",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGRw7eJQnJD5d7Bnhh4yZLHZI5JMMKv4P/VSUOhZPhU7AiEAjXmYSgMqsTL9FNRAmoh1oLEt9I4+pAUmdSu/IvA2wPY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.4.0.tgz",
+     "unpackedSize": 633690
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.5.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.5.0_1785280807272_0.5116537584486966"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-CZg1vtefPBrZoszqFzb18+Ix+PPwfY0T0nB10M7kkcnaN+//ZZC2HjlMUrW2H32gihan0hX0aLgZRF8MhAwCGA==",
+     "shasum": "f1902f516ba193fb7fe9005940f93def6993cc7d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHvefuztii/FgVKHD1mQS1a8EHsQjmawcJ9p3hLVdNt+AiBNYlLA/LeMR73YeMkbqs2sV0p4BYUcZ3dmbhKl3ZtGzw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.5.0.tgz",
+     "unpackedSize": 636802
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.6.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.6.0_1785326326971_0.779850601045035"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-HKprhTH8ObltwpyP0xQd7zMIKWSi6aagXp+Nk7Rq8ndiVx9SNoOLU65TUawNuHRXnpXw1PEObqKcm6otUs1iXg==",
+     "shasum": "0425daff8aa86c038ffba4fd66bf79bc37423e36",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDA0QDxRxBpn2sYICdiI3J1ROx7cowEqs1L0kpo82QeJAiBA2MGkxq/plkAdKhj3r56ckw5dlFwz/Q3GBp4XCaq/Kg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.6.0.tgz",
+     "unpackedSize": 641391
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.7.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.7.0_1785330836966_0.2322567089192109"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-sccspYs5wJKKogmXUVFeLzwNAYD4m23OI3P+3oIrY/0A/MMMdSrDBd3p++TaFj+I2QhOknvpLm2KvIDqh6ctwA==",
+     "shasum": "07a85a072c41dd96fa8e21076f29fe9d466d4bf8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCPF2XEsZ0L6bzBmi1SOiNRnBD1xHZaKJfXtjZ5mrXw8AIhALvXKtbSMEkLfbr/jKQVYLMHViFXvslg58wM+N2S7UVj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.7.0.tgz",
+     "unpackedSize": 644058
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.8.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.8.0_1785368038339_0.6811584458938156"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-D3+QL05js++4o5Xt+fyO80qBk7OnA6cpaHpUWkaSFCIa84RvpPIsGxSt5sNqQhe1rrosP3+fa41LYhwrMW81xQ==",
+     "shasum": "7e6c4da380a9a25ed71cd98c8da18544bffe0992",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCQoBqn5axWlx8KclT+6/40mcosk/87MVPQ8Bueaz9fiwIgYLT2xFmkHzssaGfRH5dqkP9XYLIGO2jxSZiQNRmUYbY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.8.0.tgz",
+     "unpackedSize": 679466
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@amirhosseinnateghi/vibed-mcp@0.9.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/vibed-mcp_0.9.0_1785375435278_0.8819644887674725"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:322ad8a6af53]",
+     "name": "amirhosseinnateghi"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "vibed-mcp": "dist/index.js"
+    },
+    "comment": "Zero runtime deps: the MCP stdio protocol (JSON-RPC over newline-delimited JSON) is implemented directly, and @amirhosseinnateghi/vibed-cli's engine is bundled by esbuild into dist. So `npx @amirhosseinnateghi/vibed-mcp` needs no install.",
+    "description": "vibed MCP server \u2014 make it vibed from any MCP client (Codex, Cursor, Gemini, \u2026): check, login, and publish tools",
+    "devDependencies": {
+     "@amirhosseinnateghi/vibed-cli": "workspace:*",
+     "@types/node": "^20.17.10",
+     "esbuild": "^0.21.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.2",
+     "vitest": "^2.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-qrkCxozjNnuYCj2Vh7iE/y6ogsN5AJ9Xi2di7gNTJj23Xy9RY4fNEYvoJOoQTndc/ZunKbcHcmDbXVKWTs7l+Q==",
+     "shasum": "330c19eccf100ac2724b1cb5564333dd9826a552",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIByKAAtFquIphy4PTLKNozkx9JJoSNDCby7VJmeCTxilAiA8vF/KgY5f6dN7QcWAsdD36ANRettzRXSmqPsQbty4/g=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@amirhosseinnateghi/vibed-mcp/-/vibed-mcp-0.9.0.tgz",
+     "unpackedSize": 680344
+    },
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:322ad8a6af53]",
+      "name": "amirhosseinnateghi"
+     }
+    ],
+    "name": "@amirhosseinnateghi/vibed-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --define:__VIBED_MCP_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js && chmod +x dist/index.js",
+     "dev": "tsx src/index.ts",
+     "lint": "echo 'no-op'",
+     "prepublishOnly": "pnpm build",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@amirhosseinnateghi/vibed-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@amirhosseinnateghi%2Fvibed-mcp"
+}

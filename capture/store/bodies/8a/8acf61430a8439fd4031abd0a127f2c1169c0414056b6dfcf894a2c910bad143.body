@@ -1,0 +1,646 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.5",
+  "maintainers": [
+   {
+    "email": "[redacted-email:751c37e897d7]",
+    "name": "asif2bd"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5"
+  ]
+ },
+ "manifest": {
+  "_id": "@asif2bd/umami-mcp",
+  "_rev": "6-80cb836964d257b65c000f7df1b88af1",
+  "author": {
+   "name": "M Asif Rahman"
+  },
+  "bugs": {
+   "url": "https://github.com/Asif2BD/umami-mcp/issues"
+  },
+  "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+  "dist-tags": {
+   "latest": "0.1.5"
+  },
+  "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "umami",
+   "analytics",
+   "claude",
+   "ai"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:751c37e897d7]",
+    "name": "asif2bd"
+   }
+  ],
+  "name": "@asif2bd/umami-mcp",
+  "readme": "# Umami MCP Server\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for [Umami Analytics](https://umami.is).\nAsk Claude, Cursor or any MCP client about your traffic \u2014 and let it create and manage websites \u2014 while your\ncredentials stay on your own machine.\n\n[![npm](https://img.shields.io/npm/v/@asif2bd/umami-mcp?color=cb3837&logo=npm)](https://www.npmjs.com/package/@asif2bd/umami-mcp)\n[![npm downloads](https://img.shields.io/npm/dm/@asif2bd/umami-mcp?color=cb3837)](https://www.npmjs.com/package/@asif2bd/umami-mcp)\n[![CI](https://github.com/Asif2BD/umami-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Asif2BD/umami-mcp/actions/workflows/ci.yml)\n[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-published-0E7C86)](https://registry.modelcontextprotocol.io/?q=umami)\n[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)\n![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)\n![Umami](https://img.shields.io/badge/Umami-v3-blue)\n\n```\n\"Which pages drove the most visitors last month, and where did that traffic come from?\"\n\"Build a funnel from /pricing to /signup to /welcome for the last 30 days.\"\n\"Add analytics for my new site blog.example.com and give me the tracking snippet.\"\n```\n\n<!-- Absolute URL so the image also renders on npmjs.com, which does not\n     resolve repository-relative paths. -->\n![umami-mcp answering questions about live traffic](https://raw.githubusercontent.com/Asif2BD/umami-mcp/main/demo/umami-mcp-demo.gif)\n\n<sub>A throwaway site with generated traffic, on a live Umami 3.3.1 instance, read by a\nview-only service account \u2014 so the counts are small and mean nothing, but every one of them was\nreally collected and really queried. Regenerate with `vhs demo/demo.tape`.</sub>\n\n## Why this exists\n\nUmami has no official MCP server. Several community ones exist, and if you just want broad API\ncoverage you should look at [`0xtlt/umami-mcp`](https://github.com/0xtlt/umami-mcp) first \u2014 it\nwraps more of the API than this does. Some of the older servers\n([`jakeyShakey`](https://github.com/jakeyShakey/umami_mcp_server),\n[`mikusnuz`](https://github.com/mikusnuz/umami-mcp),\n[`mittwald`](https://github.com/mittwald/umami-mcp),\n[`Macawls`](https://github.com/Macawls/umami-mcp-server)) were written against the **v2** API and\nbreak on a modern instance, because v3 renamed things without aliases:\n\n| | Umami v2 | Umami v3 |\n|---|---|---|\n| Top pages | `/metrics?type=url` | `/metrics?type=path` |\n| Hostnames | `/metrics?type=host` | `/metrics?type=hostname` |\n| UTM data | `/metrics?type=utm_source` | `POST /api/reports/utm` |\n| Funnels, retention, journeys, attribution, revenue | \u2014 | `POST /api/reports/*` |\n\nThis server exists for two things the others do not do:\n\n**1. Complete, verified v3 report coverage.** All seven v3 report types \u2014 funnel, retention,\njourney, goal, revenue, attribution and UTM \u2014 were exercised against a live **Umami 3.3.1**\ninstance. The report envelope is easy to get wrong: dates go in `parameters` as ISO-8601 strings,\nnot in `filters`, and not as the epoch milliseconds the rest of the API uses. Attribution takes\n`first-click` / `last-click`, not the camelCase spellings you would guess.\n\n**2. A capability model rather than a boolean.** See below.\n\n## Security model\n\nAn analytics MCP server holds a credential that can read every visitor session you have ever\nrecorded \u2014 and, if you let it, delete the lot. The design follows from that.\n\n**Your credentials never leave your environment.** Configuration is read only from the process\nenvironment. There is no telemetry, no phone-home, and no hosted relay. The only host this\nserver ever contacts is the `UMAMI_URL` you set. If you self-host it, nothing about your\nanalytics ever reaches a third party \u2014 including the author of this software.\n\n> Be wary of any Umami MCP that offers a hosted endpoint you point at your instance.\n> Self-hosted Umami has no API keys, so \"convenient\" hosting means mailing your **admin\n> password** to someone else's server.\n\n**Least privilege by default.** The server starts in `read` mode. Widening is a deliberate act:\n\n| Mode | Adds |\n|---|---|\n| `read` *(default)* | Analytics, reports, listing websites |\n| `write` | Create and update websites and teams |\n| `admin` | User management |\n| `+ UMAMI_MCP_ALLOW_DESTRUCTIVE=true` | Delete website, reset data, delete user |\n\nWithheld tools are **not registered at all**, so they never appear in the model's tool list.\nThis is the part that differs from a `READONLY=true` flag: a tool that was never advertised\ncannot be invoked by a prompt-injected instruction hidden in, say, a referrer string or a page\ntitle inside your own analytics data. There is no runtime check to forget or bypass, because\nthere is no tool.\n\n**Destructive actions need a typed confirmation checked against reality.** `umami_delete_website`\ntakes a `confirmDomain` argument, fetches the live record, and refuses unless they match. A model\nthat reaches for the wrong website UUID gets an error, not a wiped dataset.\n\n**Credentials stay out of client config.** Rather than requiring your password inside\n`~/.claude.json` or `mcp.json`, the server reads it from a file you control at\n`~/.config/umami-mcp/env`, and warns if that file is readable by other users. See\n[Credentials](#credentials).\n\n**Secrets are scrubbed from output.** MCP output flows into a model and often into a chat\ntranscript, which cannot be un-said. Passwords, bearer tokens and JWTs are redacted from every\nerror and response before they leave the process.\n\n**Refuses to leak credentials over the wire.** Plaintext HTTP to a remote host is rejected at\nstartup; it is permitted only for `localhost`, for local development.\n\n## Install\n\nThree ways to run it. **Self-hosting is the default and the recommended one** \u2014 the hosted\ninstance exists so you can try it in two minutes without cloning anything.\n\n| | Runs where | Credentials live | Best for |\n|---|---|---|---|\n| **Hosted** | asif.dev | Sealed in your token, never stored | Trying it out; Claude web and Cowork |\n| **Source** | Your machine | A file only you can read | Daily use in Claude Code |\n| **Docker** | Your server | Your `.env` | Teams, always-on |\n\nIf you self-host and want it in Claude web, run it with `UMAMI_MCP_OAUTH=true` behind your own\ndomain \u2014 then nothing of yours touches anyone else's infrastructure.\n\n### 1. Use the hosted instance (nothing to install)\n\nAdd a custom connector in Claude pointing at:\n\n```\nhttps://umami-mcp.asif.dev/mcp\n```\n\nYou will be asked for your own Umami URL and login on a consent screen. See\n[Claude web, Cowork, and Claude Code on web](#claude-web-cowork-and-claude-code-on-web)\nfor how the credentials are handled.\n\n### 2. From source\n\n```bash\ngit clone https://github.com/Asif2BD/umami-mcp.git\ncd umami-mcp\nnpm install && npm run build\n```\n\nThen set up [credentials](#credentials) and register it with your client:\n\n```bash\nclaude mcp add umami --scope user -- node \"$PWD/dist/index.js\"\n```\n\nRequires Node 20 or newer.\n\n### 3. Docker\n\n```bash\ngit clone https://github.com/Asif2BD/umami-mcp.git\ncd umami-mcp\ncp .env.example .env    # then edit .env\ndocker compose up -d\n```\n\n> **npm:** not published yet. Once it is, `npx -y @asif2bd/umami-mcp` will replace the\n> clone-and-build step above. Until then use source or Docker.\n\n## Credentials\n\nSelf-hosted Umami has no API keys, so the credential this server holds is a **real account\npassword**. MCP clients normally want that embedded in their config JSON \u2014 `~/.claude.json`,\n`mcp.json` and friends \u2014 which are widely readable, get pasted into issues and screen-shares, and\nare synced between machines by some clients.\n\nSo this server reads credentials from a file you control instead. Create it once:\n\n```bash\nmkdir -p ~/.config/umami-mcp\ncat > ~/.config/umami-mcp/env <<'EOF'\nUMAMI_URL=https://analytics.example.com\nUMAMI_USERNAME=mcp-bot\nUMAMI_PASSWORD=your-password\nUMAMI_MCP_MODE=read\nEOF\nchmod 600 ~/.config/umami-mcp/env\n```\n\nThe server loads it automatically. It warns on startup if the file is readable by other users.\n\nLookup order \u2014 the first file found wins, and **real environment variables always override the\nfile**, so you can still pass settings from the client config when you want to:\n\n1. `$UMAMI_MCP_ENV_FILE`, if set\n2. `~/.config/umami-mcp/env` (or `$XDG_CONFIG_HOME/umami-mcp/env`)\n3. `./.env` in the working directory\n\n## Connect your client\n\n### Claude Code\n\nWith the credentials file above, the registration carries no secrets at all:\n\n```bash\nclaude mcp add umami --scope user -- node ~/umami-mcp/dist/index.js\n```\n\nUse the absolute path to your checkout. If your Node lives under nvm, give the full\ninterpreter path too, since MCP clients do not load your shell profile:\n\n```bash\nclaude mcp add umami --scope user -- ~/.nvm/versions/node/v22.22.0/bin/node ~/umami-mcp/dist/index.js\n```\n\n### Claude Desktop / Cursor / VS Code\n\n```json\n{\n  \"mcpServers\": {\n    \"umami\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/umami-mcp/dist/index.js\"]\n    }\n  }\n}\n```\n\nIf you would rather keep everything in one place, environment variables still work and take\nprecedence over the file:\n\n```json\n{\n  \"mcpServers\": {\n    \"umami\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/umami-mcp/dist/index.js\"],\n      \"env\": {\n        \"UMAMI_URL\": \"https://analytics.example.com\",\n        \"UMAMI_USERNAME\": \"mcp-bot\",\n        \"UMAMI_PASSWORD\": \"your-password\"\n      }\n    }\n  }\n}\n```\n\n### Check it works\n\nAsk your client to run `umami_whoami`. It reports the instance, the account, and the permission\nmode \u2014 the fastest way to confirm the connection and see how much the server is allowed to do:\n\n```json\n{\n  \"instance\": \"https://analytics.example.com\",\n  \"authenticatedAs\": \"mcp-bot\",\n  \"role\": \"admin\",\n  \"serverMode\": \"read\",\n  \"destructiveOperations\": \"disabled\"\n}\n```\n\nThen try: *\"List my Umami websites\"*, or *\"What were my top pages last week?\"*\n\n## Claude web, Cowork, and Claude Code on web\n\nThose clients cannot launch a local process, so they need a public HTTPS MCP server \u2014 and their\nconnector UI accepts **OAuth only**, with no field for a static bearer token or custom header.\n\nHosting the obvious way, with one set of Umami credentials baked in and no authentication, turns\nthe URL into an open proxy to that Umami. So this server does OAuth instead, and does it without\nbecoming a credential store.\n\n### Use the hosted instance\n\nAdd a custom connector in Claude with this URL:\n\n```\nhttps://umami-mcp.asif.dev/mcp\n```\n\nClaude registers itself, sends you to a consent screen, and asks for **your own** Umami URL,\nusername and password. Nothing is shared with other users of the host.\n\n### Host your own\n\n```bash\nUMAMI_MCP_OAUTH=true\nUMAMI_MCP_TRANSPORT=http\nUMAMI_MCP_ISSUER=https://mcp.example.com      # public HTTPS URL of this server\nUMAMI_MCP_TOKEN_KEY=<32 random bytes>          # keep stable; see below\nUMAMI_MCP_TOKEN_TTL=2592000                    # 30 days\n```\n\nGenerate the key once and keep it:\n\n```bash\nnode -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"\n```\n\nSet `UMAMI_URL` as well to pin every user to one instance instead of letting them choose.\n\n### How the credentials are handled\n\nThe consent screen verifies the credentials against the Umami instance the user named, then seals\nthem into the access token with AES-256-GCM. The server keeps **no session table and stores no\ncredentials**: each request decrypts the token, builds an MCP server scoped to that one user,\nserves the call, and discards it.\n\nThe honest trade-off: whoever holds `UMAMI_MCP_TOKEN_KEY` can decrypt any token they capture.\nTreat it as the most sensitive value in the deployment. Rotating it invalidates every issued\ntoken, which is the intended blast-radius control.\n\nDestructive tools are **never** exposed over OAuth, whatever permission the user picks. Their\ntyped-confirmation guard assumes a local operator who can see what they are about to delete, and\na remote caller cannot be shown that.\n\n## Running it as a plain HTTP service\n\nSet `UMAMI_MCP_TRANSPORT=http` without `UMAMI_MCP_OAUTH` for a single-tenant endpoint at `/mcp`,\nplus `/health`.\n\n**In this mode the server has no authentication of its own.** Anyone who can reach the port can\nuse your Umami credentials. Keep it on loopback and tunnel to it:\n\n```bash\nssh -N -L 3334:127.0.0.1:3334 you@your-server\nclaude mcp add --transport http umami http://127.0.0.1:3334/mcp\n```\n\nThe server warns at startup when it is bound to anything other than loopback.\n\n## Tools\n\n| Tool | Requires | Description |\n|---|---|---|\n| `umami_list_websites` | read | List the websites tracked by this Umami instance, with their UUIDs |\n| `umami_get_website` | read | Fetch a single website by UUID, including its domain, owner and creation date. |\n| `umami_create_website` | write | Register a new website for tracking and return its UUID, which is the value to put in the data-website-id attribute of the Umami tracking script. |\n| `umami_update_website` | write | Change a website's name, domain or share slug |\n| `umami_reset_website` | destructive | PERMANENTLY DELETE all collected analytics data for a website, keeping the website itself |\n| `umami_delete_website` | destructive | PERMANENTLY DELETE a website and every event ever recorded for it |\n| `umami_get_tracking_snippet` | read | Return the ready-to-paste HTML script tag that sends data to this Umami instance for a given website. |\n| `umami_get_stats` | read | Headline totals for a website over a period: pageviews, visitors, visits, bounces and total time on site |\n| `umami_get_pageviews` | read | Pageviews and sessions bucketed over time, for charting traffic |\n| `umami_get_metrics` | read | Top values for one dimension, ranked by visitor count -- top pages, referrers, countries, browsers and so on |\n| `umami_get_active_visitors` | read | Number of visitors active on the site in the last few minutes |\n| `umami_get_realtime` | read | Live snapshot of current activity: recent events with country, URL, browser and device, plus rollups by country, URL and referrer |\n| `umami_get_event_stats` | read | Totals for custom tracked events over a period: event count, unique event names, visitors and visits, with a comparison against the preceding period. |\n| `umami_list_sessions` | read | Individual visitor sessions with browser, OS, device, country and region |\n| `umami_get_session_activity` | read | The ordered sequence of pageviews and events for one visitor session -- their path through the site. |\n| `umami_report_utm` | read | Breakdown of traffic by UTM parameters: source, medium, campaign, term and content |\n| `umami_report_funnel` | read | Step-by-step conversion funnel |\n| `umami_report_retention` | read | Cohort retention: of the visitors first seen on a given day, how many returned on each subsequent day. |\n| `umami_report_journey` | read | Most common ordered paths visitors take through the site, as sequences of pages with a count for each. |\n| `umami_report_goal` | read | Progress toward a single goal: how many visitors hit a given path or custom event. |\n| `umami_report_revenue` | read | Revenue over time from events carrying a revenue property, broken down by country, region, referrer and channel |\n| `umami_report_attribution` | read | Credits conversions to acquisition channels -- referrer, paid ads and UTM parameters -- under either a first-click or last-click model. |\n| `umami_list_users` | admin | List Umami user accounts with their roles |\n| `umami_create_user` | admin | Create a Umami user account |\n| `umami_delete_user` | destructive | PERMANENTLY DELETE a user account and the websites they own |\n| `umami_list_teams` | read | List teams and their members. |\n| `umami_create_team` | write | Create a team so websites can be shared between users. |\n| `umami_whoami` | read | Verify that this MCP server can reach the configured Umami instance and report which account it is authenticated as, plus the permission mode the server is running in |\n\n### Time ranges\n\nEvery analytics tool accepts a `period` shorthand \u2014 `24h`, `7d`, `30d`, `12m`, `today`,\n`yesterday` \u2014 instead of epoch milliseconds. Models are reliably good at \"last 30 days\" and\nunreliably good at timestamp arithmetic, and a miscalculated epoch returns data for the wrong\nwindow *without erroring*. Explicit `startAt`/`endAt` in epoch milliseconds still work and take\nprecedence.\n\n## Configuration\n\nSee [.env.example](.env.example) for every option. The essentials:\n\n| Variable | Default | Purpose |\n|---|---|---|\n| `UMAMI_URL` | *required* | Your Umami instance |\n| `UMAMI_USERNAME` / `UMAMI_PASSWORD` | | Self-hosted login |\n| `UMAMI_API_KEY` | | Umami Cloud alternative |\n| `UMAMI_MCP_MODE` | `read` | `read` / `write` / `admin` |\n| `UMAMI_MCP_ALLOW_DESTRUCTIVE` | `false` | Unlock delete and reset |\n| `UMAMI_MCP_TRANSPORT` | `stdio` | `stdio` or `http` |\n| `UMAMI_MCP_HOST` | `127.0.0.1` | HTTP bind address |\n| `UMAMI_MCP_PORT` | `3334` | HTTP port |\n| `UMAMI_MCP_ENV_FILE` | | Explicit path to a credentials file |\n\n## Recommended setup\n\nCreate a dedicated Umami account for the MCP server rather than reusing your admin login, and\ngive it only the websites it needs. Then, if the credential is ever exposed, the blast radius is\none bot account you can delete \u2014 not your administrator.\n\n## Compatibility\n\nVerified against **Umami 3.3.1** (self-hosted, PostgreSQL). Umami Cloud works via `UMAMI_API_KEY`.\nUmami v2 is not supported: the renamed metric types above mean v2 and v3 need different clients,\nand this one targets v3.\n\n## Development\n\n```bash\nnpm install\nnpm run build\nnpm test          # unit tests, no network required\n```\n\n`test/e2e.mjs` and `test/write-e2e.mjs` drive the built server through a real MCP client against\na live instance. The write test creates a throwaway website on a `.invalid` domain and deletes it\nagain; point it at a non-production instance.\n\n## Contributing\n\nIssues and pull requests welcome. Umami v3 exposes around 127 API routes and this server covers\nthe most useful ones \u2014 session replay, heatmaps, pixels, link tracking, boards and segments are\nall still unmapped. If you add tools, keep the tier and `destructive` flags honest, because the\nwhole safety model rests on them.\n\nIf the Umami team would like to adopt, fork or upstream this, please open an issue \u2014 that is the\noutcome this was built for.\n\n## License\n\nMIT \u00a9 M Asif Rahman\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-25T17:39:51.131Z",
+   "0.1.1": "2026-08-25T18:17:41.203Z",
+   "0.1.2": "2026-08-25T18:20:57.200Z",
+   "0.1.3": "2026-08-26T10:33:15.319Z",
+   "0.1.4": "2026-09-06T22:40:55.117Z",
+   "0.1.5": "2026-09-06T22:49:26.116Z",
+   "created": "2026-08-25T17:39:50.797Z",
+   "modified": "2026-09-06T22:49:26.408Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.0_1787679590998_0.0611368088355706"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:751c37e897d7]",
+     "name": "asif2bd"
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-bXRn0cDEtf7G97WQ+gT02zPqUuvp40Ttp4WHD4fB/xJKdbYpKCwIldeq2VDnoa8z5N6m6FEy41Obt2ARhbXjJg==",
+     "shasum": "d77c1b34c6c8de39a93ebbc10ffe116bd7b9e077",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA2Rxr8+Q8To4+ycOArCbwZ/l5cfgG4uG5pyPsEqkXuJAiAiwZcgRym7mbIrIiBMi41fOxwIkr+hqwa6vk34XQkZYA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.0.tgz",
+     "unpackedSize": 177409
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "e04666a354ed08cc5431d29d0e1cb3734e4298b7",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.1",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.1_1787681861060_0.286678159533321"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:814098c6-d799-4807-9dc5-f08fd0cac2e9"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@asif2bd%2fumami-mcp@0.1.1"
+     },
+     "fileCount": 54,
+     "integrity": "sha512-cjuiwkZ+0ckgbErENWBoKHElN+ikHoFnBkStYGRhklof5Eyn3k7hAKetl2QnRDWZJzizwWJ0D8oJIziE+VahWA==",
+     "shasum": "6e0934d57ddd2bec91868d9676d3a301a9d05afd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCPWuCvrJcr5E3nzjIDBfc7a6M45EsvX0VgfzA1PbKtdwIhAL+SlxUK867Jj5UpaTvgRMDGEg6VN/1G1GPAfGFN4oYg"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.1.tgz",
+     "unpackedSize": 179880
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "09ed2a312c5066665dce963ad7930d8fe5d337c8",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.2",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.2_1787682057031_0.10707454791586435"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:814098c6-d799-4807-9dc5-f08fd0cac2e9"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@asif2bd%2fumami-mcp@0.1.2"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-FI5DEjy8ZKHhGK1bFqZXc4xoQ4LIK0U2fpkXyF2SU5Cu1/Bj3IbvN3A3+GAfgggrIVBp/z1fNdr92jFAJt3ocQ==",
+     "shasum": "b65a4381367a500f60a68a16c802bb3823310444",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAGJMD2qFOqb5OxMhP/+c/hf0lD32Nl7Q1hMlP2+euirAiACNVFfx8GxjqEaRlijoxZKrd4aR67HBwDx85bX0cryng=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.2.tgz",
+     "unpackedSize": 189330
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "c40a36aae81d168b8f791e2d84522a492fa506b9",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.3",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.3_1787740395172_0.005473038119951257"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:814098c6-d799-4807-9dc5-f08fd0cac2e9"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@asif2bd%2fumami-mcp@0.1.3"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-IEHycMGnE4ItlRXiDQTlyBExjX76tbR/X3l0lhpBkxo1Uwdzf4058evIfnhL9aeLldYgy2Scqe1AYJO+6k4UgQ==",
+     "shasum": "c7e0da527bfed4fda32776bdb3f5dba4466be5da",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbCs/sP6YwugGIcjwc8WaT3CnJBejeWc8ngySQSHjWHAIgKFP1QFtlPmR8qrEhubsb5tVB+l7lv+7MaXJhjhBkq4w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.3.tgz",
+     "unpackedSize": 189894
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "f85358b271ce93fe13304acf1e765e287ef25227",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "mcpName": "io.github.Asif2BD/umami-mcp",
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.4",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.4_1788734455034_0.5089005479775979"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:814098c6-d799-4807-9dc5-f08fd0cac2e9"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@asif2bd%2fumami-mcp@0.1.4"
+     },
+     "fileCount": 60,
+     "integrity": "sha512-ZmUdIeJsrsSdmvrYEkdlc2mI7k3jANAtOAB6se/HMYXgZAm/LbbTWAVrwalnK1Mo+17FcOt8qQ/uwWRx1+TJ6g==",
+     "shasum": "a295e380dd95dbf69d19aab0e7667269eef826a5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEJzgpOqVI939sJakxp59ZZUh0TA+0qVkICEPsGX2R3qAiASjedMGWuMNSK+JyW49A2GgI9kBPrJn52+rt07sGl39w=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQChd98kIfgwhS5gautkKU3sJdIFlB57p6vifPOfo2gu0wIhAMafbArG3ZeyiirnfYnHX6PyQ0XnydDk/pIiCr15yAb+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.4.tgz",
+     "unpackedSize": 196798
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a849f790a8d4ccb37ca048c8eba26d3fc461d902",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "mcpName": "io.github.Asif2BD/umami-mcp",
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@asif2bd/umami-mcp@0.1.5",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/umami-mcp_0.1.5_1788734966021_0.8202891946711015"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:814098c6-d799-4807-9dc5-f08fd0cac2e9"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "name": "M Asif Rahman"
+    },
+    "bin": {
+     "umami-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/Asif2BD/umami-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.22.0",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol server for Umami Analytics. Self-hosted, credentials never leave your environment.",
+    "devDependencies": {
+     "@types/node": "^22.10.0",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@asif2bd%2fumami-mcp@0.1.5"
+     },
+     "fileCount": 60,
+     "integrity": "sha512-AO+qLO6qcAzJwAMus2zeEwuQVuQe06m46YmooAoUuOGsWDk7qRSiosJRoYN5BTsiOfcdNIcMAfVuUFdSLwSu1g==",
+     "shasum": "55065864ce504a8a3684ab69ad7462ac77c37840",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCowakBhNjTlmjsDllIbksQCFKnBCVo4L1cLBMGlRDFNAIhAIqnHHVIdJOMQDcVlPqJ7swSElD+s3MANBPbOW+PqrGu"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDbsX5joGr1w3STHGpNu2qi406PYeSwr3NuCybmi679vAiAW0/bs0faxnvmBYHINilqEl5o17CO60lxI8K89ebFDng=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@asif2bd/umami-mcp/-/umami-mcp-0.1.5.tgz",
+     "unpackedSize": 197232
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "a587d16f3eba15327fd4cda90c413c68eed79361",
+    "homepage": "https://github.com/Asif2BD/umami-mcp#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "umami",
+     "analytics",
+     "claude",
+     "ai"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:751c37e897d7]",
+      "name": "asif2bd"
+     }
+    ],
+    "mcpName": "io.github.Asif2BD/umami-mcp",
+    "name": "@asif2bd/umami-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/Asif2BD/umami-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "node --test test/*.test.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.5"
+   }
+  }
+ },
+ "name": "@asif2bd/umami-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@asif2bd%2Fumami-mcp"
+}

@@ -1,0 +1,457 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:8b27f1cfe2d8]",
+    "name": "bm1549"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.3.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@bm1549/remote-mcp-cloudflare",
+  "_rev": "4-ecc87f5d9e34577322f9d81820101601",
+  "author": {
+   "email": "[redacted-email:9000d48d2a07]",
+   "name": "Brian Marks"
+  },
+  "bugs": {
+   "url": "https://github.com/bm1549/remote-mcp-cloudflare/issues"
+  },
+  "description": "Library for wrapping a stdio MCP server in a Cloudflare Worker with Google OAuth + email allowlist. Exposes the server as a remote MCP endpoint for Claude Desktop / mobile.",
+  "dist-tags": {
+   "latest": "0.3.0"
+  },
+  "homepage": "https://github.com/bm1549/remote-mcp-cloudflare#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "cloudflare-workers",
+   "oauth",
+   "google-oauth",
+   "remote-mcp"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:8b27f1cfe2d8]",
+    "name": "bm1549"
+   }
+  ],
+  "name": "@bm1549/remote-mcp-cloudflare",
+  "readme": "# remote-mcp-cloudflare\n\nA small library for building a **remote MCP server on Cloudflare Workers** \u2014 the kind Claude Desktop or the Claude mobile app can connect to over Streamable HTTP.\n\nYou bring an `McpServer` from `@modelcontextprotocol/sdk`. This library wraps it in:\n\n- **OAuth 2.1 + dynamic client registration** (via `@cloudflare/workers-oauth-provider`)\n- A **Google OAuth consent flow** with an **email allowlist**, so only people you trust can complete authorization\n- A **Durable Object\u2013backed MCP transport** (via `agents/mcp`), so each issued token gets its own session\n\nThe result is a single `export default` you can deploy to Cloudflare. See [`lunchmoney-mcp-cloudflare`](https://github.com/bm1549/lunchmoney-mcp-cloudflare) for a real-world consumer.\n\n## Why this exists\n\nMost MCP servers ship as stdio binaries. Claude Desktop runs them locally; the mobile app cannot. Anthropic's \"remote MCP\" path expects a server that speaks Streamable HTTP transport with OAuth 2.1, which is significantly more involved than stdio. This library stitches together two Cloudflare libraries (`workers-oauth-provider` + `agents/mcp`) and adds a Google OAuth front-end so the server stays private to a known set of Gmail addresses.\n\n## Architecture\n\n```\n                              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n  Claude Desktop / mobile     \u2502  Cloudflare Worker           \u2502\n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba  \u2502   \u251c\u2500 /register               \u2502\n  (Streamable HTTP + OAuth)   \u2502   \u251c\u2500 /authorize  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25ba  \u2502 \u2500\u2500\u25ba Google\n                              \u2502   \u251c\u2500 /authorize/callback \u25c4\u2500\u2500   \u2502 \u25c4\u2500\u2500 consent\n                              \u2502   \u251c\u2500 /token                  \u2502\n                              \u2502   \u2514\u2500 /mcp  (auth-gated)      \u2502\n                              \u2502       \u2502                      \u2502\n                              \u2502       \u25bc                      \u2502\n                              \u2502   Durable Object             \u2502\n                              \u2502     \u251c\u2500 McpAgent (transport)  \u2502\n                              \u2502     \u2514\u2500 McpServer (your tools)\u2502\n                              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n`workers-oauth-provider` handles dynamic client registration, code/token exchange, and bearer-token validation on `/mcp`. The library's `defaultHandler` implements the Google consent flow: browser \u2192 Google \u2192 email allowlist \u2192 `completeAuthorization`. The Durable Object is keyed by the issued token; on each new token, `init()` runs once and constructs your underlying MCP server.\n\n## Install\n\n```sh\nnpm install @bm1549/remote-mcp-cloudflare\nnpm install @modelcontextprotocol/sdk agents @cloudflare/workers-oauth-provider\n```\n\nPeer deps: `@modelcontextprotocol/sdk`. The other two are direct deps of this package but will normally already be in your worker's `package.json`.\n\n## Usage\n\nYour consumer worker is two files: `wrangler.jsonc` and `src/worker.ts`.\n\n```ts\n// src/worker.ts\nimport { McpAgent } from \"agents/mcp\";\nimport { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\nimport { createOAuthWorker, type BaseEnv } from \"@bm1549/remote-mcp-cloudflare\";\n\nimport { createServer } from \"@your-org/your-mcp-server/server\";\nimport { initializeConfig } from \"@your-org/your-mcp-server/config\";\n\ninterface WorkerEnv extends BaseEnv {\n    YOUR_API_TOKEN: string;\n}\n\nexport class YourMCP extends McpAgent<WorkerEnv> {\n    server!: McpServer;\n    async init() {\n        initializeConfig(this.env.YOUR_API_TOKEN);\n        this.server = createServer(\"1.0.0\");\n    }\n}\n\nexport default createOAuthWorker(YourMCP);\n```\n\nA full template lives at [`wrangler.example.jsonc`](./wrangler.example.jsonc) \u2014 copy it into your consumer repo and fill in the placeholders. Minimal shape:\n\n```jsonc\n// wrangler.jsonc\n{\n    \"name\": \"your-mcp\",\n    \"main\": \"src/worker.ts\",\n    \"compatibility_date\": \"2025-03-10\",\n    \"compatibility_flags\": [\"nodejs_compat\"],\n    \"migrations\": [{ \"tag\": \"v1\", \"new_sqlite_classes\": [\"YourMCP\"] }],\n    \"durable_objects\": {\n        \"bindings\": [{ \"name\": \"MCP_OBJECT\", \"class_name\": \"YourMCP\" }]\n    },\n    \"kv_namespaces\": [\n        { \"binding\": \"OAUTH_KV\", \"id\": \"REPLACE_WITH_YOUR_KV_ID\" }\n    ],\n    \"ratelimits\": [\n        {\n            \"name\": \"REGISTER_LIMITER\",\n            \"namespace_id\": \"1001\",\n            \"simple\": { \"limit\": 10, \"period\": 60 }\n        }\n    ],\n    \"observability\": { \"enabled\": true }\n}\n```\n\nThe DO class name (`YourMCP`) must match between the exported class, the migration entry, and the durable_objects binding.\n\n`REGISTER_LIMITER` is optional. If present, `createOAuthWorker` rate-limits `POST /register` per `cf-connecting-ip` before delegating to the OAuth provider. Without it, `/register` is unauthenticated and unbounded (per the MCP spec).\n\n### Constraints on the wrapped MCP server\n\n- It should expose a `createServer(version: string)` factory that returns an `McpServer`.\n- Anything that needs to happen at construction time (token validation, config singletons, etc.) should run inside `init()` so it's deterministic per Durable Object instance.\n- Avoid module-level `process.env` reads inside the wrapped server \u2014 those don't run reliably in Worker isolates. Pass values in via `this.env`.\n\n### Required secrets\n\nEach consumer worker must set these:\n\n| Secret                  | What it's for                                                       |\n| ----------------------- | ------------------------------------------------------------------- |\n| `GOOGLE_CLIENT_ID`      | Google OAuth Web Client ID                                          |\n| `GOOGLE_CLIENT_SECRET`  | Google OAuth Web Client secret                                      |\n| `ALLOWED_EMAILS`        | Comma-separated allowlist of Gmail addresses                        |\n| `STATE_SECRET`          | Random secret used to HMAC-sign the OAuth `state` (generate: `openssl rand -hex 32`) |\n\nPlus whatever secrets your wrapped MCP server needs.\n\n### Routes\n\nBy default the library mounts:\n\n| Route                  | Purpose                                  |\n| ---------------------- | ---------------------------------------- |\n| `GET /`                | Plain-text smoke test                    |\n| `GET /authorize`       | Starts the Google OAuth flow             |\n| `GET /authorize/callback` | Completes the flow, issues OAuth grant |\n| `POST /register`       | Dynamic Client Registration (MCP spec)   |\n| `POST /token`          | OAuth token endpoint                     |\n| `* /mcp`               | The bearer-gated MCP endpoint            |\n\nPass overrides to `createOAuthWorker(AgentClass, { apiRoute, authorizeEndpoint, ... })` if you need to relocate any of them.\n\n## Multi-tenant servers\n\nSingle-tenant (the example above) means the worker holds one shared API token and uses `ALLOWED_EMAILS` to gate access. For multi-tenant servers \u2014 where each end-user supplies their own credentials \u2014 `createOAuthWorker` accepts these additional options:\n\n| Option              | Purpose                                                                                  |\n| ------------------- | ---------------------------------------------------------------------------------------- |\n| `userIdSource`      | `\"email\"` (default) or `\"sub\"`. Picks which Google identifier becomes the OAuth `userId`. |\n| `resolveUser`       | Replaces the default allowlist check. Decides whether to complete, redirect, or reject.   |\n| `routes`            | Map of `pathname -> handler` for custom routes (e.g. `/setup`).                          |\n| `registerPolicy`    | Tightens Dynamic Client Registration: PKCE, redirect schemes, IP hosts, max URIs.        |\n\nThe library also exports three helpers consumers use to drive a deferred-completion flow:\n\n```ts\nimport {\n    signResumeToken,\n    verifyResumeToken,\n    resumeAuthorization,\n} from \"@bm1549/remote-mcp-cloudflare\";\n```\n\n`signResumeToken(env, payload)` produces a 30-minute HMAC-signed opaque token. `verifyResumeToken(env, token)` returns the payload or `null`. `resumeAuthorization(env, oauthReqInfo, userId, props)` is a thin wrapper around `OAUTH_PROVIDER.completeAuthorization` so custom routes don't need to import OAuth provider types directly.\n\n### Example: per-user token via `/setup`\n\n```ts\nimport { McpAgent } from \"agents/mcp\";\nimport { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\nimport {\n    createOAuthWorker,\n    signResumeToken,\n    verifyResumeToken,\n    resumeAuthorization,\n    type BaseEnv,\n    type GoogleUserInfo,\n} from \"@bm1549/remote-mcp-cloudflare\";\n\ninterface WorkerEnv extends BaseEnv {\n    TOKENS_KV: KVNamespace; // per-user token storage\n}\n\nexport class YourMCP extends McpAgent<WorkerEnv> {\n    server!: McpServer;\n    async init() {\n        // `props.userToken` is populated by resumeAuthorization below.\n        const token = (this.props as { userToken?: string }).userToken;\n        this.server = createServer(\"1.0.0\", token);\n    }\n}\n\nexport default createOAuthWorker(YourMCP, {\n    userIdSource: \"sub\",\n    registerPolicy: {\n        requirePkce: true,\n        allowedRedirectSchemes: [\"https\", \"http-localhost\"],\n        rejectIpHosts: true,\n        maxRedirectUris: 5,\n    },\n    async resolveUser(userinfo: GoogleUserInfo, env, _request, oauthReqInfo) {\n        if (!userinfo.email_verified || !userinfo.sub) {\n            return { reject: \"Email not verified\" };\n        }\n        const existing = await (env as WorkerEnv).TOKENS_KV.get(userinfo.sub);\n        if (existing) {\n            return { userId: userinfo.sub, props: { userToken: existing } };\n        }\n        // First-time user: bounce to /setup with a signed resume token\n        // carrying the parsed OAuth request so we can finish later.\n        const rt = await signResumeToken(env, {\n            sub: userinfo.sub,\n            oauthReqInfo,\n        });\n        return { redirect: \"/setup\", resumeToken: rt };\n    },\n    routes: {\n        \"/setup\": async (request, env, _ctx) => {\n            const url = new URL(request.url);\n            const rt = url.searchParams.get(\"rt\");\n            if (!rt) return new Response(\"Missing rt\", { status: 400 });\n            const data = await verifyResumeToken<{\n                sub: string;\n                oauthReqInfo: unknown;\n            }>(env, rt);\n            if (!data) return new Response(\"Expired\", { status: 400 });\n\n            if (request.method === \"GET\") {\n                return new Response(\n                    `<form method=\"POST\"><input name=\"token\"/><input type=\"hidden\" name=\"rt\" value=\"${rt}\"/><button>Save</button></form>`,\n                    { headers: { \"content-type\": \"text/html\" } },\n                );\n            }\n            const form = await request.formData();\n            const token = String(form.get(\"token\") ?? \"\");\n            await (env as WorkerEnv).TOKENS_KV.put(data.sub, token);\n            const { redirectTo } = await resumeAuthorization(\n                env,\n                data.oauthReqInfo,\n                data.sub,\n                { userToken: token },\n            );\n            return Response.redirect(redirectTo, 302);\n        },\n    },\n});\n```\n\nNote: when consumer code stores per-user credentials in `props`, they end up in the OAuth grant in KV. That's a deliberate tradeoff for multi-tenant \u2014 the single-tenant example above keeps `props: {}` because the DO reads the shared token from `env`.\n\n### `registerPolicy` semantics\n\n- `requirePkce`: enforced at `/authorize` (rejects requests with no `code_challenge`), not at `/register`. DCR doesn't carry PKCE parameters.\n- `allowedRedirectSchemes`: scheme strings without trailing colons (e.g. `[\"https\"]`). The literal `\"http-localhost\"` is a marker permitting `http://localhost` and `http://127.0.0.1`.\n- `rejectIpHosts`: rejects raw IPv4 / IPv6 literal hostnames. Loopback (`127.0.0.1`, `[::1]`) is still allowed when `\"http-localhost\"` is in `allowedRedirectSchemes`.\n- `maxRedirectUris`: simple array-length cap.\n\nAll four default to \"no enforcement\", so omitting `registerPolicy` reproduces 0.1.x behavior exactly.\n\n## Security model\n\nThree layers gate access:\n\n1. **Google's \"Testing\" mode.** Keep your OAuth app in Testing \u2014 only listed test users can complete consent. Production mode removes this gate for `openid email` scopes.\n2. **`ALLOWED_EMAILS` allowlist.** Even if Google approves, the worker rejects emails that aren't on this list. `email_verified` is required.\n3. **HMAC-signed OAuth `state`.** The `state` carries the parsed `oauthReqInfo` + a 10-minute expiration, signed with `STATE_SECRET`. This prevents an attacker from crafting a malicious `/authorize` URL with their own `client_id` / `redirect_uri` (the classic OAuth CSRF).\n\nOther notes:\n\n- **OAuth grants in KV carry no secrets.** The Durable Object reads sensitive credentials from `this.env` directly, so `completeAuthorization` is called with `props: {}` and KV never sees your wrapped server's tokens.\n- **Dynamic Client Registration is unauthenticated** at `/register`, per the MCP spec. Owning a `client_id` alone grants nothing \u2014 both gates above still apply.\n- **`/register` rate limiting is opt-in** via the `REGISTER_LIMITER` binding. Recommended for any publicly addressable worker to prevent KV-quota abuse. Other routes are not rate-limited by this library \u2014 add Cloudflare dashboard rules if you need broader coverage.\n- **All MCP tools are equally accessible** to any authorized session. There's no per-tool ACL. If your wrapped server exposes destructive operations, gate them inside the tool's handler.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/bm1549/remote-mcp-cloudflare.git"
+  },
+  "time": {
+   "0.1.0": "2026-05-19T10:12:43.153Z",
+   "0.1.1": "2026-05-19T10:20:37.960Z",
+   "0.2.0": "2026-05-21T01:33:14.576Z",
+   "0.3.0": "2026-07-30T02:24:02.462Z",
+   "created": "2026-05-19T10:12:42.876Z",
+   "modified": "2026-07-30T02:24:02.814Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@bm1549/remote-mcp-cloudflare@0.1.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/remote-mcp-cloudflare_0.1.0_1779185563003_0.6114247799924666"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8b27f1cfe2d8]",
+     "name": "bm1549"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:9000d48d2a07]",
+     "name": "Brian Marks"
+    },
+    "bugs": {
+     "url": "https://github.com/bm1549/remote-mcp-cloudflare/issues"
+    },
+    "dependencies": {
+     "@cloudflare/workers-oauth-provider": "^0.4.0",
+     "agents": "^0.12.3"
+    },
+    "description": "Library for wrapping a stdio MCP server in a Cloudflare Worker with Google OAuth + email allowlist. Exposes the server as a remote MCP endpoint for Claude Desktop / mobile.",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.20250404.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-SaK7yPQPnU7tIi15C6lmb7YBzTDBboljrKuR54rRMvc/2OT1Urv5dT7wv8F2FqLYU+45Grl6yV0C6siD9B0iog==",
+     "shasum": "58402e9e8b31d8dd3c15d2268459ac8dffbcf212",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDO+Ogv6Qmh0TRnlBsfJVQVNee6fsPH71AyFhAtSeguoAIgN95oFrEF7wQz5Y+pT73QODZiE9QHwLBvVBH70nQ5UfE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@bm1549/remote-mcp-cloudflare/-/remote-mcp-cloudflare-0.1.0.tgz",
+     "unpackedSize": 37539
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "22fe680dbfa8a5f90d39418c1dbeda10674c6d82",
+    "homepage": "https://github.com/bm1549/remote-mcp-cloudflare#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "cloudflare-workers",
+     "oauth",
+     "google-oauth",
+     "remote-mcp"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8b27f1cfe2d8]",
+      "name": "bm1549"
+     }
+    ],
+    "name": "@bm1549/remote-mcp-cloudflare",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/bm1549/remote-mcp-cloudflare.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "tsc",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@bm1549/remote-mcp-cloudflare@0.1.1",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/remote-mcp-cloudflare_0.1.1_1779186037815_0.4404720120275303"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7a2a2246-7dd8-483e-a915-e5be482d7b92"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "email": "[redacted-email:9000d48d2a07]",
+     "name": "Brian Marks"
+    },
+    "bugs": {
+     "url": "https://github.com/bm1549/remote-mcp-cloudflare/issues"
+    },
+    "dependencies": {
+     "@cloudflare/workers-oauth-provider": "^0.4.0",
+     "agents": "^0.12.3"
+    },
+    "description": "Library for wrapping a stdio MCP server in a Cloudflare Worker with Google OAuth + email allowlist. Exposes the server as a remote MCP endpoint for Claude Desktop / mobile.",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.20250404.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@bm1549%2fremote-mcp-cloudflare@0.1.1"
+     },
+     "fileCount": 14,
+     "integrity": "sha512-KAhIW9+3Rx5GvulNE8vOBAr209I+PSLJgRYbqljiHEG3IAgEiQj/H28jn+K24hBqxSpkDg84gMD3xCb8U+q3tw==",
+     "shasum": "a9779352ec01e0ddef8bd31e075af6bf8e66387b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID+rb5kWRElxQrg6CbG9GeVMzxsZbp2YGOboe7h4xeVyAiEAnhKgiruqkK937BR+uGTCT61teVtbgIgJfe2ozSasdsc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@bm1549/remote-mcp-cloudflare/-/remote-mcp-cloudflare-0.1.1.tgz",
+     "unpackedSize": 37539
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "189d020e32517c473291b681bb0a091b5e962bf2",
+    "homepage": "https://github.com/bm1549/remote-mcp-cloudflare#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "cloudflare-workers",
+     "oauth",
+     "google-oauth",
+     "remote-mcp"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8b27f1cfe2d8]",
+      "name": "bm1549"
+     }
+    ],
+    "name": "@bm1549/remote-mcp-cloudflare",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/bm1549/remote-mcp-cloudflare.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "tsc",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@bm1549/remote-mcp-cloudflare@0.2.0",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/remote-mcp-cloudflare_0.2.0_1779327194410_0.5855935562712298"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7a2a2246-7dd8-483e-a915-e5be482d7b92"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "email": "[redacted-email:9000d48d2a07]",
+     "name": "Brian Marks"
+    },
+    "bugs": {
+     "url": "https://github.com/bm1549/remote-mcp-cloudflare/issues"
+    },
+    "dependencies": {
+     "@cloudflare/workers-oauth-provider": "^0.4.0",
+     "agents": "^0.12.3"
+    },
+    "description": "Library for wrapping a stdio MCP server in a Cloudflare Worker with Google OAuth + email allowlist. Exposes the server as a remote MCP endpoint for Claude Desktop / mobile.",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.20250404.0",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@bm1549%2fremote-mcp-cloudflare@0.2.0"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-dQAcyVBgLMGVQYZWV0+Z7yUZWF7lzvBy5HSlghxDE0LOuP81Mo15qtDBqNAmif5d22gzpTRlYMtpu+O9QYke+g==",
+     "shasum": "cf039391575ea6287cdbd1b484346c9f20e21fe9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFOYgjlUamToMUShU+MUR5Qp2y3KAc4uPrAnQB3j7A7TAiEA4tUw9iNfGNqE2RW8HVUQRvtaT5VsFNRLB8Ixuw4PLSM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@bm1549/remote-mcp-cloudflare/-/remote-mcp-cloudflare-0.2.0.tgz",
+     "unpackedSize": 81734
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "bd0f8d7c206877894566dd1071ca9e853c7e459b",
+    "homepage": "https://github.com/bm1549/remote-mcp-cloudflare#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "cloudflare-workers",
+     "oauth",
+     "google-oauth",
+     "remote-mcp"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8b27f1cfe2d8]",
+      "name": "bm1549"
+     }
+    ],
+    "name": "@bm1549/remote-mcp-cloudflare",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/bm1549/remote-mcp-cloudflare.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "tsc",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@bm1549/remote-mcp-cloudflare@0.3.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/remote-mcp-cloudflare_0.3.0_1785378242301_0.4082418591268402"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7a2a2246-7dd8-483e-a915-e5be482d7b92"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:9000d48d2a07]",
+     "name": "Brian Marks"
+    },
+    "bugs": {
+     "url": "https://github.com/bm1549/remote-mcp-cloudflare/issues"
+    },
+    "dependencies": {
+     "@cloudflare/workers-oauth-provider": "^0.8.3"
+    },
+    "description": "Library for wrapping a stdio MCP server in a Cloudflare Worker with Google OAuth + email allowlist. Exposes the server as a remote MCP endpoint for Claude Desktop / mobile.",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.20250404.0",
+     "typescript": "^5.4.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@bm1549%2fremote-mcp-cloudflare@0.3.0"
+     },
+     "fileCount": 24,
+     "integrity": "sha512-a8Nmf397a//6iV/lC1FzH64fedrQLVmP1hvwRBAblMgL4SvGMzvp8mws1kfIx23GndcjvYSQOHfIzYJ/joGSiA==",
+     "shasum": "4942d6a7fd5d1a1b221897337655d6bcc9024d2c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFNaC82sDlOD46E1e0Hy9Us9KuprGeE5wMfStVKWvXa6AiBKMzp8LxVamoYpX3dP30f7PAP2dywrWSC2ZxA5Mhr9lg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@bm1549/remote-mcp-cloudflare/-/remote-mcp-cloudflare-0.3.0.tgz",
+     "unpackedSize": 85752
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     },
+     "./package.json": "./package.json"
+    },
+    "gitHead": "663631a636f927f3b6422a7b7d8a3ab8d1cc98dd",
+    "homepage": "https://github.com/bm1549/remote-mcp-cloudflare#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "cloudflare-workers",
+     "oauth",
+     "google-oauth",
+     "remote-mcp"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:8b27f1cfe2d8]",
+      "name": "bm1549"
+     }
+    ],
+    "name": "@bm1549/remote-mcp-cloudflare",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/bm1549/remote-mcp-cloudflare.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "tsc",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0"
+   }
+  }
+ },
+ "name": "@bm1549/remote-mcp-cloudflare",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@bm1549%2Fremote-mcp-cloudflare"
+}

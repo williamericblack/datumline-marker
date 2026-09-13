@@ -1,0 +1,550 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.4.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0",
+   "0.3.0",
+   "0.3.1",
+   "0.4.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-x",
+  "_rev": "4-1c18b538fbbb39368d6df265529a401b",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-x/issues"
+  },
+  "description": "Model Context Protocol server for the X (Twitter) API v2",
+  "dist-tags": {
+   "latest": "0.4.0"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-x#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "twitter",
+   "twitter-api",
+   "x"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-x",
+  "readme": "# @mgcrea/mcp-x\n\n[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-x.svg)](https://www.npmjs.com/package/@mgcrea/mcp-x)\n[![ci](https://github.com/mgcrea/mcp-x/actions/workflows/ci.yml/badge.svg)](https://github.com/mgcrea/mcp-x/actions/workflows/ci.yml)\n[![license](https://img.shields.io/npm/l/@mgcrea/mcp-x.svg)](./LICENSE)\n\nModel Context Protocol server for the **X (Twitter) API v2** \u2014 built for reading and searching posts.\n\n> **Unofficial.** Not affiliated with, endorsed by, or supported by X Corp.\n\n## Features\n\n- **A serious reader.** Post lookup, recent and full-archive search, profiles, user timelines, thread reconstruction, bookmarks and your home timeline \u2014 with X's query syntax exposed properly.\n- **Readable output.** X returns posts whose author, quoted post and real URLs live in a separate `includes` sidecar. Every tool here resolves that first, so posts arrive with the handle inline, t.co links expanded, and retweets showing the original text.\n- **Free posting.** `x_compose_post` returns an [`x.com/intent/tweet`](https://docs.x.com/x-for-websites/post-button/guides/web-intent) URL you click. No credentials, no API quota, no cost \u2014 and nothing publishes without a human click.\n- **X Articles, kept in sync with their source.** Read any Article in full, check a published one against the Markdown it came from, and \u2014 behind the write flags \u2014 draft and publish new ones from Markdown, images included. X's API cannot edit a published Article, so `x_compare_article` tells you exactly what to change in X's editor. See [Articles](#articles).\n- **Cost-aware by design.** X is pay-per-use. Every read reports what it cost, repeat reads inside a UTC day are free, and a budget ceiling stops a runaway loop before the request goes out.\n- **Ads, when you ask for it.** Campaigns, line items, targeting, audiences and performance analytics through the [X Ads API](https://docs.x.com/x-ads-api/introduction). Needs its own approval from X and is off unless configured; campaign writes are a second switch again, and anything created starts PAUSED.\n- **Official API only.** No cookie scraping, no password automation, nothing that risks your account.\n\n## Cost \u2014 read this first\n\n**X removed its tiered pricing on 2026-02-06. There is no free tier for new developers**, and much of the ecosystem's documentation still says otherwise. Current list prices:\n\n| Action                                            | Price     |\n| ------------------------------------------------- | --------- |\n| Read a post                                       | ~$0.005   |\n| Read a user profile                               | ~$0.010   |\n| Read **your own** data (bookmarks, home timeline) | ~$0.001   |\n| Create a post                                     | ~$0.015   |\n| Create a post **containing a URL**                | ~$0.200   |\n| Monthly read cap                                  | 2,000,000 |\n\nCredits are prepurchased in the developer console; at zero credits, requests are blocked. Three things follow, and they shape the whole server:\n\n1. **`maxResults` defaults to 10, not 50.** A 100-result search is about $0.50.\n2. **Repeat reads are free.** X deduplicates per resource id within a UTC calendar day, so the built-in cache mirrors that exactly \u2014 a cache hit is genuinely free, not merely fast.\n3. **Posting should not cost anything.** `x_compose_post` is the default write path and uses a web intent. The paid `x_create_post` stays unregistered unless you opt in twice (`X_ALLOW_WRITES=1` **and** `X_WRITE_BACKEND=api`).\n\nRun `x_count_recent` before a broad search \u2014 it returns totals without reading any posts, so it costs nothing and tells you what the search would cost. `x_build_search_query` is likewise free and local.\n\n> Prices are X's published list rates, transcribed 2026-07-19. Override them via the config file's `pricing` key, or `X_PRICING` as a JSON object, if they change. `x_get_usage_report` estimates locally and is not authoritative \u2014 the developer portal is.\n\n**Ads is billed elsewhere.** Ads API calls are not metered by X's pay-per-use read pricing, so they cost nothing and never appear in `x_get_usage_report`. What they manage does: a campaign spends your advertising budget, on X's invoice rather than the API's, and no tool here can see that number. Treat `x_get_usage_report` as silent on ads rather than as reporting zero.\n\n**Articles are unpriced.** X publishes no rate for its Articles or media upload endpoints (checked 2026-09-12), so creating a draft, uploading its images and publishing it are not estimated and do not appear in `x_get_usage_report`. Reading an Article is an ordinary post read.\n\n## Security\n\n- **Supply chain.** Two runtime dependencies: the MCP SDK and zod. The HTTP layer is hand-rolled `fetch` \u2014 no HTTP library, no logger, nothing else on the tree.\n- **Verified builds.** npm releases carry [provenance](https://docs.npmjs.com/generating-provenance-statements) via OIDC trusted publishing; container images are multi-arch, ship an SBOM, and are signed with [cosign](https://docs.sigstore.dev/cosign/signing/overview/).\n- **Your credentials.** Read from the environment or a config file you control, sent only to `api.x.com` (and `ads-api.x.com` when ads is enabled), never logged. The one other host ever contacted is `ton.twimg.com`, where X serves finished analytics reports \u2014 those downloads carry no credential at all, and any other host in a report URL is refused. The **one** file this server writes is `tokens.json` (mode 600), and only if you use OAuth \u2014 it has to persist a rotating refresh token. Everything else is read-only. Every request has a 30-second deadline, and a rate-limit window longer than 30 seconds is reported rather than waited out.\n- **Blast radius.** Paid writes are off by default and _unregistered_ rather than refused, so an agent cannot call what does not exist. The free compose path never publishes without a human clicking Post. Ads writes are a separate switch on the same principle, campaigns and line items are created `PAUSED` unless a call explicitly asks otherwise, and budgets are taken in major currency units \u2014 the \u00d71,000,000 mistake is not expressible.\n- **Local files.** The Article tools read the Markdown file and images you name, and nothing else: a `.md`, `.markdown` or `.mdx` file by absolute path, and images only when their content \u2014 not their name \u2014 is a PNG, JPEG or WebP under 5 MB. A key file renamed `cover.png` is refused before any request. Only `x_create_article_draft` sends what it reads to X.\n- **No scraping.** This server never touches session cookies or your password. Tools that do are a ban risk regardless of how they are marketed.\n\n## Configure\n\n**The server starts with no configuration at all.** In that state it registers only the tools that need no credentials \u2014 `x_compose_post`, `x_validate_post`, `x_validate_article`, `x_build_search_query` and `x_get_auth_status` \u2014 and `x_get_auth_status` tells you exactly what to set for the rest. It never refuses to start over missing credentials, because an MCP server that exits shows up in the client as a bare `Connection closed` with the explanation swallowed. The same goes for a contradiction between flags (`X_ADS_ENABLED` without a client id, say): the flag is switched off, and the reason is printed at startup and returned by `x_get_auth_status` under `warnings`.\n\nTo read anything, one variable is required:\n\n```bash\nexport X_BEARER_TOKEN=\"...\"   # console.x.com \u2192 your app \u2192 Keys and Tokens\n```\n\nThat covers every public read: lookup, search, profiles, timelines \u2014 no OAuth needed. See [Getting credentials](#getting-credentials) below, and [.env.example](./.env.example) for the rest. The ones worth knowing by name:\n\n| Variable                | Meaning                                                                                                                                                |\n| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |\n| `X_BEARER_TOKEN`        | App-only Bearer token. Every public read.                                                                                                              |\n| `X_CLIENT_ID`           | OAuth 2.0 client id. Bookmarks, home timeline, API writes, Ads.                                                                                        |\n| `X_MONTHLY_BUDGET_USD`  | Spend ceiling for this process. A read whose estimate would cross it is refused before the request goes out.                                           |\n| `X_DEFAULT_MAX_RESULTS` | Default page size for every read tool (10).                                                                                                            |\n| `X_PRICING`             | JSON object overriding the price table, for deployments with no config file.                                                                           |\n| `X_ALLOW_WRITES`        | With `X_WRITE_BACKEND=api`, registers the paid `x_create_post` / `x_delete_post` and the Article draft and publish tools, and lets `x_request` mutate. |\n| `X_ENABLE_FULL_ARCHIVE` | Registers `x_search_all`.                                                                                                                              |\n| `X_ADS_ENABLED`         | Registers the Ads API tools (needs `X_CLIENT_ID`).                                                                                                     |\n| `X_ADS_ALLOW_WRITES`    | Registers the campaign-mutating Ads tools.                                                                                                             |\n| `X_ADS_ACCOUNT_ID`      | The ads account to act on. Optional with exactly one account; with several, a call without `accountId` is refused.                                     |\n| `X_ADS_BASE_URL`        | Point at the sandbox (see below) before touching a live account.                                                                                       |\n\n### Getting credentials\n\nCreate an app at **[console.x.com](https://console.x.com)** \u2014 this replaced the old `developer.x.com` portal, and the legacy URL is a common dead end. Sign in, accept the Developer Agreement, then **New App**.\n\nSettings that matter:\n\n| Setting                   | Value                            | Why                                                                                                                                                                    |\n| ------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| **Type of App**           | **Native App**                   | Native App and Single Page App are _public_ clients \u2014 PKCE, no client secret. Web App and Automated App are confidential and issue a secret this server does not want. |\n| **App permissions**       | Read _(or Read and write)_       | Read covers search and bookmarks. Changing this later forces every user to re-authorize.                                                                               |\n| **Callback URI**          | `http://127.0.0.1:8723/callback` | Must match byte for byte. X's docs say to use `127.0.0.1`, not `localhost`, for local development.                                                                     |\n| **Package / Environment** | **Pay-per-use / Production**     | See the warning below.                                                                                                                                                 |\n\nBoth credentials appear on the app's **Keys and Tokens** screen: the **Bearer Token** and the **Client ID**.\n\n> **The enrollment trap.** An app left in the legacy Free package or the Development environment logs in successfully and then fails _every_ user-context call with `403 client-not-enrolled`. If that happens, open the app at console.x.com and move it to Pay-per-use / Production. X's own `xurl` CLI documents this as the fix.\n\nCreating an app and getting credentials appears to be free; **making calls is not** \u2014 there has been no free tier since 2026-02-06, so you need prepurchased credits before any read succeeds.\n\n**OAuth 2.0** is needed only for bookmarks, your home timeline, and API writes:\n\n```bash\nexport X_CLIENT_ID=\"...\"      # the Client ID of a Native App (public PKCE client)\nnpx @mgcrea/mcp-x login       # opens a browser, stores a refresh token (mode 600)\n```\n\nOr, from inside a client, call `x_login`. Under [Bastion](https://github.com/mgcrea/bastion) the profile editor's **Sign in with X** button does the same through the server's own tools \u2014 Bastion assigns the callback port per profile, so read the URL from `x_get_auth_status` and register that exact one with the app.\n\n### Ads API access\n\nThe Ads API is a separate product behind a separate approval, even though it uses the same OAuth 2.0 login. Three steps, in order:\n\n1. At [console.x.com](https://console.x.com), open the app \u2192 **Project Access** \u2192 **MANAGE** \u2192 select **Ads Project**. This attaches Ads API access to the app id.\n2. Request Ads API access for that app using X's **Ads API Access Form**. Standard Access covers campaigns, creatives, audiences and analytics.\n3. Once approved, run `x-mcp login` **again**, then set `X_ADS_ENABLED=1`.\n\n> **The regenerate trap.** A token minted _before_ your Ads API approval does not carry the entitlement. It logs in fine, reads posts fine, and then fails every ads call \u2014 which reads as a scope problem and is not one. If ads calls fail right after approval, log in again before debugging anything else.\n\nYour X user also needs a role on at least one ads account, granted in [ads.x.com](https://ads.x.com) rather than the developer console \u2014 the API only ever sees accounts you can already see there.\n\nExercise the write tools against the free sandbox first:\n\n```bash\nexport X_ADS_ENABLED=1\nexport X_ADS_ALLOW_WRITES=1\nexport X_ADS_BASE_URL=https://ads-api-sandbox.twitter.com   # note: not .x.com, which does not resolve\n```\n\nCampaigns and line items are created `PAUSED` unless a call passes `activateImmediately: true`, and every budget is given in major currency units \u2014 `50` means 50.00, never 50000000.\n\n### Config file\n\nInstead of environment variables, use `~/.config/x/config.json` (camelCase keys, the env names minus the `X_` prefix). Environment wins **per field**, so a one-off `X_ALLOW_WRITES=0` still overrides a file that says `true`. Unknown keys are an error rather than silently ignored.\n\n```json\n{\n  \"bearerToken\": \"...\",\n  \"defaultMaxResults\": 10,\n  \"monthlyBudgetUsd\": 25\n}\n```\n\n## Quick start\n\n**A. npx**\n\n```json\n{\n  \"mcpServers\": {\n    \"x\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@mgcrea/mcp-x\"],\n      \"env\": { \"X_BEARER_TOKEN\": \"...\" }\n    }\n  }\n}\n```\n\n**B. Docker (stdio)**\n\n```json\n{\n  \"mcpServers\": {\n    \"x\": {\n      \"command\": \"docker\",\n      \"args\": [\"run\", \"--rm\", \"-i\", \"-e\", \"X_BEARER_TOKEN\", \"ghcr.io/mgcrea/mcp-x\"],\n      \"env\": { \"X_BEARER_TOKEN\": \"...\" }\n    }\n  }\n}\n```\n\n**C. From source**\n\n```bash\npnpm install && pnpm build\nX_BEARER_TOKEN=... node dist/cli.js\n```\n\n**Inspect the tools**\n\n```bash\nX_BEARER_TOKEN=... npx @modelcontextprotocol/inspector node dist/cli.js\n```\n\n## Tools\n\nWrites are marked `*`, and `\u2020` means a `confirm: true` argument is required. Tools that do not apply to your configuration are not registered at all.\n\n**Posts** \u2014 `x_get_post` \u00b7 `x_get_posts` (batch up to 100 in one request) \u00b7 `x_get_thread` \u00b7 `x_get_quotes`\n\n**Users** \u2014 `x_get_user` \u00b7 `x_get_users` \u00b7 `x_get_user_posts` \u00b7 `x_get_user_mentions`\n\n**Search** \u2014 `x_search_recent` \u00b7 `x_count_recent` (free \u2014 totals only) \u00b7 `x_build_search_query` (free \u2014 local) \u00b7 `x_search_all` _(needs `X_ENABLE_FULL_ARCHIVE`)_\n\n**Compose** \u2014 `x_validate_post` (free, local) \u00b7 `x_compose_post` (free, web intent) \u00b7 `x_create_post` \\*\u2020 \u00b7 `x_delete_post` \\*\u2020 _(the last two need `X_ALLOW_WRITES=1` **and** `X_WRITE_BACKEND=api`)_\n\n**Articles** \u2014 `x_get_article` \u00b7 `x_compare_article` \u00b7 `x_validate_article` (free, local) \u00b7 `x_create_article_draft` \\*\u2020 \u00b7 `x_publish_article` \\*\u2020 _(the last two need `X_ALLOW_WRITES=1` **and** `X_WRITE_BACKEND=api`)_\n\n**Timelines** \u2014 `x_get_home_timeline` \u00b7 `x_get_bookmarks` _(need OAuth login; X serves these for your own account only)_\n\n**Auth** \u2014 `x_get_auth_status` \u00b7 `x_login` \\* \u00b7 `x_logout` \\* _(the last two need `X_CLIENT_ID`)_\n\n**Ads \u2014 reads** \u2014 `x_ads_get_accounts` \u00b7 `x_ads_get_funding_instruments` \u00b7 `x_ads_get_campaigns` \u00b7 `x_ads_get_line_items` \u00b7 `x_ads_get_promoted_tweets` \u00b7 `x_ads_get_targeting_criteria` \u00b7 `x_ads_search_targeting_options` \u00b7 `x_ads_get_audiences` \u00b7 `x_ads_get_stats` \u00b7 `x_ads_create_stats_job` \u00b7 `x_ads_get_stats_jobs` \u00b7 `x_ads_download_stats_job` _(need `X_ADS_ENABLED` and an OAuth login)_\n\n**Ads \u2014 writes** \\* \u2020 \u2014 `x_ads_create_campaign` \u00b7 `x_ads_update_campaign` \u00b7 `x_ads_delete_campaign` \u00b7 `x_ads_create_line_item` \u00b7 `x_ads_update_line_item` \u00b7 `x_ads_delete_line_item` \u00b7 `x_ads_create_targeting_criterion` \u00b7 `x_ads_delete_targeting_criterion` \u00b7 `x_ads_create_promoted_tweet` \u00b7 `x_ads_delete_promoted_tweet` \u00b7 `x_ads_set_entity_status` _(need `X_ADS_ALLOW_WRITES=1`)_ \u00b7 `x_ads_create_sandbox_account` _(sandbox only)_\n\n**Usage** \u2014 `x_get_usage_report` \u00b7 `x_get_rate_limit_status`\n\n**Escape hatch** \u2014 `x_request` \u2014 any `/2/` or `/12/` endpoint this server does not wrap, returned raw. GET only until a write gate is on; a mutation additionally takes `confirm: true`. Reads made here are billed by X but not counted by `x_get_usage_report`.\n\n### Reading posts\n\nAsk for a post and you get it resolved, not raw:\n\n```json\n{\n  \"post\": {\n    \"id\": \"1799000000000000001\",\n    \"url\": \"https://x.com/mgcrea/status/1799000000000000001\",\n    \"author\": \"@mgcrea (Olivier)\",\n    \"text\": \"Shipping v2 today https://acme.dev/v2\",\n    \"metrics\": { \"likes\": 88, \"reposts\": 12, \"replies\": 3, \"quotes\": 1, \"views\": 10400 },\n    \"quotes\": { \"id\": \"1798\u2026\", \"author\": \"@acme (Acme Inc)\", \"text\": \"v1 was great.\" },\n    \"media\": [\"photo: https://pbs.twimg.com/media/x.jpg (alt: release notes screenshot)\"]\n  },\n  \"cost\": { \"billable_post_reads\": 1, \"free_from_cache\": 0, \"estimated_usd\": 0.005 }\n}\n```\n\nThe `includes` sidecar, `entities`, `edit_history_tweet_ids` and `author_id` never appear \u2014 the join is already done, so the model cannot get it wrong.\n\n### Searching without overspending\n\nThe cheapest workflow is free until the last step:\n\n1. `x_build_search_query` \u2014 turn a description into `rust (from:a OR from:b) lang:en -is:retweet`, with each operator explained. Local, $0.\n2. `x_count_recent` \u2014 how many posts match, and what reading them all would cost. Totals only, $0.\n3. `x_search_recent` \u2014 actually read them, at ~$0.005 each.\n\n### Posting for free\n\n`x_compose_post` validates the draft against X's **weighted** 280-character limit (every URL counts 23 whatever its length; CJK characters and emoji count 2, so 140 Japanese characters is already full) and hands back a URL:\n\n```json\n{\n  \"intent_url\": \"https://x.com/intent/tweet?text=Shipping+v2+today&url=https%3A%2F%2Facme.dev%2Fv2\",\n  \"opened\": true,\n  \"weighted_length\": 41,\n  \"remaining\": 239,\n  \"cost\": { \"estimated_usd\": 0, \"note\": \"Web intent \u2014 no API call, no quota consumed.\" }\n}\n```\n\nThe URL comes back whether or not a browser could be opened, so Docker and SSH behave identically.\n\n**Web intents cannot** attach media, create polls, make native quote posts, or build threads \u2014 those need the paid API. Replying to a post _does_ work (`inReplyTo`).\n\n### Articles\n\nX Articles are the long-form posts with a title, headings and images. The API behind them is small and lopsided, and that decides how these tools work:\n\n- **Reading** is an ordinary post lookup. `x_get_article` returns the title, the whole body (paged with `offset` \u2014 an Article can run past 50,000 characters), the cover, and the images, links and posts it embeds, for one post read. Every other read marks an Article post with `article.title`, since its own text is only a link.\n- **Writing** is two endpoints: create a draft, publish a draft. There is no update, no delete, and no way to read a draft back \u2014 so **a published Article cannot be edited through the API.** X's web editor can.\n- **Keeping a copy in sync** is therefore a comparison, not a push. `x_compare_article` converts your Markdown exactly as a draft would, reads the Article, and lists only the title and paragraphs that differ, each anchored to the unchanged paragraph before it \u2014 the edits to make in X's editor. Whitespace and curly quotes are ignored; images, links and formatting are not compared.\n- **Drafting from Markdown** is checked locally first. `x_validate_article` is free and shows the title, the outline, each image and everything an Article cannot express. `x_create_article_draft` then uploads each local image and the cover and creates the draft, and `x_publish_article` makes it public.\n\nWhat converts: headings (h4\u2013h6 become level three), bold, italic, strikethrough, links, lists (flattened \u2014 Articles have no nesting), quotes, dividers, and code blocks and tables (as X's markdown blocks, capped at 10,000 weighted characters per Article). An image, or an `x.com/\u2026/status/\u2026` link, on a line of its own becomes an embed. Inline code loses its style. Front matter supplies `title` and `cover`, and relative image paths resolve against the Markdown file, as a site generator reads them. Relative links (`/blog/next-post`) resolve against `linkBaseUrl`, your site's address, when you pass it; without it they keep their text and lose the link.\n\nBefore drafting:\n\n- The posting account needs **X Premium**.\n- Images must be local PNG, JPEG or WebP files up to 5 MB. Remote URLs are not downloaded for you.\n- Uploads need the `media.write` scope. It is requested at login whenever writes are on, but a login made before this version lacks it \u2014 run `x_login` again. It is deliberately not _required_ of a stored token, so an older login keeps working for everything else in the meantime.\n\n## Troubleshooting\n\n**`MCP error -32000: Connection closed`** \u2014 the server process died on startup. It does _not_ do this for missing credentials (see [Configure](#configure)), so check, in order:\n\n1. The command actually resolves. `@mgcrea/mcp-x` must be published for the `npx` form to work; while developing, point at a built file: `\"command\": \"node\", \"args\": [\"/absolute/path/to/dist/cli.js\"]`. A relative `./dist/cli.js` depends on the client's working directory.\n2. You ran `pnpm build` \u2014 `dist/cli.js` has to exist.\n3. Run it by hand to see stderr, which MCP clients swallow: `X_BEARER_TOKEN=... node dist/cli.js`. A config error prints one readable line; add `X_DEBUG=1` for the stack.\n\n**Only the free local tools show up** \u2014 no credentials are configured. Call `x_get_auth_status`; it returns the setup steps.\n\n**I want OAuth but see no way in** \u2014 OAuth needs an app you register. See [Getting credentials](#getting-credentials): create a **Native App** at console.x.com, set `X_CLIENT_ID` to its Client ID, register the callback, then run `npx @mgcrea/mcp-x login` (or call `x_login`). There is no way to log in without a client id \u2014 X has nothing to authorize against.\n\n**`403 client-not-enrolled` right after a successful login** \u2014 the app is in the legacy Free package or the Development environment. Move it to **Pay-per-use / Production** at console.x.com. Nothing about your token or scopes is wrong.\n\n**Bookmarks or the home timeline say they cannot identify your account** \u2014 X's `/2/users/me` is unreliable, and login tolerates it failing. The server retries it lazily on first use and caches the result, so this usually resolves itself; if it persists, it is normally the enrollment trap above rather than a login problem.\n\n## Notes\n\n- **Recent search reaches back 7 days.** `x_get_thread` inherits that limit: an older conversation returns only its root post. Full-archive search (back to March 2006) needs a paid tier and `X_ENABLE_FULL_ARCHIVE=1`, and is capped at one request per second.\n- **Bookmarks and the home timeline are self-only.** X does not serve anyone else's, so those tools take no user argument \u2014 the id comes from your token.\n- **Rate limits are per endpoint and per credential**, not per plan: recent search allows 450 requests / 15 min app-only vs 300 with a user token. `x_get_rate_limit_status` shows the headroom X last reported.\n- **Search asks for at least 10 results.** X's minimum for `max_results` is 10 (5 on user timelines), and X bills every post it returns \u2014 so a request for 3 fetches 10, returns all 10, and reports all 10 in `cost`. Trimming to 3 would waste seven paid posts and make `next_token` skip them.\n- **`x_get_usage_report` counts this process only.** It is not persisted across restarts and does not know about spend from other clients.\n\n## Develop\n\n```bash\npnpm install\npnpm test          # vitest \u2014 every test injects fetch; nothing leaves the machine\npnpm typecheck\npnpm lint && pnpm format:check\npnpm build\n```\n\nTests never touch the network: `createServer` accepts an injectable `fetch`, `logger` and `tokenProvider`, and `test/tools.test.ts` drives the real server through the MCP SDK's in-memory transport. The only sockets opened are two loopback listeners in `test/oauth.test.ts`, which exercise the real OAuth callback server on ports 8798 and 8799.\n\n### Publish\n\n```bash\npnpm dlx release-it          # tags vX.Y.Z; CI publishes to npm and GHCR\n```\n\n### Verify a release\n\n```bash\nnpm view @mgcrea/mcp-x --json | jq .dist.attestations\ncosign verify ghcr.io/mgcrea/mcp-x:latest \\\n  --certificate-identity-regexp 'https://github.com/mgcrea/mcp-x/.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com\n```\n\n## License\n\nMIT \u00a9 [Olivier Louvignes](https://github.com/mgcrea)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-x.git"
+  },
+  "time": {
+   "0.2.0": "2026-09-02T20:51:02.544Z",
+   "0.3.0": "2026-09-06T22:00:59.913Z",
+   "0.3.1": "2026-09-08T14:54:39.566Z",
+   "0.4.0": "2026-09-12T10:06:44.145Z",
+   "created": "2026-09-02T20:51:02.140Z",
+   "modified": "2026-09-12T10:06:44.538Z"
+  },
+  "versions": {
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-x@0.2.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-x_0.2.0_1788382262390_0.7175615516182381"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "author": "Olivier Louvignes <[redacted-email:3ebf74febb7d]>",
+    "bin": {
+     "x-mcp": "dist/cli.js"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the X (Twitter) API v2",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-scn9d7bTbtJVbySP+kwGwy5fJ8pJEvyMKeqDGrnslSz6ScusMcK2W/F1V7FNbmSMwDc8kEsuQQ3P8eOE/5BSQA==",
+     "shasum": "665def65cdf24e0ad18de9c5b135c45cd14981ce",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF0rRMruyFLz1xYRv9+LE/Ssm6kGVAMd1s7JUkE84A0nAiAHTxbyDMTZTxLiMc9DtJcAnv4WcNhmQHgGiynBd36xGg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-x/-/mcp-x-0.2.0.tgz",
+     "unpackedSize": 575724
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "twitter",
+     "twitter-api",
+     "x"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-x",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-x.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-x:latest && docker push mgcrea/mcp-x:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "login": "node dist/cli.js login",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-x@0.3.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-x_0.3.0_1788732059764_0.8585284765266934"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:72e6ae16-d6d9-4492-a1ab-5b45b8516705"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "x-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-x/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the X (Twitter) API v2",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-x@0.3.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-QTlH8fHi5hBha5KYngb5kX6rNhYHdPU7083osL3ahHkNdyj5pt+iFa6GCalifvhuGIMo9BanYu3XQt9gqTFruw==",
+     "shasum": "fcc623ec83dcce69df5dda475399a5b367f5b20c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDOJM3Kud0TSQO9bBYO8IJ9qlQynLFF0tq2stiYdl6zPQIgE7klyZC4ToGxX1z5UsGv1cFjPnFDq7zQ5Phc/mfuJHs="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-x/-/mcp-x-0.3.0.tgz",
+     "unpackedSize": 646811
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3e906b6e69e5a725493eb21c142edb5df87f5178",
+    "homepage": "https://github.com/mgcrea/mcp-x#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "twitter",
+     "twitter-api",
+     "x"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-x",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-x.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-x:latest && docker push mgcrea/mcp-x:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "login": "node dist/cli.js login",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-x@0.3.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-x_0.3.1_1788879279426_0.014621163684739313"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:72e6ae16-d6d9-4492-a1ab-5b45b8516705"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "x-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-x/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the X (Twitter) API v2",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-x@0.3.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-Lt62QAFPzJRZuc1JB71+FzUH+b3a741b71yIioQ+oPCOjv9gdRtTJNZkwCJzbW/HQZW26k119zyzvhh8o2C5Vg==",
+     "shasum": "92e1d9702087ff4ffc3333b209da59f2d472617f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF2W39nTG9uMOYpdwcZhQ2s9XgwnU5ad8s6OnmnETwrrAiEA1xDW/yeSkz5OIJ80y79kgkijaS8r7mVtXnkW6mLyIjI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-x/-/mcp-x-0.3.1.tgz",
+     "unpackedSize": 653096
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9154d26717d3ad07c8ee451de7517f3cef43e5b7",
+    "homepage": "https://github.com/mgcrea/mcp-x#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "twitter",
+     "twitter-api",
+     "x"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-x",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-x.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-x:latest && docker push mgcrea/mcp-x:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "login": "node dist/cli.js login",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-x@0.4.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-x_0.4.0_1789207604001_0.8180015039042303"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:72e6ae16-d6d9-4492-a1ab-5b45b8516705"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "x-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-x/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the X (Twitter) API v2",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-x@0.4.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-LhCxcqfZA+dE6O062O6107Zq5vMg/PrD3eJmODBrmndG35dA/urklZzEfafkCdgujXLFP2pZq2zZF5d60D0ErA==",
+     "shasum": "944eee3b0258ec1a1548956b77908aae41ee7056",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7iCcBXHQ7Z04vtnLJ5FFwk9sWzMkz94UarF1JwCxAkwIgG6Rot/HA1v8braWc4Nm4lJmwz75dx3C2XfXWKpwMef8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-x/-/mcp-x-0.4.0.tgz",
+     "unpackedSize": 794130
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9d452dcd7cdab6e7dfcc451263d39e68ca66f308",
+    "homepage": "https://github.com/mgcrea/mcp-x#readme",
+    "imports": {
+     "#/*": "./src/*.ts",
+     "#test/*": "./test/*.ts"
+    },
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "twitter",
+     "twitter-api",
+     "x"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-x",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-x.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-x:latest && docker push mgcrea/mcp-x:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "login": "node dist/cli.js login",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-x",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-x"
+}

@@ -1,0 +1,2885 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e2ff9066e6e4]",
+    "name": "dickhardt"
+   },
+   {
+    "email": "[redacted-email:e6ee5e64426f]",
+    "name": "rohanharikr"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4",
+   "0.1.5",
+   "0.10.0",
+   "0.10.1",
+   "0.10.2",
+   "0.10.3",
+   "0.10.4",
+   "0.11.0",
+   "0.11.1",
+   "0.11.2",
+   "0.11.3",
+   "0.2.0",
+   "0.4.1",
+   "0.5.2",
+   "0.6.0",
+   "0.7.0",
+   "0.7.1",
+   "0.7.2",
+   "0.7.3",
+   "0.8.0",
+   "0.8.1",
+   "0.8.2",
+   "0.9.0",
+   "1.0.0",
+   "1.1.0",
+   "1.2.0",
+   "1.3.0",
+   "2.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@aauth/mcp-agent",
+  "_rev": "33-3d343265b5a3c9b10bbaca45002caf44",
+  "author": {
+   "email": "[redacted-email:b6d45798a4b3]",
+   "name": "Dick Hardt"
+  },
+  "bugs": {
+   "url": "https://github.com/aauth-dev/packages-js/issues"
+  },
+  "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+  "dist-tags": {
+   "latest": "2.0.0"
+  },
+  "homepage": "https://github.com/aauth-dev/packages-js#readme",
+  "keywords": [
+   "aauth",
+   "mcp",
+   "http-signatures"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:e2ff9066e6e4]",
+    "name": "dickhardt"
+   },
+   {
+    "email": "[redacted-email:e6ee5e64426f]",
+    "name": "rohanharikr"
+   }
+  ],
+  "name": "@aauth/mcp-agent",
+  "readme": "# @aauth/mcp-agent\n\nAgent-side AAuth for MCP. Handles signed HTTP requests, AAuth challenge-response flows, token exchange with auth servers, and 202 deferred/interaction polling.\n\nPart of [aauth-dev/packages-js](https://github.com/aauth-dev/packages-js). Protocol spec: [dickhardt/AAuth](https://github.com/dickhardt/AAuth).\n\n## Install\n\n```bash\nnpm install @aauth/mcp-agent\n```\n\n## Usage\n\n### `createAAuthFetch(options): FetchLike`\n\nCreates a protocol-aware fetch that handles the full AAuth flow automatically: signs requests, parses 401 challenges, exchanges tokens with the auth server, caches auth tokens, handles `AAuth-Access` opaque tokens (two-party mode), and retries.\n\n```ts\nimport { createAAuthFetch } from '@aauth/mcp-agent'\n\nconst fetch = createAAuthFetch({\n  getKeyMaterial: async () => ({\n    signingKey: privateKeyJwk,\n    signatureKey: { type: 'jwt', jwt: agentToken }\n  }),\n  // Optional: declare protocol capabilities\n  capabilities: ['interaction', 'clarification'],\n  // Optional: mission context (sets AAuth-Mission header)\n  mission: { approver: 'https://ps.example', s256: '...' },\n  // Optional callbacks\n  onInteraction: (url, code) => {\n    console.log(`Visit ${url}?code=${code}`)\n  },\n  onClarification: async (question) => {\n    return prompt(question)\n  },\n  // Optional hints for the auth server\n  justification: 'Read project files',\n  loginHint: '[redacted-email:b4c9a289323b]',\n  tenant: 'acme.com',\n  domainHint: 'acme.com',\n})\n\nconst response = await fetch('https://resource.example/api')\n```\n\nWhen `capabilities` is set, every signed request includes the `AAuth-Capabilities` header. When `mission` is set, every signed request includes the `AAuth-Mission` header.\n\nThe fetch automatically caches and reuses `AAuth-Access` opaque tokens returned by resources in two-party mode, sending them back via `Authorization: Bearer` on subsequent requests.\n\n### `createSignedFetch(getKeyMaterial, options?): FetchLike`\n\nCreates a fetch that signs requests with HTTP Message Signatures but does not handle AAuth challenges. Use this when you only need request signing.\n\n```ts\nimport { createSignedFetch } from '@aauth/mcp-agent'\n\nconst signedFetch = createSignedFetch(async () => ({\n  signingKey: privateKeyJwk,\n  signatureKey: { type: 'hwk' }\n}), {\n  capabilities: ['interaction'],\n  mission: { approver: 'https://ps.example', s256: '...' },\n})\n```\n\n### `parseAAuthHeader(headerValue): AAuthChallenge`\n\nParses an `AAuth-Requirement` response header into a structured challenge.\n\n```ts\nimport { parseAAuthHeader } from '@aauth/mcp-agent'\n\nconst challenge = parseAAuthHeader(response.headers.get('aauth-requirement'))\n// { requirement: 'auth-token', resourceToken: '...' }\n```\n\nReturns:\n\n```ts\ninterface AAuthChallenge {\n  requirement: 'auth-token' | 'approval' | 'interaction' | 'clarification' | 'claims'\n  resourceToken?: string\n  url?: string\n  code?: string\n}\n```\n\n### `exchangeToken(options): Promise<TokenExchangeResult>`\n\nExchanges a resource token for an auth token at the person server. Handles metadata discovery (`/.well-known/aauth-person.json`), 202 deferred responses, and interaction polling.\n\n```ts\nimport { exchangeToken } from '@aauth/mcp-agent'\n\nconst { authToken, expiresIn } = await exchangeToken({\n  signedFetch,\n  authServerUrl: 'https://ps.example',\n  resourceToken: '...',\n  justification: 'Read project files',\n})\n```\n\n### `pollDeferred(options): Promise<DeferredResult>`\n\nPolls a 202 Location URL until a terminal response. Handles `Retry-After`, `Prefer: wait`, clarification chat, and interaction codes.\n\n```ts\nimport { pollDeferred } from '@aauth/mcp-agent'\n\nconst { response, error } = await pollDeferred({\n  signedFetch,\n  locationUrl: 'https://auth.example/pending/abc123',\n  interactionCode: 'ABCD1234',\n  onInteraction: (code, endpoint) => { /* show to user */ },\n  maxPollDuration: 300, // seconds, default 300\n})\n```\n\n## Key Material Callback\n\nAll signing functions take a `GetKeyMaterial` callback. This decouples key management from the protocol \u2014 you provide keys however you want:\n\n```ts\ntype GetKeyMaterial = () => Promise<{\n  signingKey: JsonWebKey          // Ed25519 private key for HTTP signatures\n  signatureKey:\n    | { type: 'jwt', jwt: string }  // agent or auth token\n    | { type: 'hwk' }               // bare public key (pseudonym)\n}>\n```\n\nFor local development, use [`@aauth/local-keys`](../local-keys) to provide this callback from the OS keychain.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "mcp-agent",
+   "type": "git",
+   "url": "git+https://github.com/aauth-dev/packages-js.git"
+  },
+  "time": {
+   "0.1.0": "2026-03-01T20:17:58.230Z",
+   "0.1.1": "2026-03-01T20:39:18.787Z",
+   "0.1.2": "2026-03-01T20:52:04.517Z",
+   "0.1.3": "2026-03-02T11:10:19.725Z",
+   "0.1.4": "2026-03-16T15:47:20.387Z",
+   "0.1.5": "2026-03-16T17:46:34.592Z",
+   "0.10.0": "2026-05-12T14:47:35.302Z",
+   "0.10.1": "2026-05-12T15:31:09.944Z",
+   "0.10.2": "2026-05-12T22:11:44.792Z",
+   "0.10.3": "2026-05-13T09:27:55.215Z",
+   "0.10.4": "2026-05-13T12:24:09.714Z",
+   "0.11.0": "2026-05-15T12:30:50.218Z",
+   "0.11.1": "2026-05-15T13:36:46.020Z",
+   "0.11.2": "2026-05-21T09:19:01.138Z",
+   "0.11.3": "2026-05-21T13:03:36.319Z",
+   "0.2.0": "2026-04-02T23:04:59.014Z",
+   "0.4.1": "2026-04-10T13:14:35.146Z",
+   "0.5.2": "2026-04-12T00:00:14.880Z",
+   "0.6.0": "2026-04-12T01:01:22.740Z",
+   "0.7.0": "2026-04-22T12:01:26.597Z",
+   "0.7.1": "2026-04-22T14:18:26.474Z",
+   "0.7.2": "2026-04-22T14:31:11.723Z",
+   "0.7.3": "2026-04-22T14:52:45.488Z",
+   "0.8.0": "2026-04-22T20:27:48.909Z",
+   "0.8.1": "2026-04-24T15:37:49.729Z",
+   "0.8.2": "2026-05-11T13:58:43.032Z",
+   "0.9.0": "2026-05-11T17:55:02.303Z",
+   "1.0.0": "2026-05-26T13:04:44.291Z",
+   "1.1.0": "2026-06-08T17:18:40.370Z",
+   "1.2.0": "2026-06-10T11:23:53.790Z",
+   "1.3.0": "2026-07-12T18:20:12.105Z",
+   "2.0.0": "2026-08-07T15:43:43.746Z",
+   "created": "2026-03-01T20:17:57.965Z",
+   "modified": "2026-08-07T15:43:44.147Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.0_1772396278079_0.5653111332458056"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "deprecated": "Use 0.1.1 or later",
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 53,
+     "integrity": "sha512-JNoAWNokaP4v5ZRbdCcnaByIKGBORUO1CQg5Js/QfHGxoYJSpLu/HSBqzy4YY1nIIiE8wNVH2ULcfyZ5xwomVQ==",
+     "shasum": "2fa48e0ae62be9c1b744cab9e8a0f5aa17b01aa2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCn4kHT6r/WFE9aEswaKqzVZH2VeIanKzuMOL4267oPiAIhAOcwWZhqk9TA3IbYiti43sbk8bPS8Vo4M4TbIgeIhMZ+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.0.tgz",
+     "unpackedSize": 101598
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b4e8779ed1767db983ac4e7f7aa6bc34a3ea7176",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.1_1772397558648_0.9407793558435407"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:b513d05c-d101-4202-9c63-cf1b6df4c247"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.1.1"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-X8m+Q4UbgYpRebixWziJwK8xrMX47BK5t4p9BrhMn/vpvv2MyG5nIrnt9dIiyJNAhUT6pAGDMwu+BSUMnliRMg==",
+     "shasum": "50b65ac3ff56520ea799659168c8b1ab07fa88c3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCWNnYSwotoKVvfyUHwbg6xuC94c5aBqHBixpLEupngDwIgR873r5tfyc8UA2YFetKCIo2Dy74ECR7R41+8G6ldNOc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.1.tgz",
+     "unpackedSize": 100100
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "14c339a78a1ba3190c158c086051814c5fc834aa",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.2",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.2_1772398324373_0.0406215117279507"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:b513d05c-d101-4202-9c63-cf1b6df4c247"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.1.2"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-deOGE427p4j54M4SuG8Ge14niG/Ns7ebXsy7wFtU/Mau7M0Y2A4TPd6xstSl/iFAe6z23rZT7nZh97+cVLs6xg==",
+     "shasum": "cfc068deafb2a0d5f042c425b0d67a35a1bf6568",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDQFlkTgbKmneonQqgvUZqGItsRan3C3UzfnB3xrBA1TgIgUdtjFZC50C1jqA/H4X6wkFaToFDxJJZ2GxKLJ/yu+4I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.2.tgz",
+     "unpackedSize": 103717
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1143e7d6114c01a1734bb59e8d327ef170f0c5ed",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.3",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.3_1772449819577_0.46770869019397465"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:b513d05c-d101-4202-9c63-cf1b6df4c247"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.1.3"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-uKuji/LBvrmZgC5etuxY1vWgkQTKoacnoF+wbcwJTw9TeulcFO4/QLItenmLfTgpP9aR7cSryy7qXPqH75Xcyw==",
+     "shasum": "2efbc64d9890171d962f3579253d3753c640ee8b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDv5wUtI0nvfn+4wXvi4b+5DK8fTdVz3/cfuL1o97CNqAIhAJlKh9YpzWjDplBfQUJ5Dvq8SYWtZE5lCJ1iMVfrqdMZ"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.3.tgz",
+     "unpackedSize": 103717
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d5dbbed4a913f93c76544864114edced8a8d8580",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.4",
+    "_nodeVersion": "22.22.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.4_1773676040238_0.5193291788595462"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:b513d05c-d101-4202-9c63-cf1b6df4c247"
+     }
+    },
+    "_npmVersion": "11.11.1",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.1.4"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-whC9EbPxJ874EnE66iJ+PYzvQPfcTEld3O7FLErZ4y+dUUjMyvCMjmEHO0Rwbqo8ip7peAEyz6oaobr5+ld4ug==",
+     "shasum": "4d5bc97dbc5fa2794700a018854c5c109729e7e1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC4lEyRocQNDq9JACXoG3z337nq+73MP7DNiKhcfWBFGwIhAN3OfnJ9R0ythessw3A3m3rl6Ry51FBXMfI2EEKIA6Zy"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.4.tgz",
+     "unpackedSize": 106981
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "fdd0379798aa2cea0a5045ee08471bfee62ec087",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.4"
+   },
+   "0.1.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.1.5",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.1.5_1773683194455_0.0740389744025709"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:b513d05c-d101-4202-9c63-cf1b6df4c247"
+     }
+    },
+    "_npmVersion": "11.11.1",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.1.5"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-/Qxj1SVerFiSgK7ZK26f6ygamcBhJZeDlMYK7oyMBE6VG1R8hi5nM/gG0rmpPSRKH8onLmetkrbpYe6z5D6Leg==",
+     "shasum": "d21c148a5eb788b033c4ede9cadf54459c5f9f00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD73wzFG+UAdGEXlk7EkzFYis5b26gZCZ7lH6qWrFEULgIhANEaccZhSUCiAx/2TFD2eRn0FQhcHi/Gk25idlWh9mYs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.1.5.tgz",
+     "unpackedSize": 106981
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "bf13b2f7d824c5016bbf6aade2bc7165613a0d8c",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.1.5"
+   },
+   "0.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.10.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.10.0_1778597255147_0.7118797346640244"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.10.0"
+     },
+     "fileCount": 54,
+     "integrity": "sha512-nD6h4XEU7QLXV1fpzNimyTgDOTJle7NYWHcMlnwWMYnWtC7kgYbB4qALJhtBYa0j3XGb/O9X/wZ1mX9c5806YA==",
+     "shasum": "742e6b98b795658bc2a4317f5a4081aaaabfc6c4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEkQnKTC3oaewwsYHM7ISfAZFT6732lO7vSoMes9rNM5AiEAt69tIkzPBHouF5kX4QIAwJRsURYCGRCIVhxsO+xywBc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.10.0.tgz",
+     "unpackedSize": 136940
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d5733084bce2a3b3a6d3321ff53b0b248b6f7ee7",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.10.0"
+   },
+   "0.10.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.10.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.10.1_1778599869695_0.1411652455017558"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.10.1"
+     },
+     "fileCount": 54,
+     "integrity": "sha512-Utb0QfXaC7Dx01BcggUatPWk3ED5++pcc8dOEhm1fENp2NvBJ0tBjzpXJ38vYz+libUG8Ye3zL7dDkV28mEMvw==",
+     "shasum": "df507f6c601fc16a9ca8013a764aefac416792ba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICVnzOcc6SWCZegDjZOG3hpODR1afg01dTVCg+YocIdgAiEAu91r77QAazK35fSu7rin54Y/KlPAuHkRP6Q2LERp2QI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.10.1.tgz",
+     "unpackedSize": 136940
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "703ff479660d31a12dd9e328c355a9e6f67ed896",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.10.1"
+   },
+   "0.10.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.10.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.10.2_1778623904651_0.34425438732116254"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.10.2"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-WCedKan7+Gf9uVoQMSQ4DyARJwkRlfLmnKLU4X4xEWLUMYTAgkKT2B5C3H3iFg7IVn1NUJ2GOAo2ofGTwXr4IQ==",
+     "shasum": "b48ccfcb692ac7920f77609575b24501fac4225b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDZmbNVFuSS0cDQhaDSeS4HW1DecaYCmrhLF9gktZYJZAiEAsztY6Bx0xVc/lsCQ3P5PndrvA1qvWZPyr+/6nTcOr2g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.10.2.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "90cb1917250b17c7bc62e02d9bfed967bb71adea",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.10.2"
+   },
+   "0.10.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.10.3",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.10.3_1778664475006_0.3826539801437572"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.10.3"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-32S/ggt1QklGzwKJ33QqJnDY+TyRXzFNisNJ1vvgrjNo9IFBxltULWFZX4JzUDX9D77BdUzmnvZT0QmjIeuZpw==",
+     "shasum": "6720b4feb0d0f1ba00f6a6ba7112f98acd4b58aa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDJmz2/dASwTYjOrCzNGiSd0r3u7m1vSOUqoUw9cn1k5gIhANXlAEHH0xT1OR0eeOGPREMVO1xx9jByDmlBQAFRs7nG"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.10.3.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5c18eb7391cd9951aaae12070d3932e7cfb18e27",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.10.3"
+   },
+   "0.10.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.10.4",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.10.4_1778675049542_0.8931722173973085"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.10.4"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-g10ZhyifnTKIkXBMvYhv2Hw4K8jlqKlyK2l8WJiBWqkVuBcbiT/ZxIZ3OXfJVPZKxZTUWbZ84GsH8/x+czkYrQ==",
+     "shasum": "5d5b600bd07c9ca0d30bf2e96c356a8e6fbbd4e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDj9WB9nNQApfFj1dqA+sWQlfOJBIN9YKY6O4qCmBWb/AIhALPtHQwUuPF2FnKajtJOLwfARwqQUaZb/NHoWThojfRk"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.10.4.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "792f35676d28df4e8de6eb1aaa8080a19dbda3bc",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.10.4"
+   },
+   "0.11.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.11.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.11.0_1778848250058_0.3580968745023765"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.11.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-uZ4ZITAerogfYwLIZQm2ZXwEBdcY5S2ib2Ci3Om4q283dufaMbzUymFHGSwDJcdBpSnOAhu47ke49gOHEmvmTw==",
+     "shasum": "e288b26b8aa66dcbca48302655cd37b31cd40904",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDGcMKWg80BqIrmqHjZD5Ns5sTr+fViawzHA3UFQ4FnHAIgRhsNl28QluMsecbeHBC+/CQ/agscc8s+6cLqShMb1EM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.11.0.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3b1d87b53fda93c1fc68097046ced4011270bebf",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.11.0"
+   },
+   "0.11.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.11.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.11.1_1778852205790_0.4685403699068196"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.11.1"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-GNCHyk+dSke+/BpU7LBmNGSrFZmHv+3PXq7QY7D2jpcUltGRaupD8tTvezqv6iAbKdsf2HsTAafZ0Vppb9tvFA==",
+     "shasum": "02a77a91d8937e15ff246ed23a98ba36a63d6ee7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDHNV5e+OxvTxnrjHtjIRByoNeXTDUCU/NyzbuEs5DAqwIgIQcNOi4q5pzCfhWx+0UxlXnECvRs3/OBtnhisOo9rIQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.11.1.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7028057ec2a46154a53ffd1314021139e5fe56f8",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.11.1"
+   },
+   "0.11.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.11.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.11.2_1779355140975_0.4114723111957128"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e6ee5e64426f]",
+     "name": "rohanharikr"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.11.2"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-mejg62e+i/DeFv0NHLds55R9HSfQ3G/5fchOnj+Ihgux+2uE+JateVZiuH3tNiqJKJLGpMHTn0U/VErcLKavfg==",
+     "shasum": "25fe929f0f4de2a997199b8a9a4128218db89c10",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCNupyNEHvc+40HQCI9tGjUGs845Xu+XT+DahnmMD7TQAIhANhvmhrM2+U7ik1m0skTzLXKdb1CLugkEKgUXREGAqQE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.11.2.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "aecdb52b70381a752fca96860f0772a15cd5f233",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.11.2"
+   },
+   "0.11.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.11.3",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.11.3_1779368615732_0.001078438854959174"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.11.3"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-noUB3b7pCKMNBBjTl1hPvIc5sND1WGGdoQWTQ2A5ji3HEJgIwEoqSZdAJkhTnYBIUphBwrC1oZ2ooHJKOf9S/Q==",
+     "shasum": "e1ac1ace97504695affad13ad36aec4f93059a64",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEfR0TIRX8eH6Sj0/I4vFu5W2vHX5J4C7YCWdjtVefb3AiAzYt4ILsT2Hz7mR/bQVJHPrQMdAUsSinUIxHMUkGN8Qw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.11.3.tgz",
+     "unpackedSize": 143532
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "62b79b0fe94b8903bc99375aca5f6a254e175597",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.11.3"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.2.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.2.0_1775171098867_0.32243257000239756"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-FAmxQpH2cfs6j7NwFbGpC98cEG2oDXi1W5aVmE54hZ8IggvlKxfJOY+cMMnYBHsTPTRvkwhlAPq9ASHmSih8ww==",
+     "shasum": "c27e91c77ec9c12e54aa90b143db77303582a4dd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEAISTBv3sYi1jzocNtNfTs+c12w2zkBpJNCWQs69RCnAiBMbYrv4gB/suq+JMAuaOzvI77O3lgCAnpNUCkRfv4ktQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.2.0.tgz",
+     "unpackedSize": 107524
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "bc4b47f408786af1e7d325004e0e63f9eaa09119",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.4.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.4.1_1775826875003_0.018726094025754536"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 54,
+     "integrity": "sha512-xRIosW4c51Qv87VIn1jp32E0bvwyHWZa6BfEzgE+dhQDjv8hlLDv5lg21yd6NQac3f/2Yt2+Qj2C3lvyrBKh7w==",
+     "shasum": "139831422f23a31528b58f2dcbce3b1e43a9a06d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD7VEIOvcqsfGfMcRggQOD9UctTHO2G0hwt1/diG76dxgIgOBA3uwEJoM1HIbxUrWIDD9t4fCncsC26YkP1jyEstY4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.4.1.tgz",
+     "unpackedSize": 110837
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d12c5d9d0a4b7c0d23bd6a279d501dc7aa757a5f",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "agent-auth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.4.1"
+   },
+   "0.5.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.5.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.5.2_1775952014764_0.0445545913251133"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.5.2"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-o7XOWzPD82VW9GA2NPHYks3IO1PlGbqUdFponBMc8b7QxLxF9rOJMytV9XrH6akbizpUqqi7Jjd3KUTU8E05dA==",
+     "shasum": "bef01958e599a2d3283a9310e0e12f8750dcad8a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDv54PmM6dkSlGH3iRywHywMKdu6jgSOL4Dt/YM/5hgpAiEAqEwlQRGEVzzbIyJTBL1RxWXaAjXtrAwk/qWekV446CY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.5.2.tgz",
+     "unpackedSize": 109321
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "6bf10011493723da2ff8841744f867357f313f62",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.5.2"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.6.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.6.0_1775955682598_0.8711071987491232"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/hellocoop/AAuth/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.6.0"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-BqIWD4iiIdKpOGxL5KqvwAT84lc/lnFDTPMbvzFW66gLhwkUldUWVFzWlRtZEXyqQpznOjUDb7S1VtlG1QUiAA==",
+     "shasum": "bb71b2e44b9b2a2ef601cdc33b1941f927a84119",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICKboa7f9rKkE5A6W1fjWUnXUv3TXpFjp5tovSHNDJOnAiEAo36Egs7T7ZE/WZvOWbcRIqJdMr/9UWAs8bRzXMitWu8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.6.0.tgz",
+     "unpackedSize": 129199
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c1d21dae930ddb2ce7d5400e3ac36c04f1ea28e6",
+    "homepage": "https://github.com/hellocoop/AAuth#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/hellocoop/AAuth.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.7.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.7.0_1776859286460_0.19564173215858172"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.7.0"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-F7lvtE1op+Kzh5f0eV1uantkiOdfoDtRPrGBqTnhgRX28shMGz1/nTNC4VYUY3Vp6wpnt5JUsmsXL/ewjXoWcg==",
+     "shasum": "c25472b3c9101ab7ce0869c1bcc92e1cf9cb1de4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDTWK3xYo3YKNtypenPJ+sB21+DKZk1wqvWIRFvRXIVQgIgHm56rRcJncxfrZ5RyW5NtgZfNX0iv8ZiXE6pllzAWKM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.7.0.tgz",
+     "unpackedSize": 129211
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c94f368138aab88bcca563e1c90cdc7c5a8088f6",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.7.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.7.1_1776867506340_0.24782448393280276"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.7.1"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-hg38NI2wc6bwbXEOiUj7p4qQ/qV0AjZZz2wEF5DjYburd1e74TbUU1LO93y2Qqw57PIXm1MdupFOAz/ozFKzLA==",
+     "shasum": "88202f020707cf9d4459a1a536f4483cb24a41b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD07QEBMiafuZ1uUpdRFhSk2J9qh73SO/vAeLGMv3oIZwIgRJpXcy2Bbhs645/9eQUqx8ADJaP4D4XuyNrsdJCpiTI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.7.1.tgz",
+     "unpackedSize": 129211
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "34a37494311fe51cc68dfe849ab63d435f7c8bee",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.7.1"
+   },
+   "0.7.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.7.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.7.2_1776868271558_0.012544004117701846"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.7.2"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-h0+k2QlojGQV5+3Eh4joVWhIwpv/ci+LlBz6UQF2KfmSNAH6IPQ+/efgcgA1DBuTwPSYGoCgnGLLJoqnsozTrA==",
+     "shasum": "203ed2c4aafbcd79b328a519fbcd978f52d81c40",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDHn1mludplBiV2P14Jx+9Xtd3k8d9M99c94Rlch8tpVQIhAMsKI3eYcW2Yzlalg4WEVeIFGNBgUj8D64u2e6PvCBRo"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.7.2.tgz",
+     "unpackedSize": 129211
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "ec9c68cdf09a0d66680d1f769d30bdb30b4490be",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.7.2"
+   },
+   "0.7.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.7.3",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.7.3_1776869565347_0.08513870706174953"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.7.3"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-RDS8RZF/iV1Q0rULdoFK3QVPQWG9TcmlDCsddPs5QqSxsEF6GXqVnOe7tExBgPvFLxwjbwVnQ6CcBuTIZiFeog==",
+     "shasum": "829bfb19286e8a2b2357083bd771cb135c2c3fe1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDit2yHBtrS6hAOT11zraKPNLX7dqc/xQdn/aYq+oQ8uAIhAP5Docr/ggbzxW/5Q/RyDY/LRvPMSCxYGvgCNIQswkMb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.7.3.tgz",
+     "unpackedSize": 129211
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "530f3a2802bd74bc2cd5d303b3bbcfd2c5494c7a",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.7.3"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.8.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.8.0_1776889668721_0.6802328976746495"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.8.0"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-b+eROGkCB4qkUGk/8/H4t1y3d16fheFbmg+7jB7/rBH+cYsYTubbenZSYRkaiFZMbvt7eI1Ef1uUukYi2mrZOA==",
+     "shasum": "977ae4aee6dd37ba931b42829ce07c5a2ebb80eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDaCPYBG6ehSpVxDGktpNIrFFAMWRYWJcgfH8dEPRDJJAIhAI4BEfOT6O3GHG4EnIj8aFMm3Iadz71XFmO2qwXFRlh/"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.8.0.tgz",
+     "unpackedSize": 129699
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "be96f9724db0fd97b41856ed177028c22d5d26a6",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.8.1",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.8.1_1777045069585_0.7958240077422511"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.8.1"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-A9M0S7bfx9mn+2j3SnkJahM1R6xZKJcL5PXfT3Gg+NZQwkQhPxi1RLEQPHX0qw36hAHRiS1Ze+lEXueCpCr23Q==",
+     "shasum": "5daa6083ad6048e650350356311772ab274c1512",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBPecLKBzqHiPpFclnxTdxFfwIF4NFF5H+vPzrXfaoGMAiEA8eJ0Wl0LoV2wFcGzmztZufM6akBYZwhXIcw8gckIZ9A="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.8.1.tgz",
+     "unpackedSize": 129699
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "edb64ec1ed81f0b89195099f780101a123901a95",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.8.1"
+   },
+   "0.8.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.8.2",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.8.2_1778507922910_0.40225268880094567"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.8.2"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-K+8eHeKYMdcof1Z+NCK/7KWFl12TdlG7UuC4yCMvUHDBRjmaTlzEnxagTzVmFqgTbCusQtp99wh8fra8t4aang==",
+     "shasum": "99e1ed208512647c1ced74857368ac8c4e9d54ca",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCYQJuqUUzAZV3s7J5FZNeACCHvay8yXkcN5+FKW/n5SAIgTpzug1OMgLdSkuhxVU4bDU3hMbPblZOVtH226lbsqSg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.8.2.tgz",
+     "unpackedSize": 129758
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "11849540309a6f6b7abae5f532bc51f3b647d33b",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.8.2"
+   },
+   "0.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@0.9.0",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_0.9.0_1778522102149_0.3846424656677949"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e2ff9066e6e4]",
+     "name": "dickhardt"
+    },
+    "_npmVersion": "10.9.7",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.1.3"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@0.9.0"
+     },
+     "fileCount": 50,
+     "integrity": "sha512-WGC89vDDFGH2y5Efw9C+mDKzSTvX1ZKzKUe6PZammGsSQyyEGh8nu+jnvHVOtaO7HOxBsLeUaK00GTpvSEKSQg==",
+     "shasum": "2d785e602d65bc8793a33620f52041507403b860",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGTBgD0LYVJPJXXOdUGV6nPzHlORoRfBxDQH1a/5/4ixAiEA+3G6fNoMiou7YbEvRLL6xbOQeKiHqP7hIZ1c31sUPKo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-0.9.0.tgz",
+     "unpackedSize": 129758
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f9f84f080de204468b3204a898ef198df4aaa38f",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "0.9.0"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@1.0.0",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_1.0.0_1779800684155_0.8937877176085338"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.6.0"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@1.0.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-6uIXouDdsedq4yUplyBXRIsPb7RPnpjVJcxKt9mwGTT9TncoW+69lZZ9Wye2/yxrlCOyptQ5DmAQkTVGb2wi1w==",
+     "shasum": "da2a50673eb6c793627d5823dded382162fe23e1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDITcaoO7QFMw25vB9oGc5hvD5t4e90FrKcULvfVHcmOQIhAJIA8OhKJhfYBoOvJo184rXlQN1DPiAvV1x+J+ufZE9U"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-1.0.0.tgz",
+     "unpackedSize": 167032
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c6fe39430bff27dc41c2028e68e245d7bd061a4c",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@1.1.0",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_1.1.0_1780939120207_0.5290788846698806"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.6.0"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@1.1.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-XDOazQs1w0huWdB2ySNdy4OvB6suBI+gBv8rIc/ssKyp91cGBqLJmrK90H1A7olit9XBPwU3zLP8A/zH+C8FoA==",
+     "shasum": "d230e99a45eaff73317591c9adb7e14155769837",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAgb2XPgYgwP9APbX3RCD2P24AQLgWR23aBLCD+ATWA+AiBaCHjirons35ESMCT2TEaBIcH+Z9gxLNvaEbXbwT6LLw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-1.1.0.tgz",
+     "unpackedSize": 167954
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "8fb212b99f15dcf033bb4bcb96b28a730fceb3f3",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "1.1.0"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@1.2.0",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_1.2.0_1781090633667_0.7204179651746423"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.6.0"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@1.2.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-8QIHbIFXDI59mw8eGqCgGOefNA7fHX2HUv5JXx5YLHJL65ienlyEdak+DZwqEi0dS5pqPApObknh7Ctp8XRIKQ==",
+     "shasum": "d14663f56711f7dd06dc496b641f3914427a0af0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID6oyyyH7IlVt7nZJwF1+7+TKEE5XApG1ijumncHQeC1AiBuUWgKsTW8aaHKpCqfHjr05X6/q6HsMU2IEzEHaEaD9w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-1.2.0.tgz",
+     "unpackedSize": 168625
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "456770b0a410d756f514c090bee612b2a70ed277",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "1.2.0"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@1.3.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_1.3.0_1783880411967_0.2315632725103809"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^1.6.0"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@1.3.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-ATCtyWj3l8G+ilYeBmvsc9L1tl6B4qk+Y0za+/7BcpBHKLiozYpchrI9LrxJ0TEHFmQr7dkfQJbIQad7/K1+pA==",
+     "shasum": "6ec3b7848e5fc710c722fddfb98cadb59799c062",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCRVV5GFASlMnaqstPJfhwMwXrrV1YhqMhYaHD9484ZFAIhAJ3bK4cklUCViI5dtXY8S40uItST4Gf9FW8OjTZctHVf"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-1.3.0.tgz",
+     "unpackedSize": 169291
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "dc657f0d632eac3c1265ce2e0757d1517ff62a09",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "1.3.0"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@aauth/mcp-agent@2.0.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-agent_2.0.0_1786117423605_0.01626669258364455"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:221db820-60fa-4cc1-baa5-881a93594f0d"
+     }
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:b6d45798a4b3]",
+     "name": "Dick Hardt"
+    },
+    "bugs": {
+     "url": "https://github.com/aauth-dev/packages-js/issues"
+    },
+    "dependencies": {
+     "@hellocoop/httpsig": "^2.0.0"
+    },
+    "description": "Authenticated MCP transport with HTTP Signatures for AAuth agents",
+    "devDependencies": {
+     "@types/node": "^20.0.0",
+     "typescript": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@aauth%2fmcp-agent@2.0.0"
+     },
+     "fileCount": 58,
+     "integrity": "sha512-Li7FhvYSwIrXfAymYpr574KqaL7FNwV5d6jKmx9lUG9jv5Lf0bnwNb4leN/Ht5ZcwxeElQcwjvaBNZGoV1UJJQ==",
+     "shasum": "15f86b4a0a67fe43c34f9f44d094701a7c471d53",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHSg6vs1FKtHKtZR8akMJlZ6UZ6YwdEBOOSuTgpgSr9UAiBzq3etC8RtupPwzcseqwoy7PzH8rRXtp3CBQBbGy5EhQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@aauth/mcp-agent/-/mcp-agent-2.0.0.tgz",
+     "unpackedSize": 169291
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "aab541deeb56435eef46fca5857163c4c4997023",
+    "homepage": "https://github.com/aauth-dev/packages-js#readme",
+    "keywords": [
+     "aauth",
+     "mcp",
+     "http-signatures"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:e2ff9066e6e4]",
+      "name": "dickhardt"
+     },
+     {
+      "email": "[redacted-email:e6ee5e64426f]",
+      "name": "rohanharikr"
+     }
+    ],
+    "name": "@aauth/mcp-agent",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "mcp-agent",
+     "type": "git",
+     "url": "git+https://github.com/aauth-dev/packages-js.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build"
+    },
+    "type": "module",
+    "version": "2.0.0"
+   }
+  }
+ },
+ "name": "@aauth/mcp-agent",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@aauth%2Fmcp-agent"
+}

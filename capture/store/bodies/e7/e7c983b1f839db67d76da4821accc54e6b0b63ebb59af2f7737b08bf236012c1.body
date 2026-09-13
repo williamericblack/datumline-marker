@@ -1,0 +1,581 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.1.4",
+  "maintainers": [
+   {
+    "email": "[redacted-email:288d2c84f14a]",
+    "name": "allensandiego"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.1.2",
+   "0.1.3",
+   "0.1.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@allensandiego/postgres-mcp-server",
+  "_rev": "5-654d77a4e1ab7760cc86f9a1e3050cee",
+  "bugs": {
+   "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+  },
+  "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+  "dist-tags": {
+   "latest": "0.1.4"
+  },
+  "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "postgres",
+   "postgresql",
+   "ai",
+   "database"
+  ],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:288d2c84f14a]",
+    "name": "allensandiego"
+   }
+  ],
+  "name": "@allensandiego/postgres-mcp-server",
+  "readme": "# Postgres MCP Server\n\nA Model Context Protocol (MCP) server for PostgreSQL databases. Connects AI assistants (Claude Desktop, Cursor, Antigravity, etc.) to a PostgreSQL database with schema discovery, catalog introspection, read-only analytical queries, and opt-in safe write operations.\n\n## Features\n\n- **Schema Discovery**: Inspect schemas, tables, views, column data types, primary keys, and uniqueness constraints (`list_tables`, `describe_table`).\n- **Catalog & Governance Discovery**: Discover visible databases, roles with attributes and memberships, and permissions across schemas, tables, and columns (`list_databases`, `list_roles`, `list_permissions`).\n- **Bounded Read Queries**: Run parameterized SQL queries with pagination (`limit`, `offset`), strict maximum row limits, and automatic truncation detection (`run_query`).\n- **Gated Safe Writes**: Write operations (`run_write_query` for INSERT, UPDATE, DELETE, DDL) are disabled by default and require explicit `ALLOW_WRITE=1` configuration.\n- **Security & Privacy First**: Zero credential leakage. Connection strings, passwords, and internal stack traces are redacted from logs and tool responses. Parameterized SQL prevents SQL injection.\n- **Stdio Transport**: Seamlessly runs over stdio conforming to standard MCP protocol clients.\n\n---\n\n## Quick Start\n\n### Running via NPX\n\nPass the connection string directly as a command-line argument or via environment variable:\n\n```bash\n# Read-only mode (default)\nnpx @allensandiego/postgres-mcp-server postgres://user:password@localhost:5432/mydb\n\n# Enable write mode via CLI flag\nnpx @allensandiego/postgres-mcp-server postgres://user:password@localhost:5432/mydb --allow-write\n\n# Or configure via environment variables\nexport DATABASE_URL=\"postgres://user:password@localhost:5432/mydb\"\nexport ALLOW_WRITE=1   # Optional: enable write queries\nnpx @allensandiego/postgres-mcp-server\n```\n\n### Global Installation\n\n```bash\nnpm install -g @allensandiego/postgres-mcp-server\n\n# Run read-only\npostgres-mcp-server postgres://user:password@localhost:5432/mydb\n\n# Run with write operations enabled\npostgres-mcp-server postgres://user:password@localhost:5432/mydb --allow-write\n```\n\n### Local Development\n\n```bash\n# Clone and install dependencies\ngit clone https://github.com/allensandiego/postgres-mcp-server.git\ncd postgres-mcp-server\nnpm install\n\n# Build\nnpm run build\n\n# Run with tsx in development\nnpm run dev -- postgres://user:password@localhost:5432/mydb --allow-write\n```\n\n---\n\n## Configuration\n\nThe server can be configured via CLI flags or environment variables:\n\n### Connection String\n\nYou can provide the connection string in any of the following ways (in order of precedence):\n1. **CLI Positional Argument**: `postgres-mcp-server postgres://user:password@host:port/db`\n2. **CLI Option**: `postgres-mcp-server --url=postgres://...` or `--connection-string=...`\n3. **Environment Variables**: `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_CONNECTION_STRING`, `PG_CONNECTION_STRING`, `DATABASE_URI`, `POSTGRES_URI`, `PGURL`, or `PG_URL`\n\n### Enabling Write Operations (`ALLOW_WRITE`)\n\nBy default, the server runs in **read-only mode** (`run_write_query` will reject any destructive or mutating SQL).\nTo enable write queries (INSERT, UPDATE, DELETE, CREATE, DROP, ALTER):\n- **Via CLI flag**: Pass `--allow-write`, `--write`, or `-w`\n- **Via Environment Variable**: Set `ALLOW_WRITE=1` (or `ALLOW_WRITE=true`)\n\n### Environment Variables Reference\n\n| Variable | Description | Default |\n|---|---|---|\n| `DATABASE_URL` / `POSTGRES_URL` / `POSTGRES_CONNECTION_STRING` | Full PostgreSQL connection URI (`postgres://user:pass@host:port/db`) | None |\n| `ALLOW_WRITE` | Enables write queries (`1`, `true`, `yes`, `on`) | `false` (Read-only) |\n| `PGHOST` / `POSTGRES_HOST` | Database host name | `localhost` |\n| `PGPORT` | Database port number | `5432` |\n| `PGDATABASE` / `POSTGRES_DB` | Database name | `postgres` |\n| `PGUSER` / `POSTGRES_USER` | Database user name | `postgres` |\n| `PGPASSWORD` / `POSTGRES_PASSWORD` | Database password | None |\n| `PGSSLMODE` / `PGSSL` | SSL configuration mode (`require`, `verify-full`, etc.) | Disabled |\n| `MAX_ROW_LIMIT` / `ROW_LIMIT` | Maximum rows returned per query | `1000` |\n| `QUERY_TIMEOUT_MS` | Per-query timeout in milliseconds | `30000` (30s) |\n| `MAX_CONNECTIONS` / `POOL_MAX` | Maximum active database connections in pool | `10` |\n\n---\n\n## MCP Tools Reference\n\n### 1. `list_tables`\nDiscover all user schemas and their tables/views and columns without writing SQL.\n- **Arguments**:\n  - `schema` *(optional string)*: Filter tables by schema name (e.g. `\"public\"`).\n- **Output**: Array of `{ schema, name, type, columns: [{ name, dataType, nullable, isPrimaryKey, isUnique }] }`.\n\n### 2. `describe_table`\nRetrieve detailed column specifications and primary key definitions for a table.\n- **Arguments**:\n  - `schema` *(required string)*: Schema name (e.g. `\"public\"`).\n  - `table` *(required string)*: Table name (e.g. `\"users\"`).\n- **Output**: `{ schema, table, columns: [...], primaryKey?: string }`.\n\n### 3. `list_databases`\nDiscover databases visible and connectable to the connected user.\n- **Arguments**: None.\n- **Output**: Array of `{ name, owner, encoding, isTemplate, connectable }`.\n\n### 4. `list_roles`\nDiscover roles/users, their administrative attributes, and group memberships.\n- **Arguments**: None.\n- **Output**: Array of `{ name, superuser, canLogin, canCreateDb, canCreateRole, canBypassRls, memberOf, members }`.\n\n### 5. `list_permissions`\nDiscover granted privileges across schemas, tables, and columns.\n- **Arguments**:\n  - `objectType` *(optional string)*: `\"schema\"`, `\"table\"`, or `\"column\"`.\n  - `schema` *(optional string)*: Schema name filter.\n  - `table` *(optional string)*: Table name filter.\n- **Output**: Array of `{ grantor, grantee, objectType, objectName, privilege, grantable }`.\n\n### 6. `run_query`\nExecute a read-only parameterized `SELECT` query.\n- **Arguments**:\n  - `sql` *(required string)*: Parameterized SQL statement (e.g. `\"SELECT * FROM orders WHERE status = $1\"`).\n  - `params` *(optional array)*: Parameter substitution values.\n  - `limit` *(optional integer)*: Page limit (capped at `MAX_ROW_LIMIT`).\n  - `offset` *(optional integer)*: Page offset for pagination.\n  - `role` *(optional string)*: Role/user to assume (`SET ROLE`) for this specific query only.\n- **Output**: `{ columns, rows, rowCount, truncated }`.\n\n### 7. `run_write_query`\nExecute modifying SQL statements (INSERT, UPDATE, DELETE, DDL). Only active when `ALLOW_WRITE=1` or `--allow-write` is provided.\n- **Arguments**:\n  - `sql` *(required string)*: SQL write statement.\n  - `params` *(optional array)*: Parameter values.\n  - `role` *(optional string)*: Role/user to assume (`SET ROLE`) for this specific write query only.\n- **Output**: `{ rowCount }`.\n\n### 8. `set_role`\nSet the active PostgreSQL role/user for the session (`SET ROLE`) or restore the default session user (`RESET ROLE`).\n- **Arguments**:\n  - `role` *(required string)*: Role/username to set (e.g. `\"analyst\"`, `\"app_readonly\"`, or `\"NONE\"` / `\"RESET\"` to return to the original session user).\n- **Output**: `{ activeRole, sessionUser, isReset, message }`.\n\n---\n\n## MCP Client Setup Examples\n\n### Gemini CLI Configuration (`mcp_config.json` or `settings.json`)\n\n**Read-only mode (Default)**:\n```json\n{\n  \"mcpServers\": {\n    \"postgres\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@allensandiego/postgres-mcp-server@latest\",\n        \"postgres://username:password@localhost:5432/mydb\"\n      ]\n    }\n  }\n}\n```\n\n**Write-enabled mode**:\n```json\n{\n  \"mcpServers\": {\n    \"postgres\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@allensandiego/postgres-mcp-server@latest\",\n        \"postgres://username:password@localhost:5432/mydb\",\n        \"--allow-write\"\n      ]\n    }\n  }\n}\n```\n\n*Or via environment variables:*\n```json\n{\n  \"mcpServers\": {\n    \"postgres\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@allensandiego/postgres-mcp-server@latest\"],\n      \"env\": {\n        \"DATABASE_URL\": \"postgres://username:password@localhost:5432/mydb\",\n        \"ALLOW_WRITE\": \"1\"\n      }\n    }\n  }\n}\n```\n\n### Claude Desktop Configuration (`claude_desktop_config.json`)\n\n```json\n{\n  \"mcpServers\": {\n    \"postgres\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@allensandiego/postgres-mcp-server@latest\",\n        \"postgres://username:password@localhost:5432/mydb\"\n      ],\n      \"env\": {\n        \"ALLOW_WRITE\": \"0\"\n      }\n    }\n  }\n}\n```\n\n### Antigravity / Cursor Configuration\n\n```json\n{\n  \"mcpServers\": {\n    \"postgres\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@allensandiego/postgres-mcp-server@latest\",\n        \"postgres://username:password@localhost:5432/mydb\"\n      ],\n      \"env\": {\n        \"ALLOW_WRITE\": \"1\"\n      }\n    }\n  }\n}\n```\n\n---\n\n## Testing & Quality Gates\n\nRun the automated test suite (unit + contract + integration tests):\n\n```bash\nnpm test\n```\n\nType checking:\n\n```bash\nnpm run typecheck\n```\n\nLinting:\n\n```bash\nnpm run lint\n```\n\n---\n\n## License\n\nThis project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md) - free for personal, educational, research, and non-commercial open-source use. Commercial use requires a commercial license.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-14T15:31:17.331Z",
+   "0.1.1": "2026-08-15T03:30:02.688Z",
+   "0.1.2": "2026-08-15T03:34:44.585Z",
+   "0.1.3": "2026-08-16T13:26:41.779Z",
+   "0.1.4": "2026-08-16T13:49:33.293Z",
+   "created": "2026-08-14T15:31:17.011Z",
+   "modified": "2026-08-16T13:49:33.630Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@allensandiego/postgres-mcp-server@0.1.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/postgres-mcp-server_0.1.0_1786721477199_0.48546869469907294"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:288d2c84f14a]",
+     "name": "allensandiego"
+    },
+    "_npmVersion": "10.8.2",
+    "author": "",
+    "bin": {
+     "postgres-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.7",
+     "pg": "^8.13.1",
+     "pg-format": "^1.0.4",
+     "zod": "^3.24.2"
+    },
+    "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+    "devDependencies": {
+     "@eslint/js": "^9.20.0",
+     "@types/node": "^22.13.4",
+     "@types/pg": "^8.11.11",
+     "@types/pg-format": "^1.0.5",
+     "eslint": "^9.20.1",
+     "pg-mem": "^3.0.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.24.0",
+     "vitest": "^3.0.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@allensandiego%2fpostgres-mcp-server@0.1.0"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-tzP76IU4geOS09vJWH3IZtG6Stwc68o8SoguzuOaEYG0gpbcDVvyJbUamrYG31JQdyMlgoMxtv/FlcXVPNKUWQ==",
+     "shasum": "4ba7decc5ad013ba5558598f4acfc5bec4839712",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCBK4DOKlEpzpEbZvnjz3oK6yaNCCutZROKZyBSc4PbrwIhAJ76wT8dmry1dEaRyKjQGm3Sa2Y6qLuTmJu9SYb2xdOf"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@allensandiego/postgres-mcp-server/-/postgres-mcp-server-0.1.0.tgz",
+     "unpackedSize": 88870
+    },
+    "gitHead": "566306d3994708403fef2494a7d73a5c70fd3712",
+    "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "postgres",
+     "postgresql",
+     "ai",
+     "database"
+    ],
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:288d2c84f14a]",
+      "name": "allensandiego"
+     }
+    ],
+    "name": "@allensandiego/postgres-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "lint": "eslint src tests",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@allensandiego/postgres-mcp-server@0.1.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/postgres-mcp-server_0.1.1_1786764602502_0.5805086038776219"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:11872167-3922-431b-a3c4-f1afc2c8de32"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": "",
+    "bin": {
+     "postgres-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.7",
+     "pg": "^8.13.1",
+     "pg-format": "^1.0.4",
+     "zod": "^3.24.2"
+    },
+    "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+    "devDependencies": {
+     "@eslint/js": "^9.20.0",
+     "@types/node": "^22.13.4",
+     "@types/pg": "^8.11.11",
+     "@types/pg-format": "^1.0.5",
+     "eslint": "^9.20.1",
+     "pg-mem": "^3.0.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.24.0",
+     "vitest": "^3.0.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@allensandiego%2fpostgres-mcp-server@0.1.1"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-JPpKYU7ud55fUUYkPYVuivrJzsJFdjNOQshhuWkmYNtMRnLHTet1vCs2CF/lcH2QdQ5u8/tSqNdutibvqDQMUg==",
+     "shasum": "cf2f7bfcb71966f544cc5c473c56fded29515570",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGHb5MI5a/jbJPYnz5jdp2ENgNZsWH06XRVDzgAa3eqpAiEArrgeZX7hYi47t9rscIHRlmaJfaeSWaZ11LTCK0afUQ4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@allensandiego/postgres-mcp-server/-/postgres-mcp-server-0.1.1.tgz",
+     "unpackedSize": 93770
+    },
+    "gitHead": "b79230043f88c51b3c6a6709723f2727a7898661",
+    "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "postgres",
+     "postgresql",
+     "ai",
+     "database"
+    ],
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:288d2c84f14a]",
+      "name": "allensandiego"
+     }
+    ],
+    "name": "@allensandiego/postgres-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "lint": "eslint src tests",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@allensandiego/postgres-mcp-server@0.1.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/postgres-mcp-server_0.1.2_1786764884391_0.01196116884962084"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:11872167-3922-431b-a3c4-f1afc2c8de32"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": "",
+    "bin": {
+     "postgres-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.7",
+     "pg": "^8.13.1",
+     "pg-format": "^1.0.4",
+     "zod": "^3.24.2"
+    },
+    "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+    "devDependencies": {
+     "@eslint/js": "^9.20.0",
+     "@types/node": "^22.13.4",
+     "@types/pg": "^8.11.11",
+     "@types/pg-format": "^1.0.5",
+     "eslint": "^9.20.1",
+     "pg-mem": "^3.0.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.24.0",
+     "vitest": "^3.0.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@allensandiego%2fpostgres-mcp-server@0.1.2"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-UauGNTxaJJf5Ms4iS/UYnYXpIIB9m4vUWc55JumoCDTBpGutd7GjZssYzST9JeRFcGx1jT9VCQirQZrhPQpJSQ==",
+     "shasum": "fa0332eda237bc9f26c268fb662fb2cd6546b309",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICPDvSVsI4JrFA9rznZvGEEKf/Xg9Zwgv/HAfOM8VGpqAiEA/LhA7krOGHFK9U1rRTNabPykp7uzSbNXLiFRbFbjcZI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@allensandiego/postgres-mcp-server/-/postgres-mcp-server-0.1.2.tgz",
+     "unpackedSize": 95928
+    },
+    "gitHead": "e14bd2473d328e76e8918f5922bf0ccdcfada930",
+    "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "postgres",
+     "postgresql",
+     "ai",
+     "database"
+    ],
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:288d2c84f14a]",
+      "name": "allensandiego"
+     }
+    ],
+    "name": "@allensandiego/postgres-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "lint": "eslint src tests",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@allensandiego/postgres-mcp-server@0.1.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/postgres-mcp-server_0.1.3_1786886801621_0.4729617782626152"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:11872167-3922-431b-a3c4-f1afc2c8de32"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": "",
+    "bin": {
+     "postgres-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.7",
+     "pg": "^8.13.1",
+     "pg-format": "^1.0.4",
+     "zod": "^3.24.2"
+    },
+    "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+    "devDependencies": {
+     "@eslint/js": "^9.20.0",
+     "@types/node": "^22.13.4",
+     "@types/pg": "^8.11.11",
+     "@types/pg-format": "^1.0.5",
+     "eslint": "^9.20.1",
+     "pg-mem": "^3.0.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.24.0",
+     "vitest": "^3.0.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@allensandiego%2fpostgres-mcp-server@0.1.3"
+     },
+     "fileCount": 51,
+     "integrity": "sha512-WlK/RvEnDEIG2EcSzM2Ci+qwgQLnC7+WO3JlZll8Z8JceGT+/rFFzlanw5wi0W+DZv9pAI7kGBC69RVyL1C+ng==",
+     "shasum": "5ba5c145774b63e8fedef5a11d5291a14d7d9b23",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDRmls9uwTrFUgI+cwxetc3D4278ytWfQpuAguf0w52KQIgS2q1ooOU6ANw5RuRj6tTNzTYeZ41havFsDcvrIdQ3fA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@allensandiego/postgres-mcp-server/-/postgres-mcp-server-0.1.3.tgz",
+     "unpackedSize": 96595
+    },
+    "gitHead": "4e4279ddd5fd8f8a357216597f92434dee027228",
+    "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "postgres",
+     "postgresql",
+     "ai",
+     "database"
+    ],
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:288d2c84f14a]",
+      "name": "allensandiego"
+     }
+    ],
+    "name": "@allensandiego/postgres-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "lint": "eslint src tests",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.3"
+   },
+   "0.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@allensandiego/postgres-mcp-server@0.1.4",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/postgres-mcp-server_0.1.4_1786888173142_0.9492680754119243"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:11872167-3922-431b-a3c4-f1afc2c8de32"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": "",
+    "bin": {
+     "postgres-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/allensandiego/postgres-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "dotenv": "^16.4.7",
+     "pg": "^8.13.1",
+     "pg-format": "^1.0.4",
+     "zod": "^3.24.2"
+    },
+    "description": "Model Context Protocol (MCP) server for PostgreSQL databases",
+    "devDependencies": {
+     "@eslint/js": "^9.20.0",
+     "@types/node": "^22.13.4",
+     "@types/pg": "^8.11.11",
+     "@types/pg-format": "^1.0.5",
+     "eslint": "^9.20.1",
+     "pg-mem": "^3.0.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.24.0",
+     "vitest": "^3.0.5"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@allensandiego%2fpostgres-mcp-server@0.1.4"
+     },
+     "fileCount": 55,
+     "integrity": "sha512-JpEnA6+TYppCkRiUfuTr2sa95oT0u9bcWPRkG7AMjpTOR20sVdkVa+Qg/0YTA8VmrVtlaJYiX6b263SczBssMg==",
+     "shasum": "c60acd81ac4eba2e014c210dfd82976f03d2b903",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCa09FIkkWQhD1SBcDlQqGzVam0b3OyKK8Aj4ZSDrTpXwIhAPSryeEJCwCnUTkbz2vZD4bH5QEhUP86jqnvvyDzj942"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@allensandiego/postgres-mcp-server/-/postgres-mcp-server-0.1.4.tgz",
+     "unpackedSize": 105420
+    },
+    "gitHead": "f4ea9755a659ef9de8f2eef2c104e8c2953bce7b",
+    "homepage": "https://github.com/allensandiego/postgres-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "postgres",
+     "postgresql",
+     "ai",
+     "database"
+    ],
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:288d2c84f14a]",
+      "name": "allensandiego"
+     }
+    ],
+    "name": "@allensandiego/postgres-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/allensandiego/postgres-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsx src/index.ts",
+     "lint": "eslint src tests",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.4"
+   }
+  }
+ },
+ "name": "@allensandiego/postgres-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@allensandiego%2Fpostgres-mcp-server"
+}

@@ -1,0 +1,780 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0",
+   "0.2.1",
+   "0.2.2",
+   "0.3.0",
+   "0.5.0",
+   "0.5.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-shopify",
+  "_rev": "6-3f04759ec2f412c604eb5929cee97f20",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-shopify/issues"
+  },
+  "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+  "dist-tags": {
+   "latest": "0.5.1"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+  "keywords": [
+   "ecommerce",
+   "graphql",
+   "mcp",
+   "model-context-protocol",
+   "shopify"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-shopify",
+  "readme": "# @mgcrea/mcp-shopify\n\n> **Breaking in 0.4.0 \u2014 every tool is now prefixed `shopify_`.**\n> `list_products` is `shopify_list_products`, `get_order` is `shopify_get_order`, and so on.\n> MCP servers share one flat tool namespace in the client, and the old unprefixed names\n> collided with other servers' \u2014 `get_quote` and `cancel_order` existed in three of these\n> repos at once, and whichever loaded last silently won. Update any saved prompts or\n> allowlists that name a tool.\n\n[![npm version](https://img.shields.io/npm/v/@mgcrea/mcp-shopify.svg?style=for-the-badge)](https://www.npmjs.com/package/@mgcrea/mcp-shopify)\n[![GHCR](https://img.shields.io/badge/ghcr.io-container_image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/mgcrea/mcp-shopify/pkgs/container/mcp-shopify)\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for the **Shopify Admin\nGraphQL API**. It lets an agent explore and understand how a store is built \u2014 products,\nvariants, metafields, metafield definitions, collections, inventory, and shop settings.\n\nThe server is **read-only**: it exposes only query tools, so it can never mutate store data.\n\n## Features\n\n- Read-only access to the Shopify **Admin GraphQL API** (default version `2026-04`).\n- Curated tools for products, variants, metafields, metafield definitions, collections,\n  inventory & locations, and shop settings.\n- A `shopify_graphql` escape hatch for arbitrary read-only queries \u2014 `mutation` and\n  `subscription` operations are rejected. See [Security](#security).\n- Native `fetch`, no HTTP client dependency.\n- Automatic retry on HTTP 429 and cost-based `THROTTLED` GraphQL errors.\n- Single-store auth via the **OAuth client credentials grant** \u2014 the server exchanges\n  your Dev Dashboard app's Client ID + Client Secret for a short-lived Admin API access\n  token and auto-refreshes it (also on a mid-session 401).\n\n## Security\n\nYou are handing an AI agent credentials to a live storefront, so the honest details\nmatter more than reassurance.\n\n### Supply chain\n\n**Two direct dependencies:** `@modelcontextprotocol/sdk` and `zod`. Nothing else is\nchosen by us.\n\nBeing straight about what that costs: those two pull in **~94 packages** transitively \u2014\nthe number `npm install` prints, and every one arrives via the official MCP SDK. That's\nthe honest figure, not \"two dependencies\". Two things keep the real exposure much\nsmaller than 94:\n\n- **Nothing runs at install time.** Not one package in the tree declares a\n  `preinstall`, `install` or `postinstall` script, so `npm install` executes no\n  third-party code \u2014 the most common supply-chain attack path simply isn't open.\n- **Only 5 are reachable when the server runs:** the SDK, `zod`, `ajv`, `ajv-formats`\n  and `zod-to-json-schema`. This server speaks **stdio only**, so the SDK's HTTP/SSE/OAuth\n  stack (`express`, `hono`, `jose`, `cors`, `pkce-challenge`, `eventsource`) sits in the\n  tree but is never imported.\n\nCheck all of it yourself:\n\n```sh\nnpm view @mgcrea/mcp-shopify dependencies                # the two\nnpm ls --omit=dev --all                                  # the ~94\ngrep -hoE '^import[^;]*from \"[^\"]+\"' node_modules/@mgcrea/mcp-shopify/dist/*.js\n```\n\nThat last command prints everything the shipped bundle imports \u2014 the SDK's stdio\nentrypoints, `zod`, and Node builtins. Nothing else.\n\n### Verified builds\n\nNeither artifact is published from a laptop:\n\n- **npm** \u2014 published by CI through [Trusted Publishing](https://docs.npmjs.com/trusted-publishers)\n  (OIDC), so there is no long-lived `NPM_TOKEN` in existence to leak, plus a\n  [provenance attestation](https://docs.npmjs.com/generating-provenance-statements).\n- **Container** \u2014 build provenance, an SBOM, and a\n  [cosign](https://github.com/sigstore/cosign) keyless signature.\n\nBoth trace back to the exact commit and CI run that produced them. The commands to check\nare in [Verify](#verify) \u2014 please run them rather than take this section's word for it.\n\n### Your credentials\n\n**No long-lived token is stored anywhere.** The server holds your Client ID and Secret\nand exchanges them at runtime for a short-lived (~24h) Admin API access token, refreshed\nabout two minutes before expiry and on any mid-session 401. Nothing is written to disk;\nthe token lives in memory for the life of the process.\n\nThis is also why the deprecated `shpat_` flow isn't supported: a permanent copy-paste\ntoken in a config file is a worse artifact to leak than a secret that mints 24h tokens.\n\n### Blast radius\n\nTwo independent limits:\n\n1. **Read-only by construction.** This server implements no mutating tools at all \u2014\n   there is no write path to disable, because none was written. The `shopify_graphql`\n   escape hatch parses your document and rejects `mutation` and `subscription`\n   operations _before_ any network call (`assertReadOnly` in\n   [src/tools/graphql.ts](./src/tools/graphql.ts)); comments and string literals are\n   stripped first so the keyword can't be smuggled past it.\n2. **Your app's access scopes are the real ceiling**, and this server cannot raise them.\n   Scopes live in the Shopify Dev Dashboard, under your control, not in this codebase.\n\nThose are different kinds of guarantee and worth keeping apart: the first is a property\nof this code and only holds as long as the code is what you think it is; the second is\nenforced by Shopify regardless of what this server does. **Grant only `read_*` scopes**\nand the second one backstops the first. See [Configure](#configure) for the minimum set.\n\n## Configure\n\nThis server talks to a single store using a **Dev Dashboard** app and the OAuth\nclient credentials grant. Shopify deprecated the in-admin \"Develop apps\" flow on\nJanuary 1, 2026, so new custom apps no longer expose a copy-paste `shpat_` token \u2014\nthey expose a Client ID + Client Secret that the server exchanges at runtime.\n\n1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com) \u2192 **Apps \u2192 Create app**.\n2. Configure **Admin API access scopes** on the app: `read_products` (required), plus\n   `read_inventory` and `read_locations` for the inventory tools.\n3. **Install the app on your store** (the client credentials grant only works once the\n   app is installed on the target shop).\n4. Copy the **Client ID** and **Client secret** (the secret starts with `shpss_`) from\n   the app's API credentials page.\n\nThen create your `.env`:\n\n```bash\ncp .env.example .env\n# Fill in SHOPIFY_STORE_DOMAIN, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET (shpss_\u2026)\n```\n\n| Variable                | Required | Description                                                                         |\n| ----------------------- | -------- | ----------------------------------------------------------------------------------- |\n| `SHOPIFY_STORE_DOMAIN`  | yes      | The `*.myshopify.com` domain. A bare handle (`my-store`) is expanded automatically. |\n| `SHOPIFY_CLIENT_ID`     | yes      | Dev Dashboard app Client ID.                                                        |\n| `SHOPIFY_CLIENT_SECRET` | yes      | Dev Dashboard app Client secret (`shpss_...`).                                      |\n| `SHOPIFY_API_VERSION`   | no       | Admin GraphQL API version. Defaults to `2026-04`.                                   |\n| `SHOPIFY_MAX_RETRIES`   | no       | Retry budget for rate-limit / throttle / 401 responses. Defaults to `3`.            |\n| `SHOPIFY_DEBUG`         | no       | Set to `1` to log debug output to stderr.                                           |\n\nThe server fetches an Admin API access token on first use and refreshes it\nautomatically (\u224824h tokens, refreshed 2min before expiry and on any 401).\n\n## Quick start\n\nPick one of the three. All talk to the same Shopify Admin GraphQL API \u2014 the difference is only how the server is launched. Options A and B need nothing checked out.\n\n### A. npx \u2014 recommended\n\nZero install; `npx` fetches and runs the published package. Wire it into Claude Code (or any MCP client) with your credentials:\n\n```json\n{\n  \"mcpServers\": {\n    \"shopify\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@mgcrea/mcp-shopify\"],\n      \"env\": {\n        \"SHOPIFY_STORE_DOMAIN\": \"my-store.myshopify.com\",\n        \"SHOPIFY_CLIENT_ID\": \"...\",\n        \"SHOPIFY_CLIENT_SECRET\": \"shpss_...\"\n      }\n    }\n  }\n}\n```\n\nTo try it from a shell (reads the same env, or a local `.env`):\n\n```sh\nnpx -y @mgcrea/mcp-shopify\n```\n\n### B. Docker (stdio)\n\nRuns the container image published to GHCR:\n\n```json\n{\n  \"mcpServers\": {\n    \"shopify\": {\n      \"command\": \"docker\",\n      \"args\": [\n        \"run\",\n        \"-i\",\n        \"--rm\",\n        \"-e\",\n        \"SHOPIFY_STORE_DOMAIN\",\n        \"-e\",\n        \"SHOPIFY_CLIENT_ID\",\n        \"-e\",\n        \"SHOPIFY_CLIENT_SECRET\",\n        \"ghcr.io/mgcrea/mcp-shopify:latest\"\n      ],\n      \"env\": {\n        \"SHOPIFY_STORE_DOMAIN\": \"my-store.myshopify.com\",\n        \"SHOPIFY_CLIENT_ID\": \"...\",\n        \"SHOPIFY_CLIENT_SECRET\": \"shpss_...\"\n      }\n    }\n  }\n}\n```\n\n`-i` keeps stdin open, which the stdio transport needs \u2014 don't drop it. With your secrets already in `.env`, you can also run it directly: `docker run --rm -i --env-file .env ghcr.io/mgcrea/mcp-shopify:latest`. GHCR is the only registry CI publishes to \u2014 it's what carries the provenance/SBOM/cosign signature described in **Verify** below.\n\n### C. From source (development)\n\n```sh\ngit clone https://github.com/mgcrea/mcp-shopify.git\ncd mcp-shopify\npnpm install\npnpm build\nnode dist/cli.js        # reads a local .env\n```\n\nOr wire the built entry directly: `\"command\": \"node\"`, `\"args\": [\"/absolute/path/to/mcp-shopify/dist/cli.js\"]`.\n\n### Inspect the tools\n\n```sh\nnpx @modelcontextprotocol/inspector npx -y @mgcrea/mcp-shopify\n```\n\n## Tools\n\n| Tool                                 | Purpose                                                                   |\n| ------------------------------------ | ------------------------------------------------------------------------- |\n| `shopify_list_products`              | Paginated product list; `query` accepts Shopify search syntax.            |\n| `shopify_get_product`                | A single product by `id` or `handle`, with full detail.                   |\n| `shopify_list_product_variants`      | Variants of a product, or a store-wide variant search.                    |\n| `shopify_get_product_variant`        | A single variant by `id`.                                                 |\n| `shopify_get_product_metafields`     | Metafields attached to a product.                                         |\n| `shopify_get_variant_metafields`     | Metafields attached to a variant.                                         |\n| `shopify_list_metafield_definitions` | Metafield definitions for an owner type \u2014 the store's custom-data schema. |\n| `shopify_list_collections`           | Paginated collection list.                                                |\n| `shopify_get_collection`             | A single collection by `id` or `handle`, optionally with member products. |\n| `shopify_list_locations`             | The store's locations / warehouses.                                       |\n| `shopify_get_variant_inventory`      | Inventory levels for a variant across all locations.                      |\n| `shopify_get_shop`                   | Shop-level settings (name, currency, plan, limits, \u2026).                    |\n| `shopify_graphql`                    | Run an arbitrary read-only GraphQL query (mutations rejected).            |\n\nAll list tools use cursor pagination: pass `pageInfo.endCursor` from one call as the `after`\nargument of the next.\n\n## Development\n\n```bash\npnpm dev          # tsdown --watch\npnpm test         # vitest run\npnpm typecheck    # tsc --noEmit\npnpm lint         # oxlint\npnpm format       # oxfmt --write .\n```\n\n### Docker (local build)\n\n```bash\npnpm docker:build      # single-arch local image\npnpm docker:buildx     # multi-arch (linux/amd64,linux/arm64)\npnpm docker:release    # multi-arch + push to Docker Hub (mgcrea/mcp-shopify)\n```\n\nThe build script passes `GIT_COMMIT` / `GIT_COMMIT_DATE` as build args so the\nbundle bakes in real git info even though `.git` isn't copied into the build\ncontext.\n\n### Publish\n\nOptions A (npx) and B (Docker) resolve only once a release is out. Pushing a `v*.*.*` tag triggers CI to:\n\n- publish to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC \u2014 no `NPM_TOKEN` stored anywhere) with a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements), and\n- build, sign, and push the multi-arch image to `ghcr.io/mgcrea/mcp-shopify`, with build provenance, an SBOM, and a [cosign](https://github.com/sigstore/cosign) keyless signature.\n\nBoth artifacts are cryptographically traceable back to the exact commit and CI run that produced them \u2014 see **Verify** below. Until a release exists, use Option C from source.\n\n### Verify\n\nBefore trusting an artifact from Option A or B, you can check it was actually built by this repo's CI rather than published from someone's laptop:\n\n```sh\n# npm \u2014 provenance attestation (also shown as a badge on the npmjs.com package page)\nnpm audit signatures\n\n# Docker \u2014 cosign keyless signature, tied to this repo's GitHub Actions identity\ncosign verify \\\n  --certificate-identity-regexp 'https://github.com/mgcrea/mcp-shopify/.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\\n  ghcr.io/mgcrea/mcp-shopify:latest\n```\n\n## License\n\nMIT \u2014 \u00a9 Olivier Louvignes\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+  },
+  "time": {
+   "0.2.0": "2026-07-19T08:46:31.548Z",
+   "0.2.1": "2026-07-19T08:54:25.127Z",
+   "0.2.2": "2026-07-19T09:33:04.847Z",
+   "0.3.0": "2026-07-20T20:06:37.530Z",
+   "0.5.0": "2026-08-30T19:32:23.678Z",
+   "0.5.1": "2026-09-01T14:12:30.535Z",
+   "created": "2026-07-19T08:46:31.160Z",
+   "modified": "2026-09-01T14:12:30.885Z"
+  },
+  "versions": {
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.2.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.2.0_1784450791407_0.15943839641299662"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@types/node": "^24.12.4",
+     "oxfmt": "^0.45.0",
+     "oxlint": "^1.60.0",
+     "tsdown": "^0.22.0",
+     "tsx": "^4.22.3",
+     "typescript": "^6.0.3",
+     "vite": "^8.0.14",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-n84TL0PdexO3zZZ4TkrdqukOhHj9xzuOry6602FBPPZxd4yLwmGoN2BNbJ0j46aRDdG1E5S2L/uOtbbP4FvUxQ==",
+     "shasum": "0457e7db58046881c75f9833b36f944801e046f0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICmpZHixA0ZtlcSQTwvzjIQPSgPBkzXvWh/B1p7X7ZQKAiBu8zw2y2oi1TzFpgCtZQlhz/uGZMTx8YMtvLxEuPTMGA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.2.0.tgz",
+     "unpackedSize": 102919
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "113dfddeca1746162d1afeba455f62b2a728d761",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.3.0",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.2.1",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.2.1_1784451264977_0.37627851456424843"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:9f8a3834-dea5-46db-a1f3-8960da124da0"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@types/node": "^24.12.4",
+     "oxfmt": "^0.45.0",
+     "oxlint": "^1.60.0",
+     "tsdown": "^0.22.0",
+     "tsx": "^4.22.3",
+     "typescript": "^6.0.3",
+     "vite": "^8.0.14",
+     "vitest": "^4.1.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-shopify@0.2.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-kiZpdv4kp49r5NrnAVQIGj2xA2EzB2OCep1LTOda9wVHsRq37DqsZe3FAlqe4q7LJjilBRTFIVVhBIVUpa9deg==",
+     "shasum": "37c711949bbd4f59db0eb8215edb40354223de6a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIB5Bq2GvWOolt9xYLJbJV1UbYlMhd7OIaTccrHtcUw85AiA2HiWExQ9iAwoCoQkVO+DREgJb8dynsVdU3aGiEsydng=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.2.1.tgz",
+     "unpackedSize": 102966
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e7050f9836d64b01b20859fc0d18d765d893d79d",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.3.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.2.2",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.2.2_1784453584708_0.07339476886679352"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:9f8a3834-dea5-46db-a1f3-8960da124da0"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-shopify@0.2.2"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-qS8VeIl8haP5TIPmAghWnVyG3oEcf2LDbPou+5W8HeWWNtwDyMEGzcmbCsEDTbgrCt28hp+QGyv7tIzYbx5Lwg==",
+     "shasum": "03cfe3cef9dcec6db1db5b1d0bb23b6f9c990993",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDXvqq0QqjkYMfEakn4ZyMhi1/VWS/IPd1P9eeqJsCbNwIgB4bL3se/TlFRcpm27W4bI14Op4sCr/xR30hkpHM/NIM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.2.2.tgz",
+     "unpackedSize": 104364
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "43fb6b3444016e4aec077f460540660d11eebc63",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.3.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.3.0_1784577997390_0.32165675308600217"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:9f8a3834-dea5-46db-a1f3-8960da124da0"
+     }
+    },
+    "_npmVersion": "12.0.1",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@types/node": "^26.1.1",
+     "oxfmt": "^0.59.0",
+     "oxlint": "^1.74.0",
+     "tsdown": "^0.22.9",
+     "tsx": "^4.23.1",
+     "typescript": "^7.0.2",
+     "vite": "^8.1.5",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-shopify@0.3.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-EexOizJTJQzUcm9Rl67w21s+6s7zXp6u9Y4rVBqxuy7ju5Oeg7DlomEjyVa7Hrd9j1Y/0aBGh3VUvZ7qYpiHcg==",
+     "shasum": "8fd02cc099e4965d364646dfd7a17e37cd8fac89",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDy/WmcuOLh1Kf+kd67pZuSz6wb04Sy4StDJv5NO5iK+gIhALPnUXzm3HgqiHld4+sFUekVQsHVCV/SbOqobQq5JFRE"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.3.0.tgz",
+     "unpackedSize": 112319
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b117c827574142930f4aaad78cd09860ecd8432e",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.5.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.5.0_1788118343523_0.009028796146862028"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:9f8a3834-dea5-46db-a1f3-8960da124da0"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-shopify@0.5.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-zovnSqTMphI94HZTKWMWsnRape/2V3xyBAb67hFoL1+1GlPVhtcbPyLodiyJezyJyCkkwGUa8BhNS2CK03s8ug==",
+     "shasum": "9e7854880b69cf07b328657311220d5be4b289c5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAePh6nn7np4Fnbh73PP8vN4WZQRXlJd2t9pYut1SBgpAiEA+bVsfV6ezK2CyOlwQWEdNiOoq2rFxhbEaVcncJlZQsk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.5.0.tgz",
+     "unpackedSize": 123225
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4f57701824a41e073c24ecb020a127686d89786d",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-shopify@0.5.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-shopify_0.5.1_1788271950258_0.17441798148882603"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:9f8a3834-dea5-46db-a1f3-8960da124da0"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "shopify-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-shopify/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Shopify Admin GraphQL API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-shopify@0.5.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-6oqOy1Vnkr5DiApVp2EBLReN0zA6ZbPyTCC9xkM5TxdQbjzFIRHHweTjgoDbIr7piXgR1OzyhrqQdzfTr2RWeg==",
+     "shasum": "f2d9e58e64992715f36c3ba919e9986ece8c660d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC5qlkP2E8gjI4njSCW3cayrntaN+wotoyG7WvG4RHmLgIgM50k9Vw0JQQ/+ZH2qmFu9z/wJvTfYtUcg6o5cFdpSQc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-shopify/-/mcp-shopify-0.5.1.tgz",
+     "unpackedSize": 123796
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "01c141e6cb2279169602a81f6ad8202dff323ce6",
+    "homepage": "https://github.com/mgcrea/mcp-shopify#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "ecommerce",
+     "graphql",
+     "mcp",
+     "model-context-protocol",
+     "shopify"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-shopify",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-shopify.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-shopify:latest && docker push mgcrea/mcp-shopify:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.1"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-shopify",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-shopify"
+}

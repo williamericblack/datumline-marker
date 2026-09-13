@@ -1,0 +1,361 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.0.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:54ebd2f66c3c]",
+    "name": "julien-r44"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.0.1",
+   "1.0.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@monocle.sh/instrumentation-mcp",
+  "_rev": "3-181ae115d0ba4eccc88e85711a1e97cf",
+  "author": {
+   "email": "[redacted-email:54ebd2f66c3c]",
+   "name": "Julien Ripouteau"
+  },
+  "bugs": {
+   "url": "https://github.com/monocle-sh/js/issues"
+  },
+  "description": "OpenTelemetry instrumentation for MCP servers",
+  "dist-tags": {
+   "latest": "1.0.2"
+  },
+  "homepage": "https://github.com/monocle-sh/js/tree/main/packages/instrumentations/mcp",
+  "keywords": [
+   "instrumentation",
+   "mcp",
+   "model-context-protocol",
+   "monocle",
+   "opentelemetry",
+   "tracing"
+  ],
+  "license": "ISC",
+  "maintainers": [
+   {
+    "email": "[redacted-email:54ebd2f66c3c]",
+    "name": "julien-r44"
+   }
+  ],
+  "name": "@monocle.sh/instrumentation-mcp",
+  "readme": "# @monocle.sh/instrumentation-mcp\n\nOpenTelemetry instrumentation for [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) servers. Automatically traces JSON-RPC requests, responses, notifications, and handler errors with zero configuration.\n\n## Installation\n\n**Preferred** \u2014 via the AdonisJS agent (already includes this package):\n\n```bash\nnpm install @monocle.sh/adonisjs-agent\n```\n\n```ts\nimport { instrumentMcpServer } from '@monocle.sh/adonisjs-agent/mcp'\n```\n\n**Standalone:**\n\n```bash\nnpm install @monocle.sh/instrumentation-mcp\n```\n\n```ts\nimport { instrumentMcpServer } from '@monocle.sh/instrumentation-mcp'\n```\n\n## Usage\n\nCall `instrumentMcpServer` once on your MCP server instance before connecting transports:\n\n```ts\nimport { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'\nimport { instrumentMcpServer } from '@monocle.sh/instrumentation-mcp'\n\nconst server = new McpServer({ name: 'my-server', version: '1.0.0' })\n\ninstrumentMcpServer(server, {\n  recordInputs: true,\n  recordOutputs: true,\n})\n\nserver.tool('search', { query: z.string() }, async ({ query }) => {\n  return { content: [{ type: 'text', text: `Results for ${query}` }] }\n})\n\n// Connect transport as usual \u2014 instrumentation hooks in automatically\nconst transport = new StdioServerTransport()\nawait server.connect(transport)\n```\n\nThe function is idempotent \u2014 calling it twice on the same server returns the same instance.\n\n## Options\n\n| Option          | Type      | Default     | Description                                                     |\n| --------------- | --------- | ----------- | --------------------------------------------------------------- |\n| `recordInputs`  | `boolean` | `false`     | Capture tool/prompt arguments as span attributes                |\n| `recordOutputs` | `boolean` | `false`     | Capture tool results and prompt messages as span attributes     |\n| `serverName`    | `string`  | auto-detect | Server name added to all spans (auto-detected from `McpServer`) |\n| `serverVersion` | `string`  | auto-detect | Server version added to all spans                               |\n\n## Span Attributes\n\n### Core\n\n| Attribute         | Description          | Example                |\n| ----------------- | -------------------- | ---------------------- |\n| `mcp.method.name` | JSON-RPC method name | `tools/call`           |\n| `mcp.request.id`  | JSON-RPC request ID  | `1`                    |\n| `mcp.session.id`  | Transport session ID | `abc-123`              |\n| `mcp.transport`   | Transport class name | `StdioServerTransport` |\n\n### Client & Server\n\n| Attribute              | Description                      | Example       |\n| ---------------------- | -------------------------------- | ------------- |\n| `mcp.client.name`      | Client name from `initialize`    | `Claude Code` |\n| `mcp.client.version`   | Client version from `initialize` | `1.0.0`       |\n| `mcp.server.name`      | Server name                      | `my-server`   |\n| `mcp.server.version`   | Server version                   | `2.0.0`       |\n| `mcp.protocol.version` | MCP protocol version             | `2025-06-18`  |\n\n### Method-Specific\n\n| Attribute          | Description                    | Example             |\n| ------------------ | ------------------------------ | ------------------- |\n| `mcp.tool.name`    | Tool name for `tools/call`     | `search`            |\n| `mcp.resource.uri` | Resource URI for `resources/*` | `file:///readme.md` |\n| `mcp.prompt.name`  | Prompt name for `prompts/get`  | `code-review`       |\n\n### Tool Result (when `recordOutputs: true`)\n\n| Attribute                       | Description                    | Example |\n| ------------------------------- | ------------------------------ | ------- |\n| `mcp.tool.result.is_error`      | Whether tool returned an error | `true`  |\n| `mcp.tool.result.content_count` | Number of content items        | `2`     |\n| `mcp.tool.result.content`       | Text content (single item)     | `hello` |\n| `mcp.tool.result.{i}.content`   | Text content (multiple items)  | `hello` |\n\n### Prompt Result (when `recordOutputs: true`)\n\n| Attribute                           | Description              | Example     |\n| ----------------------------------- | ------------------------ | ----------- |\n| `mcp.prompt.result.description`     | Prompt description       | `Review...` |\n| `mcp.prompt.result.message_count`   | Number of messages       | `2`         |\n| `mcp.prompt.result.message_role`    | Message role (single)    | `assistant` |\n| `mcp.prompt.result.message_content` | Message content (single) | `Hello`     |\n\n### Request Arguments (when `recordInputs: true`)\n\n| Attribute                     | Description               | Example   |\n| ----------------------------- | ------------------------- | --------- |\n| `mcp.request.argument.{name}` | Serialized argument value | `\"hello\"` |\n\n### JSON-RPC Errors\n\n| Attribute                   | Description            | Example          |\n| --------------------------- | ---------------------- | ---------------- |\n| `rpc.jsonrpc.error_code`    | JSON-RPC error code    | `-32603`         |\n| `rpc.jsonrpc.error_message` | JSON-RPC error message | `Internal error` |\n\n## What Gets Traced\n\n- **Incoming requests** \u2014 `tools/call`, `resources/read`, `prompts/get`, etc. create SERVER spans that remain open until the response is sent\n- **Outgoing responses** \u2014 complete the corresponding request span with result attributes\n- **Incoming notifications** \u2014 `notifications/initialized`, etc. create short-lived SERVER spans\n- **Outgoing notifications** \u2014 `notifications/tools/list_changed`, etc. create CLIENT spans\n- **Transport errors** \u2014 connection errors create INTERNAL spans with ERROR status\n- **Handler errors** \u2014 exceptions in tool/resource/prompt handlers are recorded on the active span\n- **Transport close** \u2014 cancels any pending request spans with ERROR/cancelled status\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/instrumentations/mcp",
+   "type": "git",
+   "url": "git+https://github.com/monocle-sh/js.git"
+  },
+  "time": {
+   "1.0.0": "2026-03-08T17:23:39.288Z",
+   "1.0.1": "2026-04-06T13:01:13.097Z",
+   "1.0.2": "2026-05-17T11:01:07.254Z",
+   "created": "2026-03-08T17:23:39.058Z",
+   "modified": "2026-05-17T11:01:07.372Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_from": "file:monocle.sh-instrumentation-mcp-1.0.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@monocle.sh/instrumentation-mcp@1.0.0",
+    "_integrity": "sha512-C+BW2/+QuXAiqt9Kh0FGGE8Cc/vjaxuH38Lrbe3mICSUHbkbYBMj9yuguu6XUIwo8S4raL0Ls12qpl/kINf27A==",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/instrumentation-mcp_1.0.0_1772990619144_0.7930146821776596"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:54ebd2f66c3c]",
+     "name": "julien-r44"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/tmp/383c1e079b5319c364fa45b31f7d45c4/monocle.sh-instrumentation-mcp-1.0.0.tgz",
+    "author": {
+     "email": "[redacted-email:54ebd2f66c3c]",
+     "name": "Julien Ripouteau"
+    },
+    "bugs": {
+     "url": "https://github.com/Julien-R44/monocle/issues"
+    },
+    "dependencies": {
+     "@monocle.sh/otel-utils": "1.0.0",
+     "@opentelemetry/api": "^1.9.0"
+    },
+    "description": "OpenTelemetry instrumentation for MCP servers",
+    "devDependencies": {
+     "@adonisjs/tsconfig": "^2.0.0",
+     "@japa/assert": "^4.2.0",
+     "@japa/runner": "^5.3.0",
+     "@modelcontextprotocol/sdk": "^1.27.0",
+     "@opentelemetry/sdk-trace-base": "^2.6.0",
+     "@poppinss/ts-exec": "^1.4.4",
+     "tsdown": "^0.21.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 16,
+     "integrity": "sha512-C+BW2/+QuXAiqt9Kh0FGGE8Cc/vjaxuH38Lrbe3mICSUHbkbYBMj9yuguu6XUIwo8S4raL0Ls12qpl/kINf27A==",
+     "shasum": "bb92510b1d193c8a8dfd929a58ef9379fb2bf1a1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB+tTE1iDcThiSfJ+TOKsgbvZeg4JcD4pHot+2kqIywwAiEAvbA3wctx3YzWlVTZEva+oyBAfI8eQLIA/qch1RmBN6k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@monocle.sh/instrumentation-mcp/-/instrumentation-mcp-1.0.0.tgz",
+     "unpackedSize": 36529
+    },
+    "exports": {
+     ".": "./dist/index.mjs",
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/Julien-R44/monocle/tree/main/packages/instrumentation-mcp",
+    "keywords": [
+     "opentelemetry",
+     "mcp",
+     "model-context-protocol",
+     "monocle",
+     "tracing",
+     "instrumentation"
+    ],
+    "license": "ISC",
+    "maintainers": [
+     {
+      "email": "[redacted-email:54ebd2f66c3c]",
+      "name": "julien-r44"
+     }
+    ],
+    "name": "@monocle.sh/instrumentation-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "tag": "latest"
+    },
+    "repository": {
+     "directory": "packages/instrumentation-mcp",
+     "type": "git",
+     "url": "git+https://github.com/Julien-R44/monocle.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown",
+     "test": "NODE_OPTIONS=--conditions=dev node --import @poppinss/ts-exec bin/test.ts",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.mts",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_from": "file:monocle.sh-instrumentation-mcp-1.0.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@monocle.sh/instrumentation-mcp@1.0.1",
+    "_integrity": "sha512-fmCtp+JY1ePNB6bZM/9C3h5hiMDhlzAADzQy2t4KWhtYR6MRSmmbduv1w7OjldOvnU2HjHe8ieXGuKHqIh+ZbA==",
+    "_nodeVersion": "25.9.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/instrumentation-mcp_1.0.1_1775480472939_0.9066650245067649"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7f258012-4c8e-4995-98c4-f697aa92a337"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/cc060a8f2e96c02b96e7f0354f662b13/monocle.sh-instrumentation-mcp-1.0.1.tgz",
+    "author": {
+     "email": "[redacted-email:54ebd2f66c3c]",
+     "name": "Julien Ripouteau"
+    },
+    "bugs": {
+     "url": "https://github.com/monocle-sh/js/issues"
+    },
+    "dependencies": {
+     "@monocle.sh/otel-utils": "^1.0.2",
+     "@opentelemetry/api": "^1.9.1"
+    },
+    "description": "OpenTelemetry instrumentation for MCP servers",
+    "devDependencies": {
+     "@adonisjs/tsconfig": "^2.0.0",
+     "@japa/assert": "^4.2.0",
+     "@japa/runner": "^5.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/sdk-trace-base": "^2.6.1",
+     "@poppinss/ts-exec": "^1.4.4",
+     "tsdown": "^0.21.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 16,
+     "integrity": "sha512-fmCtp+JY1ePNB6bZM/9C3h5hiMDhlzAADzQy2t4KWhtYR6MRSmmbduv1w7OjldOvnU2HjHe8ieXGuKHqIh+ZbA==",
+     "shasum": "8b3f785f79b6c1995e69cd47f15cdce46d426122",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDwFUgyJDTs/lrhc+rIghkMnH7Pz3sDta/UZmV3gjTEVQIgcLnfw3yBkypyT4ZkFTw99NSlE5RhQeu3VUZODPKQWtM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@monocle.sh/instrumentation-mcp/-/instrumentation-mcp-1.0.1.tgz",
+     "unpackedSize": 39588
+    },
+    "exports": {
+     ".": "./dist/index.mjs",
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/monocle-sh/js/tree/main/packages/instrumentations/mcp",
+    "keywords": [
+     "instrumentation",
+     "mcp",
+     "model-context-protocol",
+     "monocle",
+     "opentelemetry",
+     "tracing"
+    ],
+    "license": "ISC",
+    "maintainers": [
+     {
+      "email": "[redacted-email:54ebd2f66c3c]",
+      "name": "julien-r44"
+     }
+    ],
+    "name": "@monocle.sh/instrumentation-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "tag": "latest"
+    },
+    "repository": {
+     "directory": "packages/instrumentations/mcp",
+     "type": "git",
+     "url": "git+https://github.com/monocle-sh/js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown",
+     "test": "NODE_OPTIONS=--conditions=dev node --import @poppinss/ts-exec bin/test.ts",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.mts",
+    "version": "1.0.1"
+   },
+   "1.0.2": {
+    "_from": "file:monocle.sh-instrumentation-mcp-1.0.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@monocle.sh/instrumentation-mcp@1.0.2",
+    "_integrity": "sha512-AXiIxf/Iyzbq/SoXraU6sWNOepyMkCHNlfylHfk21AVII1RnKk9AibUEBKo8OocUygpbvpS9wcmVb/IbRpIZXw==",
+    "_nodeVersion": "25.9.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/instrumentation-mcp_1.0.2_1779015667136_0.05552814505974579"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7f258012-4c8e-4995-98c4-f697aa92a337"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/tmp/e5bccb559ba33ae259b33c2c1c5cae82/monocle.sh-instrumentation-mcp-1.0.2.tgz",
+    "author": {
+     "email": "[redacted-email:54ebd2f66c3c]",
+     "name": "Julien Ripouteau"
+    },
+    "bugs": {
+     "url": "https://github.com/monocle-sh/js/issues"
+    },
+    "dependencies": {
+     "@monocle.sh/otel-utils": "^1.3.0",
+     "@opentelemetry/api": "^1.9.1"
+    },
+    "description": "OpenTelemetry instrumentation for MCP servers",
+    "devDependencies": {
+     "@adonisjs/tsconfig": "^2.0.0",
+     "@japa/assert": "^4.2.0",
+     "@japa/runner": "^5.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@opentelemetry/sdk-trace-base": "^2.7.1",
+     "@poppinss/ts-exec": "^1.4.4",
+     "tsdown": "^0.21.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 16,
+     "integrity": "sha512-AXiIxf/Iyzbq/SoXraU6sWNOepyMkCHNlfylHfk21AVII1RnKk9AibUEBKo8OocUygpbvpS9wcmVb/IbRpIZXw==",
+     "shasum": "8388d3787f6dc7ea4151df385d63dd28e1d4aa67",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDDnO0gtAaCv9f4izauHXUUgfbWVTvApEtUA7ekFo0gigIhAL+XV/J4Pov54ws494XbY2r3Tf9C1J2uQvt0t4J8Yp/G"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@monocle.sh/instrumentation-mcp/-/instrumentation-mcp-1.0.2.tgz",
+     "unpackedSize": 39550
+    },
+    "exports": {
+     ".": "./dist/index.mjs",
+     "./package.json": "./package.json"
+    },
+    "homepage": "https://github.com/monocle-sh/js/tree/main/packages/instrumentations/mcp",
+    "keywords": [
+     "instrumentation",
+     "mcp",
+     "model-context-protocol",
+     "monocle",
+     "opentelemetry",
+     "tracing"
+    ],
+    "license": "ISC",
+    "maintainers": [
+     {
+      "email": "[redacted-email:54ebd2f66c3c]",
+      "name": "julien-r44"
+     }
+    ],
+    "name": "@monocle.sh/instrumentation-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.0.0"
+    },
+    "publishConfig": {
+     "access": "public",
+     "tag": "latest"
+    },
+    "repository": {
+     "directory": "packages/instrumentations/mcp",
+     "type": "git",
+     "url": "git+https://github.com/monocle-sh/js.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown",
+     "test": "NODE_OPTIONS=--conditions=dev node --import @poppinss/ts-exec bin/test.ts",
+     "typecheck": "tsgo --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.mts",
+    "version": "1.0.2"
+   }
+  }
+ },
+ "name": "@monocle.sh/instrumentation-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@monocle.sh%2Finstrumentation-mcp"
+}

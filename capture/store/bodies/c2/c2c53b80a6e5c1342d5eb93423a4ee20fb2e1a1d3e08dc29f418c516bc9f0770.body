@@ -1,0 +1,1098 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.7.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6103f5e24f7b]",
+    "name": "ckalima"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "2.0.0",
+   "2.1.0",
+   "2.2.0",
+   "2.3.0",
+   "2.3.1",
+   "2.4.0",
+   "2.5.0",
+   "2.6.0",
+   "2.7.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@ckalima/pipedrive-mcp-server",
+  "_rev": "9-95671d384c1fcaf3bc398bfe6e135d68",
+  "author": {
+   "name": "ckalima"
+  },
+  "bugs": {
+   "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+  },
+  "description": "MCP server for Pipedrive CRM integration with Claude Code",
+  "dist-tags": {
+   "latest": "2.7.0"
+  },
+  "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+  "keywords": [
+   "mcp",
+   "pipedrive",
+   "crm",
+   "claude",
+   "ai",
+   "model-context-protocol"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:6103f5e24f7b]",
+    "name": "ckalima"
+   }
+  ],
+  "name": "@ckalima/pipedrive-mcp-server",
+  "readme": "# Pipedrive MCP Server\n\n[![npm version](https://img.shields.io/npm/v/@ckalima/pipedrive-mcp-server?logo=npm)](https://www.npmjs.com/package/@ckalima/pipedrive-mcp-server)\n[![CI](https://github.com/ckalima/pipedrive-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/ckalima/pipedrive-mcp-server/actions/workflows/ci.yml)\n[![tests](https://img.shields.io/badge/tests-1%2C700%2B%20passing-brightgreen)](https://github.com/ckalima/pipedrive-mcp-server/actions/workflows/ci.yml)\n[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)\n\nAn MCP (Model Context Protocol) server for Pipedrive CRM integration with Claude Code and Claude Desktop. Query, create, and update CRM data directly from your AI assistant.\n\n## Why this server\n\n- **API v2-first.** Every entity uses Pipedrive's v2 REST API where it exists; v1 is used only for the capabilities that have no v2 equivalent (notes, mail, users, and leads CRUD). See [API Versioning](#api-versioning).\n- **Contract-tested against the real OpenAPI spec.** Request params, request bodies, and response shapes are checked against the vendored Pipedrive OpenAPI v2 definition (`docs/api/openapi-v2.yaml`) in `tests/contract/`, so the v2 tools can't silently drift from the documented API.\n- **Live-smoke verified.** The tool surface is broadly exercised against a real Pipedrive account (`scripts/smoke-coverage.ts`), with only API-unseedable surfaces (e.g. mail threads, project templates) left to manual checks. Coverage includes plan-gated endpoints such as Growth+ deal installments (`scripts/smoke-installments.ts`). Key write smokes (e.g. the task `is_done` flag) assert the field value actually changed on the wire, not just a 200.\n- **Server-enforced capability modes.** `PIPEDRIVE_MODE` picks a safety tier \u2014 `read-only`, `safe-write` (the default: reads + non-destructive writes), or `full` \u2014 and out-of-mode tools are both hidden from `tools/list` and refused if called directly. Deletes, conversions, and other irreversible writes (\ud83d\udd12 in the tool table) require `full`, so the server is read-and-create only out of the box. Every tool also carries MCP annotations (`readOnlyHint`/`destructiveHint`/`idempotentHint`) so policy-aware clients can tell reads from writes from deletes. See [Capability modes](#capability-modes).\n- **MIT licensed**, published with npm build provenance.\n\n**Honest limitations.** Transport is STDIO only today (a Streamable HTTP flag is planned), and auth is via a Pipedrive API key, which matches the local/self-hosted tier this server targets. There is no hosted OAuth offering yet.\n\n## Features\n\n- **Full CRM Operations**: Deals, persons, organizations, activities\n- **Email Analysis**: Access mail threads and messages for engagement analysis\n- **Field Discovery**: Map custom field hash codes to human-readable names\n- **Pipeline Management**: List pipelines, stages, and users\n- **Pagination Support**: Cursor-based pagination for large datasets\n- **Error Handling**: Clear, actionable error messages\n\n## Quick Start\n\n### Fastest setup: `npx \u2026 init`\n\nRun the one-command guided installer and follow the prompts. It opens the Pipedrive\nAPI-token page, validates your key live against your account, and generates a working\nMCP config for your client (Claude Desktop, Claude Code, Cursor, Windsurf, or VS Code):\n\n```bash\nnpx -y @ckalima/pipedrive-mcp-server init\n```\n\nIt always prints a paste-ready block and can optionally write it into your client's\nconfig file after a timestamped backup. Committed/shared config files use\n`${PIPEDRIVE_API_KEY}` indirection, never a raw key. Prefer to configure by hand? The\nmanual steps below still work.\n\n### 1. Get Your Pipedrive API Key\n\n1. Log into Pipedrive\n2. Go to **Settings** > **Personal preferences** > **API**\n3. Copy your API key (40 characters)\n\n### 2. Configure Claude Code\n\nAdd to your `.mcp.json` file:\n\n```json\n{\n  \"mcpServers\": {\n    \"pipedrive\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ckalima/pipedrive-mcp-server\"],\n      \"env\": {\n        \"PIPEDRIVE_API_KEY\": \"your-40-character-api-key\"\n      }\n    }\n  }\n}\n```\n\n> **Package name:** the supported package is the scoped **`@ckalima/pipedrive-mcp-server`**. If you arrived from an older snippet that referenced the unscoped `pipedrive-mcp-server`, update your config to the scoped name above \u2014 the unscoped name is a different, unrelated package.\n\nYou can also start it directly to verify your setup:\n\n```bash\nnpx -y @ckalima/pipedrive-mcp-server\n```\n\nOr set the environment variable:\n\n```bash\nexport PIPEDRIVE_API_KEY=\"your-40-character-api-key\"\n```\n\n### Environment Variables\n\n| Variable | Required | Default | Description |\n|----------|----------|---------|-------------|\n| `PIPEDRIVE_API_KEY` | Yes | - | Your 40-character Pipedrive API token. |\n| `PIPEDRIVE_MODE` | No | `safe-write` | Server-enforced capability tier: `read-only` (reads only), `safe-write` (reads + non-destructive writes), or `full` (all tools, including destructive). Out-of-mode tools are hidden from `tools/list` and refused if called directly. Authoritative when set to a recognized value; a blank value is treated as unset (the default applies), an unrecognized value falls back to `read-only`. See [Capability modes](#capability-modes). |\n| `PIPEDRIVE_ENABLE_DESTRUCTIVE` | No | `false` | Legacy flag, superseded by `PIPEDRIVE_MODE`. When `PIPEDRIVE_MODE` is unset, `true` is treated as `full` and anything else as `safe-write`. Still honored for back-compat; prefer `PIPEDRIVE_MODE=full`. |\n| `PIPEDRIVE_IMAGE_BASE_DIR` | No | (unset) | Allowlisted directory the server may read product images from when `file_path` is passed to the image-upload tools. Filesystem reads are **disabled** unless this is set, and a `file_path` must resolve within it. Leave unset and pass `base64_data` if the caller cannot share the server's filesystem. See [SECURITY.md](SECURITY.md#operator-best-practices). |\n\nTo enable destructive tools, set `PIPEDRIVE_MODE=full` (or, for back-compat, `PIPEDRIVE_ENABLE_DESTRUCTIVE=true`) in the `env` block of your `.mcp.json` alongside `PIPEDRIVE_API_KEY`. Below `full`, every \ud83d\udd12 tool returns a `DESTRUCTIVE_DISABLED` error instead of acting, and tools above the active tier return a `MODE_RESTRICTED` error.\n\n### Capability modes\n\n`PIPEDRIVE_MODE` sets a server-enforced safety tier. The tier is enforced two ways: out-of-mode tools are filtered out of `tools/list` (so the agent never sees them) and the dispatcher refuses any out-of-mode call by name before its handler runs, so the tier is a real guarantee rather than a UI hint.\n\n| Mode | What's available | Tools | Destructive ops |\n|------|------------------|------:|-----------------|\n| `read-only` | read verbs only (`list`/`get`/`search`) | 69 | no |\n| `safe-write` | reads + non-destructive writes | 123 | no |\n| `full` | all tools | 155 | yes |\n\n**Recommended for first-time setup and agent evaluation: `read-only`.** Let the agent look before it can touch anything, then widen the tier as you build trust.\n\n**Backward compatibility.** `PIPEDRIVE_MODE` is authoritative when set. When it is unset, the mode is derived from the legacy `PIPEDRIVE_ENABLE_DESTRUCTIVE` flag (`true` \u2192 `full`, otherwise `safe-write`), so existing installs keep their *execution* behavior on upgrade: every tool that ran before still runs, and every tool gated before is still gated. The one observable change at the unset default (`safe-write`) is that the 32 destructive tools \u2014 already refused at execution unless enabled \u2014 are now also hidden from `tools/list` rather than listed-then-refused (so the listed surface is 123, not 155). An unrecognized `PIPEDRIVE_MODE` value falls back to `read-only`.\n\n### 3. Start Using\n\nOnce configured, Claude can access your Pipedrive data:\n\n- \"Show me open deals worth more than $10,000\"\n- \"Create a deal called 'Acme Contract' with value $50,000\"\n- \"Find all contacts at TechCorp\"\n- \"List recent email threads in my inbox\"\n- \"What custom fields are defined for deals?\"\n\n## Connected account\n\nThe API token decides which Pipedrive company you are talking to, and until now nothing in a tool result said which one that was. Two registrations of this server in the same client (say, a project-scoped entry and a local-scoped one that reads a stale `.env`) resolve to different companies, and the one that loses precedence is invisible. The server now names the account it actually resolved, in two places.\n\n**On startup**, one line on stderr:\n\n```\n[pipedrive-mcp-server] Connected as [redacted-email:53e6cdc30765] -> company \"Example Corp\" (id 12345)\n```\n\nIf the check fails, that line says so (`Could not verify connected account: ...`) instead of the server starting silently. If the API key is missing or malformed it reports that the account was not checked, because no request was made.\n\n**On the first tool response after the boot check settles**, a one-shot `connection` block naming the same company, so the agent knows which account the data came from without being asked and without spending a tool call. It is emitted once per process. The check runs in the background, so any tool call that finishes while it is still in flight is returned unchanged and the block lands on a later response instead. Treat it as a fact the server volunteers once it knows, not as a guarantee that every early response carries it. Delivery is also not consumption: a host that passes the block through unchanged still leaves it to the model whether to act on it, and smaller models skip it on some runs.\n\nInside that block, `company_id` and `verified` are asserted by the server and sit at the top level. The display strings the server cannot vouch for - `company_name` and `user_email`, or `reason` when the check did not succeed - are nested under `untrusted_display`, because a company name is CRM content that anyone with write access to the account can set. If you parse the block, bind everything under that key to the same trust level you give `data`. See [SECURITY.md](SECURITY.md#prompt-injection-untrusted-crm-content).\n\nThe check is a single `GET /v1/users/me` at boot, capped at one attempt with a 10-second timeout. It never blocks startup and never fails a tool call. Nothing is checked against an expected value: `verified: true` means the token resolved to *an* account, not to the right one.\n\nTo read the same information on demand, call `pipedrive_get_current_user`, which returns the connected company's name, id, and domain alongside the token owner's user details.\n\n*For contributors:* the banner line and the notice both carry a real Pipedrive company id. If you paste either into a document in this repo, that document belongs in gitignored `docs/private/` (see `CLAUDE.md`), not in the public tree.\n\n## Available Tools\n\n<!-- BEGIN GENERATED TOOLS -->\n\n**155 tools.** \ud83d\udd12 destructive (require `PIPEDRIVE_MODE=full`, off by default) \u00b7 \u2b51 requires a Growth+ plan. The active [capability mode](#capability-modes) governs which tools are listed.\n\n<sub>This section is generated by `npm run gen:docs` from the live tool registry. Do not edit by hand - CI fails on drift.</sub>\n\n### Deals\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_deals` | List deals from Pipedrive with optional filtering by owner, person, organization, pipeline, stage, or status. Returns paginated results. |\n| `pipedrive_get_deal` | Get detailed information about a specific deal by ID, including all standard and custom fields. |\n| `pipedrive_create_deal` | Create a new deal in Pipedrive. Only title is required; all other fields are optional. |\n| `pipedrive_update_deal` | Update an existing deal in Pipedrive. Specify the deal ID and any fields to update. |\n| `pipedrive_search_deals` | Search for deals by text in title. Supports fuzzy matching by default. |\n| `pipedrive_delete_deal` \ud83d\udd12 | Delete a deal. The deal will be marked as deleted and permanently removed after 30 days. |\n| `pipedrive_list_deal_followers` | List all followers for a deal. |\n| `pipedrive_add_deal_follower` | Add a follower to a deal. |\n| `pipedrive_delete_deal_follower` \ud83d\udd12 | Remove a follower from a deal. |\n| `pipedrive_get_deal_followers_changelog` | Get the followers changelog for a deal. |\n| `pipedrive_list_deal_products` | List line-item products attached to a deal. Returns paginated results. |\n| `pipedrive_add_deal_product` | Attach a single product as a line item to a deal. |\n| `pipedrive_update_deal_product` | Update a line-item product attached to a deal. All body fields optional. |\n| `pipedrive_delete_deal_product` \ud83d\udd12 | Remove a line-item product from a deal. |\n| `pipedrive_bulk_add_deal_products` | Bulk-add up to 100 line-item products to a deal in one request. |\n| `pipedrive_list_deal_discounts` | List all additional discounts applied to a deal. |\n| `pipedrive_add_deal_discount` | Add an additional discount to a deal. |\n| `pipedrive_update_deal_discount` | Update an additional discount on a deal. All fields except IDs are optional. |\n| `pipedrive_delete_deal_discount` \ud83d\udd12 | Delete an additional discount from a deal. |\n| `pipedrive_list_deal_installments` \u2b51 | List installments across one or more deals. Requires deal_ids. Growth+ plan required. |\n| `pipedrive_add_deal_installment` \u2b51 | Add an installment (payment schedule entry) to a deal. Growth+ plan required; the deal must have at least one one-time product and no recurring products. |\n| `pipedrive_update_deal_installment` \u2b51 | Update an installment on a deal. Growth+ plan required; all body fields optional. |\n| `pipedrive_delete_deal_installment` \ud83d\udd12 \u2b51 | Delete an installment from a deal. Growth+ plan required. |\n| `pipedrive_list_archived_deals` | List archived deals with the same filtering as the active deals list (owner, person, organization, pipeline, stage, status). Returns paginated results. |\n| `pipedrive_convert_deal_to_lead` \ud83d\udd12 | Convert a deal to a lead (async job). DESTRUCTIVE: a successful conversion marks the source deal as deleted. Returns a conversion_id; the conversion runs asynchronously, so you MUST poll pipedrive_get_deal_conversion_status with the conversion_id until a terminal status. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_get_deal_conversion_status` | Get the status of a deal-to-lead conversion job. Status contract: 'completed' (terminal, carries lead_id), 'failed'/'rejected' (terminal, stop polling, no lead produced), 'not_started'/'running' (in-progress, re-poll). Only 'completed' carries lead_id, and conversion status is purged after a few days, so a 404 returned after a prior valid status means the status was purged (terminal stop-polling signal, not a transient error). Use a bounded poll budget (e.g. up to ~6 attempts with short backoff), not an unbounded loop. |\n\n### Persons\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_persons` | List persons (contacts) from Pipedrive with optional filtering by owner, organization, or first letter of name. |\n| `pipedrive_get_person` | Get detailed information about a specific person by ID. |\n| `pipedrive_create_person` | Create a new person (contact) in Pipedrive. Only name is required. |\n| `pipedrive_update_person` | Update an existing person in Pipedrive. |\n| `pipedrive_search_persons` | Search for persons by name, email, or phone number. |\n| `pipedrive_delete_person` \ud83d\udd12 | Delete a person. The person will be marked as deleted and permanently removed after 30 days. |\n| `pipedrive_list_person_followers` | List all followers for a person. |\n| `pipedrive_add_person_follower` | Add a follower to a person. |\n| `pipedrive_delete_person_follower` \ud83d\udd12 | Remove a follower from a person. |\n| `pipedrive_get_person_followers_changelog` | Get the followers changelog for a person. |\n| `pipedrive_get_person_picture` | Get the picture for a person (read-only; returns picture metadata and sized image URLs). Returns an error if the person has no picture. |\n\n### Organizations\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_organizations` | List organizations from Pipedrive with optional filtering by owner or first letter of name. |\n| `pipedrive_get_organization` | Get detailed information about a specific organization by ID. |\n| `pipedrive_create_organization` | Create a new organization in Pipedrive. Only name is required. |\n| `pipedrive_update_organization` | Update an existing organization in Pipedrive. |\n| `pipedrive_search_organizations` | Search for organizations by name or address. |\n| `pipedrive_delete_organization` \ud83d\udd12 | Delete an organization. The organization will be marked as deleted and permanently removed after 30 days. |\n| `pipedrive_list_organization_followers` | List all followers for an organization. |\n| `pipedrive_add_organization_follower` | Add a follower to an organization. |\n| `pipedrive_delete_organization_follower` \ud83d\udd12 | Remove a follower from an organization. |\n| `pipedrive_get_organization_followers_changelog` | Get the followers changelog for an organization. |\n\n### Activities\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_activities` | List activities from Pipedrive with optional filtering by owner, deal, person, organization, type, or completion status. |\n| `pipedrive_get_activity` | Get detailed information about a specific activity by ID. |\n| `pipedrive_create_activity` | Create a new activity in Pipedrive. Subject and type are required. |\n| `pipedrive_update_activity` | Update an existing activity in Pipedrive. Use this to mark activities as done. |\n| `pipedrive_delete_activity` \ud83d\udd12 | Delete an activity. |\n\n### Notes\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_notes` | List notes from Pipedrive with optional filtering by deal, person, organization, or lead. |\n| `pipedrive_get_note` | Get detailed information about a specific note by ID. |\n| `pipedrive_create_note` | Create a new note in Pipedrive. Content is required. Link to a deal, person, organization, or lead. |\n| `pipedrive_update_note` | Update an existing note in Pipedrive. |\n| `pipedrive_delete_note` \ud83d\udd12 | Delete a note. |\n\n### Leads\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_leads` | List active (non-archived) leads from Pipedrive with optional filtering by owner, person, or organization. |\n| `pipedrive_list_archived_leads` | List archived leads from Pipedrive with optional filtering by owner, person, or organization. |\n| `pipedrive_get_lead` | Get detailed information about a specific lead by UUID. |\n| `pipedrive_create_lead` | Create a new lead in Pipedrive. Title is required; link to at least one of person_id or organization_id. |\n| `pipedrive_update_lead` | Update an existing lead in Pipedrive. |\n| `pipedrive_search_leads` | Search for leads in Pipedrive by title or associated contacts. |\n| `pipedrive_delete_lead` \ud83d\udd12 | Delete a lead. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_convert_lead_to_deal` \ud83d\udd12 | Convert a lead into a deal (Pipedrive v2). DESTRUCTIVE: a successful conversion marks the source lead as deleted. The conversion runs asynchronously; this tool polls until it completes (typically under 5s) and returns the new deal ID. If it is still running after ~30s, it returns the conversion_id and status for manual follow-up. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_get_lead_conversion_status` | Get the status of an async lead-to-deal conversion by conversion ID (Pipedrive v2 GET /leads/{id}/convert/status/{conversion_id}). |\n\n### Projects\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_projects` | List projects from Pipedrive with optional filtering by board, phase, or status. Returns paginated results. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_get_project` | Get detailed information about a specific project by ID. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_create_project` | Create a new project in Pipedrive. Requires title, board_id, and phase_id. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_update_project` | Update an existing project in Pipedrive. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_delete_project` \ud83d\udd12 | Delete a project. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_search_projects` | Search for projects in Pipedrive by title. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_archive_project` | Archive a project by setting its status to archived. (Requires the Projects add-on; Projects API is in public beta.) |\n| `pipedrive_list_project_tasks` | List tasks for a project you already have the ID for \u2014 pass only `id` (the project ID). For broader task queries use pipedrive_list_tasks. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_list_project_templates` | List all project templates available in Pipedrive. Returns paginated results. |\n| `pipedrive_get_project_template` | Get detailed information about a specific project template by ID. |\n| `pipedrive_list_archived_projects` | List archived projects from Pipedrive with optional filtering by filter, phase, or status. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_project_permitted_users` | Get the list of user IDs that have permission to access a project. Returns an array of integer user IDs. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_project_changelog` | Get the changelog for a project, showing what changed, when, and by whom. Returns paginated entries with actor_user_id, new_values, and old_values. (Projects add-on; Projects API in public beta.) |\n\n### Products\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_products` | List products from Pipedrive with optional filtering by owner, IDs, or filter. |\n| `pipedrive_get_product` | Get detailed information about a specific product by ID. |\n| `pipedrive_search_products` | Search for products by name, code, or custom fields. |\n| `pipedrive_create_product` | Create a new product in Pipedrive. Only name is required. |\n| `pipedrive_update_product` | Update an existing product in Pipedrive. |\n| `pipedrive_delete_product` \ud83d\udd12 | Delete a product. The product will be marked as deleted and permanently removed after 30 days. |\n| `pipedrive_list_product_variations` | List all variations for a product. |\n| `pipedrive_add_product_variation` | Add a variation to a product. |\n| `pipedrive_update_product_variation` | Update an existing product variation. |\n| `pipedrive_delete_product_variation` \ud83d\udd12 | Delete a product variation. |\n| `pipedrive_list_product_followers` | List all followers for a product. |\n| `pipedrive_add_product_follower` | Add a follower to a product. |\n| `pipedrive_delete_product_follower` \ud83d\udd12 | Remove a follower from a product. |\n| `pipedrive_get_product_followers_changelog` | Get the followers changelog for a product. |\n| `pipedrive_get_product_image` | Get the image of a product (returns a single image with a public URL valid for 7 days). |\n| `pipedrive_delete_product_image` \ud83d\udd12 | Delete the image of a product. |\n| `pipedrive_upload_product_image` | Upload an image for a product. Provide the image via EITHER file_path OR base64_data (exactly one required). Supports png, jpeg, gif, and webp. Note: file_path is read by the SERVER process via the filesystem and is disabled by default; the operator must set PIPEDRIVE_IMAGE_BASE_DIR and the path must resolve within it; otherwise use base64_data, which is transport-safe. |\n| `pipedrive_update_product_image` | Update (replace) the image of a product. Provide the image via EITHER file_path OR base64_data (exactly one required). Supports png, jpeg, gif, and webp. Note: file_path is read by the SERVER process via the filesystem and is disabled by default; the operator must set PIPEDRIVE_IMAGE_BASE_DIR and the path must resolve within it; otherwise use base64_data, which is transport-safe. |\n\n### Tasks\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_tasks` | General task query across all projects, with optional project_id, assignee_id, done/milestone, and parent filters. Use for anything beyond a single project's full task list. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_task` | Get detailed information about a specific task by ID. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_create_task` | Create a new task in a project. title and project_id are required. Use boolean is_done/is_milestone (same field names as the GET response); a milestone task must have a due_date. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_update_task` | Update an existing task. Only id is required; all other fields are optional. Use boolean is_done/is_milestone (same field names as the GET response); a milestone task must have a due_date. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_delete_task` \ud83d\udd12 | Delete a task. If the task has subtasks, those will also be deleted. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). (Projects add-on; Projects API in public beta.) |\n\n### Boards & Phases\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_boards` | List all project boards. Returns the complete list (no pagination \u2014 the boards endpoint returns all records at once). (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_board` | Get detailed information about a specific project board by ID. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_create_board` | Create a new project board. name is required. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_update_board` | Update an existing project board. Only id is required; all other fields are optional. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_delete_board` \ud83d\udd12 | Delete a project board. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). (Projects add-on; Projects API in public beta.) |\n| `pipedrive_list_phases` | List all phases for a project board. board_id is required. Returns the complete list (no pagination \u2014 the phases endpoint returns all records for a board at once). (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_phase` | Get detailed information about a specific project phase by ID. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_create_phase` | Create a new project phase. name and board_id are required. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_update_phase` | Update an existing project phase. Only id is required; all other fields are optional. Set board_id to move this phase to a different board. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_delete_phase` \ud83d\udd12 | Delete a project phase. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). (Projects add-on; Projects API in public beta.) |\n\n### Mail\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_get_person_emails` | Get email messages linked to a person (company-wide, all users' emails). Returns metadata for emails from any user's mailbox that are linked to this person. Note: To get full message body, use pipedrive_get_mail_message, but only for emails in YOUR mailbox. |\n| `pipedrive_get_deal_emails` | Get email messages linked to a deal (company-wide, all users' emails). Returns metadata for emails from any user's mailbox that are linked to this deal. Note: To get full message body, use pipedrive_get_mail_message, but only for emails in YOUR mailbox. |\n| `pipedrive_list_mail_threads` | List mail threads from YOUR mailbox only (authenticated user). Other users' threads are not accessible. Use folder parameter to filter by inbox, drafts, sent, or archive. |\n| `pipedrive_get_mail_thread` | Get a mail thread with messages. Access depends on visibility settings - threads visible within deals/persons you can access should work. Returns 404 if the thread isn't accessible to you. |\n| `pipedrive_get_mail_message` | Get full email message with body. Access depends on visibility settings - messages linked to deals/persons you can access should work, even if sent by other users. |\n\n### Fields\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_organization_fields` | List all organization field definitions, including custom fields. Use this to map 40-character field keys to human-readable names. |\n| `pipedrive_list_deal_fields` | List all deal field definitions, including custom fields. Essential for understanding deal data structure. |\n| `pipedrive_list_person_fields` | List all person field definitions, including custom fields. Use to understand contact data structure. |\n| `pipedrive_list_product_fields` | List all product field definitions, including custom fields. |\n| `pipedrive_list_project_fields` | List all project field definitions, including custom fields. (Projects add-on; Projects API in public beta.) |\n| `pipedrive_get_field` | Get details of a specific field by its key. Useful for looking up what a 40-character hash field key means. |\n| `pipedrive_create_deal_field` | Create a deal custom field. field_name and field_type are required. For enum/set types, options is required. The response data.field_code is the 40-char hash you must keep to update or delete the field later. |\n| `pipedrive_update_deal_field` | Update a deal custom field by field_code. field_type and field_code cannot be changed. |\n| `pipedrive_delete_deal_field` \ud83d\udd12 | Delete a deal custom field by field_code. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_update_deal_field_options` | Bulk-update option labels of a deal enum/set field. Atomic: the whole request fails if any option ID does not exist. |\n| `pipedrive_delete_deal_field_options` \ud83d\udd12 | Bulk-delete options of a deal enum/set field. Atomic: fails if any ID does not exist. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_create_person_field` | Create a person custom field. field_name and field_type are required. For enum/set types, options is required. The response data.field_code is the 40-char hash to keep for later updates. |\n| `pipedrive_update_person_field` | Update a person custom field by field_code. field_type and field_code cannot be changed. |\n| `pipedrive_delete_person_field` \ud83d\udd12 | Delete a person custom field by field_code. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_update_person_field_options` | Bulk-update option labels of a person enum/set field. Atomic: the whole request fails if any option ID does not exist. |\n| `pipedrive_delete_person_field_options` \ud83d\udd12 | Bulk-delete options of a person enum/set field. Atomic: fails if any ID does not exist. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_create_organization_field` | Create an organization custom field. field_name and field_type are required. For enum/set types, options is required. The response data.field_code is the 40-char hash to keep for later updates. |\n| `pipedrive_update_organization_field` | Update an organization custom field by field_code. field_type and field_code cannot be changed. |\n| `pipedrive_delete_organization_field` \ud83d\udd12 | Delete an organization custom field by field_code. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_update_organization_field_options` | Bulk-update option labels of an organization enum/set field. Atomic: the whole request fails if any option ID does not exist. |\n| `pipedrive_delete_organization_field_options` \ud83d\udd12 | Bulk-delete options of an organization enum/set field. Atomic: fails if any ID does not exist. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_create_product_field` | Create a product custom field. field_name and field_type are required. For enum/set types, options is required. Product fields use a simpler model: no description, important_fields, or required_fields. The response data.field_code is the 40-char hash to keep for later updates. |\n| `pipedrive_update_product_field` | Update a product custom field by field_code. Only field_name and ui_visibility can be changed (product fields have no description/important_fields/required_fields). |\n| `pipedrive_delete_product_field` \ud83d\udd12 | Delete a product custom field by field_code. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_update_product_field_options` | Bulk-update option labels of a product enum/set field. Atomic: the whole request fails if any option ID does not exist. |\n| `pipedrive_delete_product_field_options` \ud83d\udd12 | Bulk-delete options of a product enum/set field. Atomic: fails if any ID does not exist. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n\n### Pipelines & Stages\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_pipelines` | List sales pipelines in Pipedrive with cursor pagination. Pipelines contain stages that deals move through. |\n| `pipedrive_list_stages` | List stages with cursor pagination, optionally filtered by pipeline. Stages represent steps in the sales process. |\n| `pipedrive_get_stage` | Get details of a specific stage by ID. |\n| `pipedrive_create_pipeline` | Create a new sales pipeline. Only name is required. Set is_deal_probability_enabled to turn on weighted deal probability for the pipeline. |\n| `pipedrive_update_pipeline` | Update an existing pipeline. Provide the pipeline id and any fields to change. |\n| `pipedrive_delete_pipeline` \ud83d\udd12 | Delete a pipeline. Marks the pipeline as deleted. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n| `pipedrive_create_stage` | Create a new stage in a pipeline. name and pipeline_id are required. Use is_deal_rot_enabled and days_to_rotten to configure deal rotting. |\n| `pipedrive_update_stage` | Update an existing stage. Provide the stage id and any fields to change. Set pipeline_id to move the stage to another pipeline. |\n| `pipedrive_delete_stage` \ud83d\udd12 | Delete a stage. Marks the stage as deleted. Requires PIPEDRIVE_MODE=full (back-compat: PIPEDRIVE_ENABLE_DESTRUCTIVE=true). |\n\n### Users\n\n| Tool | Description |\n|------|-------------|\n| `pipedrive_list_users` | List all users in the Pipedrive account. Useful for finding owner IDs when creating or filtering records. |\n| `pipedrive_get_user` | Get details of a specific user by ID. |\n| `pipedrive_get_current_user` | Identify the Pipedrive account this server is connected to: returns the connected company (name, id, and domain) alongside the API key owner's user details. Use it to confirm which company the data is coming from, or to get your user ID. |\n\n<!-- END GENERATED TOOLS -->\n\n## Example Workflows\n\n### Analyze Deal Pipeline\n\n```\n\"Show me all open deals in the Sales pipeline, sorted by value\"\n\"Get details for deal 12345 including custom fields\"\n\"Move deal 12345 to the Proposal stage\"\n```\n\n### Customer Research\n\n```\n\"Find contacts at Acme Corp\"\n\"Get emails for person 456 to analyze their engagement\"\n\"What custom fields do we have for persons?\"\n```\n\n### Activity Management\n\n```\n\"List my overdue activities\"\n\"Create a follow-up call with John Smith for tomorrow at 2pm\"\n\"Mark activity 789 as done\"\n```\n\n### Field Discovery\n\n```\n\"List all custom fields for deals\"\n\"What does field '8a4d7f...' mean?\" (40-char hash)\n```\n\n## Development\n\n### Local Setup\n\n```bash\ngit clone https://github.com/ckalima/pipedrive-mcp-server.git\ncd pipedrive-mcp-server\nnpm install\ncp .env.example .env\n# Edit .env with your API key\n```\n\n### Build & Run\n\n```bash\nnpm run build\nnpm run start\n```\n\n### Development Mode\n\n```bash\nnpm run dev\n```\n\n### Test with MCP Inspector\n\n```bash\nnpx @modelcontextprotocol/inspector node dist/index.js\n```\n\n## API Versioning\n\nThis server uses both Pipedrive API versions, routing each call to the correct one automatically:\n- **v2** (`/api/v2`): Deals, Persons, Organizations, Activities, Products, Projects, Tasks, Boards & Phases, Fields, Pipelines & Stages, and Leads search\n- **v1** (`/v1`): Mail, Notes, Users, and Leads CRUD\n\nPipedrive is sunsetting v1. Selected v1 endpoints that have v2 equivalents reach end-of-life on 2025-12-31, with full v1 sunset expected around 2026-07-31; the v1 surfaces above (Mail, Notes, Users, Leads CRUD) have no v2 replacement yet. See `docs/v1-only-capabilities.md` for details.\n\n## Error Handling\n\nErrors are returned with actionable suggestions:\n\n```json\n{\n  \"error\": {\n    \"code\": \"INVALID_API_KEY\",\n    \"message\": \"API key is invalid or expired\",\n    \"suggestion\": \"Verify your API key at Pipedrive Settings > Personal preferences > API\"\n  }\n}\n```\n\nCommon error codes:\n- `MISSING_API_KEY` - Set PIPEDRIVE_API_KEY environment variable\n- `INVALID_API_KEY` - Check your API key in Pipedrive settings\n- `NOT_FOUND` - The requested resource doesn't exist\n- `RATE_LIMITED` - Wait 60 seconds before retrying\n- `VALIDATION_ERROR` - Check your request parameters\n\n## Security\n\nSee [SECURITY.md](SECURITY.md) for the threat model (data flows, credential handling,\nprompt-injection honesty, the AI/agent attack-surface catalog, operator best practices, and\nknown limitations) and how to report a vulnerability privately. In short: STDIO-only with no\nnetwork listener, the API token is read from the environment and never logged, destructive\noperations are gated off by default, and CRM tool output is structurally labeled as\nuntrusted (an advisory mitigation, not a guarantee, see the residual-risk note).\n\nFor least-privilege deployment, mint the token from a dedicated, restricted Pipedrive user,\nkeep destructive ops disabled unless needed, and isolate the agent's context so a prompt\ninjection in CRM data has no exfiltration channel. See\n[Operator best practices](SECURITY.md#operator-best-practices).\n\n## Contributing\n\nSee [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.\n\n## License\n\nMIT - see [LICENSE](LICENSE)\n\n## Links\n\n- [Pipedrive API Documentation](https://developers.pipedrive.com/docs/api/v1)\n- [MCP Protocol](https://modelcontextprotocol.io/)\n- [Security Policy](SECURITY.md)\n- [Report Issues](https://github.com/ckalima/pipedrive-mcp-server/issues)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+  },
+  "time": {
+   "2.0.0": "2026-06-13T20:05:36.187Z",
+   "2.1.0": "2026-06-16T03:35:28.848Z",
+   "2.2.0": "2026-06-16T14:07:35.499Z",
+   "2.3.0": "2026-06-16T14:34:34.104Z",
+   "2.3.1": "2026-06-16T17:23:42.395Z",
+   "2.4.0": "2026-06-16T22:22:16.533Z",
+   "2.5.0": "2026-07-22T16:53:00.437Z",
+   "2.6.0": "2026-08-21T21:16:07.310Z",
+   "2.7.0": "2026-08-22T02:02:59.138Z",
+   "created": "2026-06-13T20:05:35.861Z",
+   "modified": "2026-08-22T02:02:59.447Z"
+  },
+  "versions": {
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.0.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.0.0_1781381135999_0.10328628806395379"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:6103f5e24f7b]",
+     "name": "ckalima"
+    },
+    "_npmVersion": "10.9.8",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^9.39.4",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.0.0",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.60.1",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.0.0"
+     },
+     "fileCount": 151,
+     "integrity": "sha512-2Vssg+qWlyi1y/1HIjcPvVnMvsAoeuGVpduGEKILLbChbD3q2DO6xQ5wvg+W34gWkwkTNzOD3WIDouyIj+jZlQ==",
+     "shasum": "bdbc01995fde3887cb75f5fca499567567ed6fda",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCIKXqRcVsGUQRBT7WEeFclzQJ8sDcJ6U2wgxvEPxT6sgIhAICU1amCX+Ldl7wyP3IABul0TokGUib5iJ8TE98eGXDC"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.0.0.tgz",
+     "unpackedSize": 1758073
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "43a66b95a4afd7d2217bf75f90f40c0aebdd1d45",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.1.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.1.0_1781580928675_0.8870543645669728"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^25",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.1.0"
+     },
+     "fileCount": 163,
+     "integrity": "sha512-R3DS4EI7UfuhBh8bq7Jdyug4ugvBa6mJ1Fp1ppLsKr2ahN1jZKXzYKKES/YMREJdYRg2Va0qX6BQxWTZRXAjuw==",
+     "shasum": "00972a43859eacd7644c8a1a2aa4c9b0f209e474",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCtl6lITNLeGJNMeBe+8ojH8oPhFp/cXyage+iM6caGswIhAMM4Zzmzbv0aSfVxcpF5J7U7yn2waWlDoLSGibh9wjFr"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.1.0.tgz",
+     "unpackedSize": 2111402
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "41120b00e23e953d10e90e897baea6d4762a2362",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.1.0"
+   },
+   "2.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.2.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.2.0_1781618855313_0.8685282589917791"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^25",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.2.0"
+     },
+     "fileCount": 183,
+     "integrity": "sha512-ANCzEMfTZT1JILc5okyEcQA6Ith4FwX4XwZ95s1lbNzSdCWHpJbV1+3HiDEmKmzH+NJNujN4fXSrky673Zk5mg==",
+     "shasum": "1c514489984ee4bba42f4e8834f8b6c06698fbe0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCzzUXBoBTzpkdIGiNh8R+rKPRB+lS1j87Hny2M0wLkmgIgFFD+xmAwj1nTW/rKv9tc3zcadamMhY9hwytAoS2x2Bw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.2.0.tgz",
+     "unpackedSize": 2232993
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "406d7e114e8cebcb743d7e2066bbb62adf11ac0f",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.2.0"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.3.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.3.0_1781620473959_0.2718578921545931"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.3.0"
+     },
+     "fileCount": 183,
+     "integrity": "sha512-719poseyArTNu64t2fEIH2UdYEsE0E2b9RnU76ZzZLkeLDWJK6rIIjGGFi0Mg/Zm5JyXyOIbmenQANm2n9PzWw==",
+     "shasum": "a49b989b975d9ff72d8643311ab81a0bc15a4933",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD0r0m+GOii6GW7WvXd/K8yxueVud8FNfBaZfNl7JgidQIgFXYyTC7Spu0BRpCv2wEU6CuPgN+aH/MR2qJaKHtWSJ8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.3.0.tgz",
+     "unpackedSize": 2232993
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "8ce1436b14507272b68d24223e4a287dfee3dc82",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.3.0"
+   },
+   "2.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.3.1",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.3.1_1781630622142_0.7554071021238364"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.3.1"
+     },
+     "fileCount": 183,
+     "integrity": "sha512-NGMOhLXCY14Xl//1ZrX3Y3KnHDB+pjvQTdQ57hbl5X1RquAgxCXtaCHgzQpq5zfjOyNkTdEBLlPzn4fHiMp04Q==",
+     "shasum": "d77735dc7b5fd2f12c2cbb39eecfdcf227ad4636",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF7SdhS1yJ+RAi40vUYZ/BlXtqZXRNuMkS+/owJsH2sCAiEAnjJN+d75u193RjSnURxxXiIUx5eX6R8L3xFRarC9Wf8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.3.1.tgz",
+     "unpackedSize": 2239701
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "e244161a98a5c03dc037e62251ff6c6a5b75dd80",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.3.1"
+   },
+   "2.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.4.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.4.0_1781648536317_0.8345114306509043"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "dotenv": "^17.4.2",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^4.2.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.4.0"
+     },
+     "fileCount": 183,
+     "integrity": "sha512-dNWfZQQWPbi30dUpiogK6BNkegNTmJdgGDVtXs3sKzsrDhdeOIZZXFGmmHOY3wWWAHNrQE7aT7yaKvrfkXrlbA==",
+     "shasum": "a102f35adfc176bdd26369f57e0654b3b9f83e29",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDa8HLsF3J6TlGypAp1ejz6eiKXr34ZTGBdBi3b0uGq+gIgFRVy7W+JRA1t5x4Kdlo0XYnREt5NIzNcSmcb1u7hfgo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.4.0.tgz",
+     "unpackedSize": 2239817
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "26c59e2989ff0d833c05e3d1f8fc0c7e9042857d",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "registry:inject": "tsx scripts/registry-inject.ts",
+     "registry:publish": "tsx scripts/registry-publish.ts",
+     "smoke:coverage": "tsx scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx scripts/smoke-installments.ts",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.4.0"
+   },
+   "2.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.5.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.5.0_1784739180262_0.7274062959643071"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.18.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^5.0.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.5.0"
+     },
+     "fileCount": 183,
+     "integrity": "sha512-Ya09uk5Uwrl8xdfVDOajsnRUctUiJn6jizK2hbMNi5RZ/SnqSaHfxCTOz9tl0aCQiTgoDD7t6al7kYlEeqPtCg==",
+     "shasum": "e1b6802d410c1c34cf25a29f5a70db4b48d14397",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCBwvHcT22+6cp3rJMi9d8DQ4xK/mT2Y3y0ubeODJMvsQIgbzKDVk95PBVwbS2rH2Ae8Ce3SQnQWLHLcYHXLY3raCg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.5.0.tgz",
+     "unpackedSize": 2270739
+    },
+    "engines": {
+     "node": ">=22.9.0"
+    },
+    "gitHead": "366afa3624c4f7fdf7d5ab12414146ee79797e99",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx --env-file-if-exists=.env src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint src/",
+     "prepublishOnly": "npm run build",
+     "registry:inject": "tsx scripts/registry-inject.ts",
+     "registry:publish": "tsx scripts/registry-publish.ts",
+     "smoke:coverage": "tsx --env-file-if-exists=.env scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx --env-file-if-exists=.env scripts/smoke-installments.ts",
+     "start": "node --env-file-if-exists=.env dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.5.0"
+   },
+   "2.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.6.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.6.0_1787346967125_0.005522311409879688"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^5.0.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.6.0"
+     },
+     "fileCount": 187,
+     "integrity": "sha512-lZIadU9GbfdAA2PVkIZWcv0aOeIo49mcDVaCbRNHT303ealJbPGHrr9sDkc3Jn7rm4zThOGdyNsLyz8fdQ6B/A==",
+     "shasum": "c3a157328a6789f0ff4cb006a968add99df8c195",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDDnUNe1NtNiQeUpe32UwYsMI8T4QYTJ+kNgooI1a5DIAiEAvKUuJMm5idA5Nt9wHJTCS7rThco8Ze1bRVoUSGt83y4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.6.0.tgz",
+     "unpackedSize": 2327621
+    },
+    "engines": {
+     "node": ">=22.9.0"
+    },
+    "gitHead": "e108c5f7d1567e28025f5e7c19a9d876511deb3f",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx --env-file-if-exists=.env src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint .",
+     "prepublishOnly": "npm run build",
+     "registry:inject": "tsx scripts/registry-inject.ts",
+     "registry:publish": "tsx scripts/registry-publish.ts",
+     "smoke:coverage": "tsx --env-file-if-exists=.env scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx --env-file-if-exists=.env scripts/smoke-installments.ts",
+     "start": "node --env-file-if-exists=.env dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.check.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.6.0"
+   },
+   "2.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ckalima/pipedrive-mcp-server@2.7.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pipedrive-mcp-server_2.7.0_1787364178966_0.9138120702013766"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:3a40e95b-040a-4d61-9515-1a8d871ce4cb"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "ckalima"
+    },
+    "bin": {
+     "pipedrive-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ckalima/pipedrive-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "zod": "^4.4.3"
+    },
+    "description": "MCP server for Pipedrive CRM integration with Claude Code",
+    "devDependencies": {
+     "@anthropic-ai/mcpb": "2.1.2",
+     "@types/node": "^22",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.5.0",
+     "js-yaml": "^5.0.0",
+     "tsx": "^4.22.4",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ckalima%2fpipedrive-mcp-server@2.7.0"
+     },
+     "fileCount": 187,
+     "integrity": "sha512-FIGaIaNR/di2DgYpRsoyCvwa/y7ziKQMNxAd5XAy+JrTnA3PX0sYODKrJ95gourCHtrtPYKbSR35evYdRawjCA==",
+     "shasum": "855cf46d8fc5d6a644daf39ef5adc500fa2a7c3c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCXUb1tfCG4W3qHoAzbPz/KcNwjAzHnORzpNx57ne/O/gIhAIL36EfgH9RpNdDa5eGTNVVr2JQGg0ULtavs7gnOHFZv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ckalima/pipedrive-mcp-server/-/pipedrive-mcp-server-2.7.0.tgz",
+     "unpackedSize": 2353067
+    },
+    "engines": {
+     "node": ">=22.9.0"
+    },
+    "gitHead": "9aaf3645680bf70e31255a8a114c533f301e2469",
+    "homepage": "https://github.com/ckalima/pipedrive-mcp-server#readme",
+    "keywords": [
+     "mcp",
+     "pipedrive",
+     "crm",
+     "claude",
+     "ai",
+     "model-context-protocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:6103f5e24f7b]",
+      "name": "ckalima"
+     }
+    ],
+    "mcpName": "io.github.ckalima/pipedrive-mcp-server",
+    "name": "@ckalima/pipedrive-mcp-server",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ckalima/pipedrive-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "bundle:mcpb": "tsx scripts/build-mcpb.ts",
+     "dev": "tsx --env-file-if-exists=.env src/index.ts",
+     "gen:docs": "tsx scripts/gen-docs.ts",
+     "lint": "eslint .",
+     "prepublishOnly": "npm run build",
+     "registry:inject": "tsx scripts/registry-inject.ts",
+     "registry:publish": "tsx scripts/registry-publish.ts",
+     "smoke:coverage": "tsx --env-file-if-exists=.env scripts/smoke-coverage.ts",
+     "smoke:installments": "tsx --env-file-if-exists=.env scripts/smoke-installments.ts",
+     "start": "node --env-file-if-exists=.env dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc -p tsconfig.check.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "2.7.0"
+   }
+  }
+ },
+ "name": "@ckalima/pipedrive-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ckalima%2Fpipedrive-mcp-server"
+}

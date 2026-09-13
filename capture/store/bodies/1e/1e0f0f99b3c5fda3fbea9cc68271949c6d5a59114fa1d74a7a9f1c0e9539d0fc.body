@@ -1,0 +1,865 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.8.0-73aec7e",
+  "maintainers": [
+   {
+    "email": "[redacted-email:145cc7b6aae6]",
+    "name": "tarikneradin"
+   },
+   {
+    "email": "[redacted-email:58609b4a1674]",
+    "name": "crs-mcp"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0-4da4735",
+   "0.2.0-8a42f15",
+   "0.3.0-a0cd8f6",
+   "0.3.1-6dc214f",
+   "0.4.0-2e51e76",
+   "0.5.0-a605421",
+   "0.5.1-629c355",
+   "0.6.0-5ee9892",
+   "0.7.0-689b3ce",
+   "0.8.0-73aec7e"
+  ]
+ },
+ "manifest": {
+  "_id": "@crscreditapi/mware-mcp-server",
+  "_rev": "10-7492700d09d6a171b4da1c6a57cb35c2",
+  "bugs": {
+   "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+  },
+  "description": "MCP server for mware",
+  "dist-tags": {
+   "latest": "0.8.0-73aec7e"
+  },
+  "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+  "maintainers": [
+   {
+    "email": "[redacted-email:145cc7b6aae6]",
+    "name": "tarikneradin"
+   },
+   {
+    "email": "[redacted-email:58609b4a1674]",
+    "name": "crs-mcp"
+   }
+  ],
+  "name": "@crscreditapi/mware-mcp-server",
+  "readme": "# mware-mcp-server\n\nMCP server exposing CRS mware (B2B middleware) over the [Model Context Protocol](https://modelcontextprotocol.io). Logs in with admin credentials, caches the JWT, and proxies calls to the mware Spring API. Most tools are read-only; the `mware_pxe_offersiq_*` create/update/assign tools write.\n\n## Tools\n\n| Name | Purpose |\n|---|---|\n| `mware_find_customer` | Case-insensitive name substring \u2192 matching customers (UUID id, externalId/CID, name). |\n| `mware_get_user_config` | All config entries for one user (rate limits, products, billing codes, pricing). |\n| `mware_request_logs` | Most recent 40 request logs (sorted by `createdAt` DESC). Optional filters: `request_id`, `applicant`, `customer_code`, `customer_name`. |\n| `mware_get_retention` | Raw request/response payloads for one request log id (upstream + client request/response + headers). |\n| `mware_get_billing` | Aggregated billing for a date range: grand totals, per-customer rollups (sorted by net amount), per-product rollups. Optional `product` filter narrows entries to one product family before rollup, so `by_customer` becomes \"which customers used product X\". |\n| `mware_pxe_offersiq_list_attributes` | The OffersIQ attribute catalog: every valid rule-condition key with label, category, data type, and allowed operators. Call before authoring \u2014 keys are environment-specific. |\n| `mware_pxe_offersiq_list_rulesets` | List OffersIQ rulesets (always PXE productId 3 \u2014 other PXE products like LeadIQ are out of scope), optionally filtered by owner customer and/or name substring, with human-readable summaries of the active rules. |\n| `mware_pxe_offersiq_get_ruleset` | One ruleset: metadata, active definition (raw + human-readable), optional full version history. Rejects non-OffersIQ rulesets. |\n| `mware_pxe_offersiq_create_ruleset` | Create a ruleset (locally validated definition tree), optionally owned by a customer; always under the OffersIQ product (id 3). |\n| `mware_pxe_offersiq_update_ruleset` | Update name/description/definition; a new definition creates a new version and (by default) activates it. |\n| `mware_pxe_offersiq_assign_ruleset` | Enable/disable/remove a ruleset on a customer's product config (`decisioningConfig`) \u2014 this is what makes it live for `/offersiq/evaluate`. |\n| `mware_pxe_offersiq_metrics` | OffersIQ usage for a required date range: totals, per-day and per-customer breakdowns of requests, live pulls vs cached re-evaluations, failures, billable counts. Hit/no-hit and approval rates are not available (not exposed by the backend). |\n| `mware_get_error_codes` | The CRS error-code catalog (code, message, description) with optional substring filter \u2014 for interpreting `CRSxxx` codes in API error responses. |\n\nAll tools require `ROLE_ADMIN` on the upstream mware API. All accept an optional `environment: \"prod\" \\| \"dev\"` (default `\"prod\"`).\n\n## Install\n\n```bash\nnpm install -g @crscreditapi/mware-mcp-server\n```\n\nAfter install, the `mware-mcp-server` binary is on your `PATH`.\n\n## Configuration\n\nThe server reads configuration from environment variables (also loaded from a local `.env` file via `dotenv`).\n\n| Variable | Required | Default | Description |\n|---|---|---|---|\n| `MWARE_PROD_BASE_URL` | yes | \u2014 | Base URL of the mware API (production). **Must include the `/api` context path.** |\n| `MWARE_PROD_USERNAME` | yes | \u2014 | Admin username for `POST /users/login`. |\n| `MWARE_PROD_PASSWORD` | yes | \u2014 | Admin password for `POST /users/login`. |\n| `MWARE_DEV_BASE_URL` | no | falls back to prod | Dev base URL. Used when a tool call passes `environment: \"dev\"`. |\n| `MWARE_DEV_USERNAME` | no | falls back to prod | Dev admin username. |\n| `MWARE_DEV_PASSWORD` | no | falls back to prod | Dev admin password. |\n| `MWARE_TIMEOUT_MS` | no | `30000` | Per-request timeout in milliseconds. |\n| `MCP_TRANSPORT` | no | `stdio` | Transport mode: `stdio` (for Claude Code and other CLI clients) or `http` (for n8n / remote clients). |\n| `MCP_PORT` | no | `3003` | Port for the HTTP transport. Ignored when `MCP_TRANSPORT=stdio`. |\n\nA starter file is included as `.env.example`.\n\n### Auth\n\nOn startup the client lazily POSTs to `/users/login` with the configured username/password, caches the returned JWT (using the upstream `expires` value, or a 55-minute TTL if absent), and sends `Authorization: Bearer <token>` on every request. On a `401` the cached token is cleared and one retry is attempted.\n\n## Usage\n\n### Stdio (Claude Code, Claude Desktop, other CLI clients)\n\nAdd an entry to your MCP config (`.mcp.json` for Claude Code, `claude_desktop_config.json` for Claude Desktop):\n\n```json\n{\n  \"mcpServers\": {\n    \"mware\": {\n      \"command\": \"mware-mcp-server\",\n      \"env\": {\n        \"MCP_TRANSPORT\": \"stdio\",\n        \"MWARE_PROD_BASE_URL\": \"https://mware.example.com/api\",\n        \"MWARE_PROD_USERNAME\": \"<admin-email>\",\n        \"MWARE_PROD_PASSWORD\": \"<admin-password>\"\n      }\n    }\n  }\n}\n```\n\nThe client launches the process; tool calls travel over stdio. No port to open.\n\n### HTTP (n8n, remote MCP clients)\n\nRun it as a long-lived service:\n\n```bash\nMCP_TRANSPORT=http \\\nMCP_PORT=3003 \\\nMWARE_PROD_BASE_URL=https://mware.example.com/api \\\nMWARE_PROD_USERNAME=<admin-email> \\\nMWARE_PROD_PASSWORD=<admin-password> \\\nmware-mcp-server\n```\n\nEndpoints:\n\n- `POST /` and `POST /mcp` \u2014 MCP requests (streamable HTTP transport)\n- `GET /health` \u2014 health check, returns `{\"status\":\"ok\",\"uptime\":<seconds>}`\n\nPoint your client at `http://<host>:3003/mcp`.\n\n### Docker\n\n```dockerfile\nFROM node:20-alpine\nRUN npm install -g @crscreditapi/mware-mcp-server\nENV MCP_TRANSPORT=http MCP_PORT=3003\nEXPOSE 3003\nCMD [\"mware-mcp-server\"]\n```\n\nPass the `MWARE_*` variables at runtime (e.g. via `--env-file` or an orchestrator's secret store).\n\n## Tool call reference\n\n### `mware_find_customer`\n\n```json\n{ \"query\": \"unlock\", \"limit\": 20 }\n```\n\n`query` is matched case-insensitively as a substring of `name`. `limit` (optional, 1\u2013100, default `20`) caps the result count. Returns `{ query, count, matches: [{ id, externalId, name }] }`.\n\n> The upstream `/customers` endpoint has no name search, so this tool fetches a customer page (size 500) and filters client-side.\n\n### `mware_get_user_config`\n\n```json\n{ \"user_id\": \"e98794ff-d151-4205-bdbe-b654c558474d\" }\n```\n\nReturns `{ user_id, count, configs: [...] }` where each config has `configName`, `queryString`, `dailyMaxRequests`, `monthlyMaxRequests`, `billingCode`, `product`, `isEnabled`, `isDefault`, `productPricing`, and friends.\n\n### `mware_request_logs`\n\n```json\n{ \"customer_code\": \"CID11117\" }\n```\n\nAll filters are optional; combine them to narrow down. The upstream endpoint sorts by `createdAt` DESC, so you always get the most recent page (size 40):\n\n- `request_id` \u2014 exact UUID match\n- `applicant` \u2014 substring on the applicant name\n- `customer_code` \u2014 CID (clientNumber). Resolved to user UUIDs via `/users/all` (cached per environment for the process lifetime) and queried through the fast indexed `userId` filter; a CID shared by several API users fans out into parallel queries whose results are merged newest-first. Falls back to the slow `composite` substring search only when the code matches no users (the response carries a `note` when that happens).\n- `customer_name` \u2014 customer name, routed through `composite` (ignored if `customer_code` is set). Composite substring search scans the full log table and can time out \u2014 prefer `customer_code`.\n\n### `mware_get_retention`\n\n```json\n{ \"request_log_id\": \"fa2eb0b3-cc3a-4ecf-a336-ccf7bfff3bc8\" }\n```\n\nReturns the stored payloads for that request: `rawRequest`, `rawResponse`, `rawClientRequest`, `rawClientResponse`, `rawRequestHeaders`, `rawResponseHeaders`, plus `userId` and `type`. Responses can be large (100 KB+ for credit reports).\n\n### `mware_get_billing`\n\n```json\n{\n  \"start_day\": \"2026-05-01T00:00:00Z\",\n  \"end_day\":   \"2026-05-08T23:59:59Z\"\n}\n```\n\nBoth dates are ISO-8601 instants. Returns:\n\n```jsonc\n{\n  \"window\":  { \"start\": \"...\", \"end\": \"...\" },\n  \"product_filter\": null,                        // or { \"query\", \"matched_rows\" } when product filter is set\n  \"totals\":  { \"rows\", \"customers\", \"requests\", \"total_amount\", \"refund_amount\", \"net_amount\" },\n  \"by_customer\": [{ \"client_name\", \"client_num\", \"requests\", \"total_amount\", \"refund_amount\", \"net_amount\" }, \"...\"],\n  \"by_product\":  [{ \"product\",     \"requests\", \"total_amount\", \"refund_amount\", \"net_amount\" }, \"...\"]\n}\n```\n\n`by_customer` and `by_product` are sorted descending by `net_amount`. Backed by `GET /api/billing/total` (the newer pricing engine \u2014 computes amounts from per-config pricing/tiers).\n\nPass an optional `product` to filter entries before rollup (case-insensitive substring on the `product` field):\n\n```json\n{\n  \"start_day\": \"2026-04-01T00:00:00Z\",\n  \"end_day\":   \"2026-04-30T23:59:59Z\",\n  \"product\":   \"Bridger Insight\"\n}\n```\n\n`by_customer` then lists only customers who used that product family in the window, and `by_product` shows the exact product strings that matched the substring (helpful for disambiguating product names).\n\n### OffersIQ ruleset tools\n\nRulesets are trees of group nodes (`AND`/`OR`) and condition nodes (`attribute` + `operator` + `value`) encoded as a flat node list with `parent` indices; the node schema and operator list are embedded in the `mware_pxe_offersiq_create_ruleset` / `mware_pxe_offersiq_update_ruleset` tool descriptions. Attribute keys come from the product's **live attribute catalog** (`mware_pxe_offersiq_list_attributes`) \u2014 they are environment-specific (e.g. `fico_v8`, not `creditScore`) and each attribute restricts which operators it allows. Definitions are validated before hitting the API: structure locally, then attribute keys and operators against the catalog, with \"did you mean\" suggestions on unknown keys.\n\n```json\n{\n  \"name\": \"Prescreen \u2014 Standard\",\n  \"customer_id\": \"e98794ff-d151-4205-bdbe-b654c558474d\",\n  \"definition\": {\n    \"nodes\": [\n      { \"type\": \"group\", \"operator\": \"AND\", \"parent\": null, \"negated\": false },\n      { \"type\": \"condition\", \"attribute\": \"creditScore\", \"operator\": \"GREATER_THAN_OR_EQUALS\", \"value\": 620, \"parent\": 0, \"negated\": false },\n      { \"type\": \"condition\", \"attribute\": \"publicRecordBankruptcyCount\", \"operator\": \"EQUALS\", \"value\": 0, \"parent\": 0, \"negated\": false }\n    ]\n  }\n}\n```\n\nCreating a ruleset does **not** make it live: wire it to a customer config with `mware_pxe_offersiq_assign_ruleset` (`{ customer_id, config_id, ruleset_id, action: \"enable\" | \"disable\" | \"remove\" }`, `config_id` from `mware_get_user_config`). The assign response echoes the config's resulting decisioning-ruleset list plus a per-config assignment overview for that ruleset.\n\n`mware_pxe_offersiq_list_rulesets` filters by owner client-side (the upstream list endpoint has no `userId` param), paging up to 20\u00d7100 rulesets; `truncated: true` in the response means the cap was hit.\n\n## Development\n\n```bash\ngit clone https://github.com/StitchCredit/mware-mcp-server.git\ncd mware-mcp-server\nnpm install\ncp .env.example .env   # fill in MWARE_PROD_BASE_URL, MWARE_PROD_USERNAME, MWARE_PROD_PASSWORD\nnpm run build\nnpm test               # node:test suite (validation logic)\nnpm start\n```\n\nFor stdio mode while iterating, set `MCP_TRANSPORT=stdio` in `.env` and point your MCP client's config at the local `dist/index.js`:\n\n```json\n{\n  \"mcpServers\": {\n    \"mware\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/mware-mcp-server/dist/index.js\"]\n    }\n  }\n}\n```\n\n## License\n\nPrivate \u2014 internal use within CRS Credit API.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+  },
+  "time": {
+   "0.2.0-4da4735": "2026-05-11T16:02:40.803Z",
+   "0.2.0-8a42f15": "2026-05-07T14:47:34.688Z",
+   "0.3.0-a0cd8f6": "2026-05-15T18:23:14.530Z",
+   "0.3.1-6dc214f": "2026-06-01T14:42:37.301Z",
+   "0.4.0-2e51e76": "2026-07-13T12:47:44.666Z",
+   "0.5.0-a605421": "2026-07-13T13:17:36.355Z",
+   "0.5.1-629c355": "2026-07-13T13:39:28.578Z",
+   "0.6.0-5ee9892": "2026-07-13T15:10:45.724Z",
+   "0.7.0-689b3ce": "2026-07-13T16:33:22.179Z",
+   "0.8.0-73aec7e": "2026-08-12T15:40:41.914Z",
+   "created": "2026-05-07T14:47:34.415Z",
+   "modified": "2026-08-12T15:40:42.121Z"
+  },
+  "versions": {
+   "0.2.0-4da4735": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.2.0-4da4735",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.2.0-4da4735_1778515360645_0.20399594352708772"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 51,
+     "integrity": "sha512-zpcrrgyE0s/cqTrv4UyFrkAADwauw9Itr8GqUZvfePVngV3SRwr+5OfWiPmfUd6oVcxavxIDsOATumcyDVka1Q==",
+     "shasum": "d65a617748bb6b8ca87a0e0c454fe4093ad85b63",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDCgfMuDrhtF9GMSiZCwpp05NvnZ4tVSiU49xV712TZUwIhANn2JEgl+I9UQISHE2rKGkeWOUZ96fnWW9qTdJEhRuXr"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.2.0-4da4735.tgz",
+     "unpackedSize": 44985
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "4da4735b79395ec284b0f20b88955c6cc3967180",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0-4da4735"
+   },
+   "0.2.0-8a42f15": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.2.0-8a42f15",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.2.0-8a42f15_1778165254548_0.37138062049614473"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 51,
+     "integrity": "sha512-uaPpGc89TB3J7P6DyhmUKKHP8sFSF3CX503El3WLPMPTl4UycBerL6zOy9QOdSNBdYdPW5w7q1+VLzIOGtaSEg==",
+     "shasum": "112c27abdf2b83070026ebb54c0340c3164e4f2d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD5thlsXvE+y0sqkgoK+D9HYMgzPae9k7wDJfwFgX7tLQIhANpSSRycADNut0H8k4UetmJBAtnUNbpXBZS1OzoUYSnq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.2.0-8a42f15.tgz",
+     "unpackedSize": 38136
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "8a42f15ac591c9607e302d329c3b0d94a1c74dbd",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0-8a42f15"
+   },
+   "0.3.0-a0cd8f6": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.3.0-a0cd8f6",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.3.0-a0cd8f6_1778869394378_0.3559153245012403"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 51,
+     "integrity": "sha512-tjafH9Z0SNkCp44+Bn6D4PomvqB/sMzvnn8NQN6dSdcifxz4TpWpvEbhB3zWZpUsNPCLEUp5lbvAfTuS4p/HdA==",
+     "shasum": "1d82674dd679680845de4f97eae42260b3296f3f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbTooR6008tZaMl2+njs7vzOIm9WBqiUzGQpz2CabmwAIgKv99j1ElegdGZMaukiIgt4V5H4CbI0TjIVXY6Ogky8Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.3.0-a0cd8f6.tgz",
+     "unpackedSize": 46652
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a0cd8f6a98e1325ffa82f734716cd2fa66646df5",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0-a0cd8f6"
+   },
+   "0.3.1-6dc214f": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.3.1-6dc214f",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.3.1-6dc214f_1780324957127_0.03843000414829434"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 51,
+     "integrity": "sha512-Lx9U9Mqimu9pHmmxkvw/wYNXkgyTwC7l0un6yUyxxqPEMmDDf56yF5znW6i6N8VfLQuJmzNHtDHtc7iYUfWXWg==",
+     "shasum": "f6c369f97d514250237e9fe876e60b686a67e7be",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFIFDK2ghvrUiHcgfqK+h2bcQrAMsx9Ds3aZA6vW/CXFAiEA8frhF71HjhUXU9hPpAMlWZn+f+yOu5960RApkPaxD+8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.3.1-6dc214f.tgz",
+     "unpackedSize": 48710
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "6dc214f3c29e52b24779e7bd80f84ec5653df1e7",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.1-6dc214f"
+   },
+   "0.4.0-2e51e76": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.4.0-2e51e76",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.4.0-2e51e76_1783946864534_0.21804379295293108"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 61,
+     "integrity": "sha512-wSQ+xNa2YpiBvd1aDL6CpMNQ4aX7OJG7n5Okkz8vXqyc1oO815Aoi+avpgnzEaW9SD/KR5ozG9InRrtFWWxvmA==",
+     "shasum": "feb4c4bc8e7c103c7dd8ca069249588b620fe078",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICJme5kOKhUSNQrz8kov46AbjY1W+gePJF9A00qlA1yfAiATFjAu3SnLkBZZERq0lml+MX1oyaQEy5jxXcLLLgBG/A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.4.0-2e51e76.tgz",
+     "unpackedSize": 86981
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "2e51e7626e506b56146eb423f17a605a9b3df2eb",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.4.0-2e51e76"
+   },
+   "0.5.0-a605421": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.5.0-a605421",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.5.0-a605421_1783948656212_0.8765907089342382"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-KRTX4XCuqB1b7vTLJ+guqn7MdDEH0KbXNFlJXAAmYJk2oY7VhG9C0T2S8GP1el9bJ1XneKDKFrieUd4yUpsjLA==",
+     "shasum": "9757412c25037d3b565e4d4108927526f3536595",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCvVW+ErFxWF9A14rymfMkFE/k87e1bK9FgmJi8fByVpgIhAIp2r9gFQz25wiiTmlEVoSfGSLEN+pqwy6rrNSM6zofa"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.5.0-a605421.tgz",
+     "unpackedSize": 99281
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a6054216dd8bd28049431c3ae0f77f61bb2d307e",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.5.0-a605421"
+   },
+   "0.5.1-629c355": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.5.1-629c355",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.5.1-629c355_1783949968440_0.2634135816330174"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-19VxAKApbereLlbR73DbA3/RH2p/T54S7NYxz5TSWtrCmY89M7ZDjerAZQCec7VgmqG2F9Cro/myQ7fYaSIeDQ==",
+     "shasum": "c93c3b4ca0bbadc1f75236cfc0f256b2455a7eb2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDJs/i4BBbxS9+sM5Vu9OWJELAy5YXQuOcTcpJRvpfRUQIgOvMC5+c1KQuV+NUX3S+QhmpmWx43IW+5zuLsu5UfpHY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.5.1-629c355.tgz",
+     "unpackedSize": 99400
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "629c35555c35eec8dfe402cf231daf3194065270",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.5.1-629c355"
+   },
+   "0.6.0-5ee9892": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.6.0-5ee9892",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.6.0-5ee9892_1783955445564_0.12230020160192323"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 65,
+     "integrity": "sha512-yoCpoIuafJG7EQ3hM3Gq64zvebTLdORqnjQ4KOCpyr34wbnslGt6KfGtGuTkg3U6Cw7qpVBFMBBhobyYl0QImw==",
+     "shasum": "7ef224eb329e1e394e4ddba092b40b641398d024",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHq2k79ZR3jHrfiBnvFRp4+SU1/6BJpcz0fkIkhnRMhlAiB7jcsJT+yIo4/O3fAsR6Hnz4H5ys7ZwvC6liByOtmr2w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.6.0-5ee9892.tgz",
+     "unpackedSize": 105204
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "5ee989219a4bcf73b9d5d36d9670a4505b4c0bd9",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.6.0-5ee9892"
+   },
+   "0.7.0-689b3ce": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.7.0-689b3ce",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.7.0-689b3ce_1783960402022_0.3455610252118422"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 71,
+     "integrity": "sha512-papk8nsM7TQk29xz1BHVHcNwFRUBSglOOJcsSazsCgniGDzoDnQtHqRBvvzeP4pz6X37dJ+JJXG1V/Dc8v6B6g==",
+     "shasum": "6727f3faca965047e95b65fd8e86be2cdfed1473",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC8CTGqdZOMRUmP5evulCGY0KRPPrtQeLNiqsAVHl4pGwIge+wZva71/tMoBUN4sDOPbDbhpgSWxzlewbsig3FGtLU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.7.0-689b3ce.tgz",
+     "unpackedSize": 108066
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "689b3ce7cebf76cef7877aa866e825f1a3623613",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.7.0-689b3ce"
+   },
+   "0.8.0-73aec7e": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/mware-mcp-server@0.8.0-73aec7e",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mware-mcp-server_0.8.0-73aec7e_1786549241772_0.1094264708100392"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "mware-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/mware-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for mware",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 79,
+     "integrity": "sha512-2KujCWlem/K4gDqzvB4uBxlSY1MJgUO6U2XCnGZcilUd77PmmeLDVb++DN7BDQ5X0TPCkW5EqV8wsbCMvTvsCQ==",
+     "shasum": "9c06a844813d0a664252c862cd286d176b804dc4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDINScUS+R8CcULCoQE50RvpzCPb6xNGIaWuW6RLMBG6wIgVktRVqN5TAgUI2gRnXRkV9VR5+eVWJn3oJcXpKLdBbc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/mware-mcp-server/-/mware-mcp-server-0.8.0-73aec7e.tgz",
+     "unpackedSize": 119030
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "73aec7e2cfd393b3a998fabe1be9712cfd149f1e",
+    "homepage": "https://github.com/StitchCredit/mware-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/mware-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/mware-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js",
+     "test": "npm run build && node --test \"dist/**/*.test.js\""
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.8.0-73aec7e"
+   }
+  }
+ },
+ "name": "@crscreditapi/mware-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@crscreditapi%2Fmware-mcp-server"
+}

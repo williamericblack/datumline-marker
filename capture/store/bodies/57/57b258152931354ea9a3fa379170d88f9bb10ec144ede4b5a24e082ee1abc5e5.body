@@ -1,0 +1,652 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.4",
+  "maintainers": [
+   {
+    "email": "[redacted-email:b9dc582a3f35]",
+    "name": "agentruntimelabs"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.0.1",
+   "0.1.2",
+   "0.2.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.3.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@agentruntime-labs/agentruntime-mcp",
+  "_rev": "9-3ea262c4599ac704bb99020ba916bfc6",
+  "author": {
+   "name": "AgentRuntime"
+  },
+  "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+  "dist-tags": {
+   "latest": "0.3.4"
+  },
+  "keywords": [
+   "mcp",
+   "agentruntime",
+   "modelcontextprotocol"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:b9dc582a3f35]",
+    "name": "agentruntimelabs"
+   }
+  ],
+  "name": "@agentruntime-labs/agentruntime-mcp",
+  "readme": "# AgentRuntime MCP SDK (TypeScript)\n\nOpinionated SDK aligned with [`agentruntime-mcp-go`](https://github.com/agentruntime-io/agentruntime-mcp-go), built on the official [@modelcontextprotocol/server](https://www.npmjs.com/package/@modelcontextprotocol/server) streamable HTTP transport (JSON responses).\n\n> **Note:** Same `config.yaml` shape and Control integration as the Go SDK (`POST /mcp/config`, optional env overrides per schema key, `GET \u2026/config/schema`). Legacy FastMCP-only flows are removed.\n\n## Releasing\n\nSee [`../RELEASE.md`](../RELEASE.md) (TypeScript section): bump `package.json`, `npm run build` before publish, do not commit `node_modules/` or `dist/`.\n\n## Install\n\n```bash\nnpm install @agentruntime-labs/agentruntime-mcp zod @cfworker/json-schema\n```\n\n## Minimal example\n\n```typescript\nimport { z } from \"zod\";\nimport { tool, run } from \"@agentruntime-labs/agentruntime-mcp\";\n\nconst In = z.object({\n  a: z.number(),\n  b: z.number(),\n});\n\nconst Out = z.object({\n  result: z.number(),\n  expression: z.string(),\n});\n\ntool({\n  name: \"add\",\n  description: \"Add two numbers\",\n  inputSchema: In,\n  outputSchema: Out,\n  execute: async (args, config) => {\n    // Resolved config from control server is exposed here.\n    const region = config.region as string | undefined;\n    return {\n      result: args.a + args.b,\n      expression: `${args.a} + ${args.b}`,\n    };\n  },\n});\n\nrun(\"config.yaml\");\n```\n\n## Config\n\n- `config.yaml` controls server host/port, optional reserved `auth` keys, tracing, and the Control **config** schema.\n- Env overrides: **`HOST`**, **`PORT`**. Control integration uses **`MCP_CONTROL_SERVER_URL`**, **`MCP_CONFIG_FETCH_REQUIRED`**, etc. (see [`docs/mcp/mcp_env.md`](../../docs/mcp/mcp_env.md)); there is no mandatory FastMCP-style global token middleware \u2014 the run token arrives on the HTTP request.\n\nExample `config.yaml`:\n\n```yaml\nserver:\n  name: \"MCPAuthDemo\"\n  host: \"127.0.0.1\"\n  port: 8012\n  stateless_http: true\n\nauth:\n  mode: token   # reserved for templates; Control uses request Bearer token\n\ntracing:\n  enabled: false\n\nconfig:\n  accessKeyId:\n    type: string\n    displayName: Access Key ID\n    required: true\n  secretAccessKey:\n    type: string\n    displayName: Secret Access Key\n    required: true\n  bucket:\n    type: string\n    displayName: Bucket\n    required: true\n  region:\n    type: option\n    displayName: Region\n    required: true\n    options:\n      - label: Default\n        value: us-east-1\n      - label: US East (Ohio)\n        value: us-east-2\n```\n\n### Auth modes\n\n- `none`: no auth\n- `token`: `Authorization: Bearer <token>` or `X-MCP-Token`; dev fallback `?auth_token=` if `ALLOW_QUERY_TOKEN=true`\n- `hmac`: headers `X-MCP-KeyId`, `X-MCP-Timestamp` (unix seconds), `X-MCP-Signature` (hex(HMAC-SHA256(secret, `${ts}\\n${method}\\n${path}`)))\n\n## Control config resolution\n\nThe SDK can resolve populated config values from a control server and expose them on the request context as `config` in tool handlers.\n\n- Set `MCP_CONTROL_SERVER_URL` (e.g. `http://control-svc:8080`)\n- SDK sends `POST /mcp/config` with your `config.yaml` `config:` schema\n- SDK forwards auth token from middleware (`Authorization` / `X-MCP-Token`)\n- SDK also forwards best-effort `runtime_context` for control-side policy/resolution\n- Returned populated config is exposed as `config` in the tool `execute` callback\n\nEnvironment flags:\n\n- `MCP_CONTROL_SERVER_URL`: control server base URL\n- `MCP_CONTROL_TIMEOUT_SEC`: request timeout (default `5`)\n- `MCP_CONFIG_FETCH_REQUIRED`: fail request if resolution fails (default `true`)\n\nSchema endpoint:\n\n- `GET /mcp/config/schema` returns the raw `config:` schema from `config.yaml`.\n\n## Proxy (library)\n\n```typescript\nimport { runProxy } from \"@agentruntime-labs/agentruntime-mcp\";\n\nawait runProxy(\n  \"http://127.0.0.1:8000/mcp\",\n  \"tools.yaml\",\n  undefined, // bearer token\n  \"127.0.0.1\",\n  8010\n);\n```\n\n## Tool organization (`toolorg`)\n\n```typescript\nimport { publisherMetadata } from \"@agentruntime-labs/agentruntime-mcp\";\n\nconst meta = publisherMetadata(\"clickup_get_task\", {});\n```\n\nPer-request caller bearer: `requestBearerFromContext()` (set by HTTP middleware).\n\nSDK parity checklist: [MCP_SDK_PARITY.md](../../docs/mcp/MCP_SDK_PARITY.md).\n\n## Templates\n\nExample MCP server using this SDK:\n\n- [connectors/ts-connectors/resend-connector](../../connectors/ts-connectors/resend-connector/) \u2013 Resend (send_email, list_audiences)\n\n## Comparison with Python package\n\n| Feature | Python (agentruntime-mcp) | TypeScript (agentruntime-mcp) |\n|---------|--------------------------|------------------------------|\n| Base framework | FastMCP (Python) | FastMCP (npm) |\n| Schema | Pydantic | Zod |\n| Runtime | `run(\"config.yaml\")` | `run(\"config.yaml\")` |\n| Tool decorator | `@tool(name=..., input_model=..., output_model=...)` | `tool({ name, inputSchema, outputSchema, execute })` |\n| Config | `ctx.config` | `config` in execute 2nd arg |\n| Auth | `token`, `hmac`, `none` | Same |\n| Control config | `POST /mcp/config` | Same |\n| Proxy | `run_proxy(...)` | `runProxy(...)` |\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.0.1": "2026-03-14T08:10:50.676Z",
+   "0.1.2": "2026-06-07T17:46:25.795Z",
+   "0.2.0": "2026-06-20T17:17:34.656Z",
+   "0.3.1": "2026-07-14T11:58:29.231Z",
+   "0.3.2": "2026-07-20T11:00:34.116Z",
+   "0.3.3": "2026-07-20T17:33:39.811Z",
+   "0.3.4": "2026-08-24T17:23:31.906Z",
+   "created": "2026-03-14T08:10:50.371Z",
+   "modified": "2026-08-24T17:23:32.077Z"
+  },
+  "versions": {
+   "0.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.0.1",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.0.1_1773475850516_0.9733046525358309"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0832784a9429]",
+     "name": "timnirmal"
+    },
+    "_npmVersion": "10.8.2",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "fastmcp": ">=3.0.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^3.23.0",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) - Opinionated SDK for building MCP agents with FastMCP",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 32,
+     "integrity": "sha512-8blf7K5baprWs1XuNTaFUP4pGWNW6vvY3XjcSs51lYTijAs6JGMsysJ1ssmE3V7OWZGQBPpiy1hptIDmv28nOA==",
+     "shasum": "005299d57a5130d713178ca3e86e5d86d2577617",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICtOqq4rdGoGDsPm09NpD7aZTeJBCgzf4fbLaTcUWEN8AiEAiZ/HIOHZi35Nf4CltLmulQiMA0VI/VdKAF362ehhkXY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.0.1.tgz",
+     "unpackedSize": 36982
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3e37b356a1730153a8a3adc486aca313186f831d",
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "fastmcp"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0832784a9429]",
+      "name": "timnirmal"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "peerDependencies": {
+     "fastmcp": ">=3.0.0"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.0.1"
+   },
+   "0.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.1.2",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.1.2_1780854385658_0.24634714056617257"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 83,
+     "integrity": "sha512-0KRs2hhyP38qgoSDixPxNXN3wiNmPi7XCgrzwcyc+QGQ0ipaWVN66GUzyNbo/h8ZLz0zrEnrP0izJIZdAMF3UQ==",
+     "shasum": "e274f5a927be5875bdfa3cd1b672eb2d46fee125",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEs5I5zqoMQCLP5KFKYUkjf2I+HzIFtl88TjXjmWRvLWAiAM7aQDqUGsaXT6eGf5EGMEQUVkaD9xO7y/nUUwwDrmsQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.1.2.tgz",
+     "unpackedSize": 122092
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.2"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.2.0",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.2.0_1781975854512_0.9292981330927161"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 95,
+     "integrity": "sha512-+IU3x5FWO6aonFS21LzMETwqOCeQrQLdNVBgpYSazTtHv7bZs0Co/N6YnzIeXz/tOsKMstv5u/t2/BOgvo+h0w==",
+     "shasum": "54d2f8727ec94ab842ed02841babfbf244e06a3f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCID6CjBtEsrZQ95x8sgCQxzmb2TqbzU/B6v2RDcf1xykkAiB+W2UgRjSm2QVcA9gqY50zgXczPQ6Qy3MzF3FIm7X8FA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.2.0.tgz",
+     "unpackedSize": 151246
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.3.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.3.1_1784030309082_0.8517466280238637"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 113,
+     "integrity": "sha512-U81UV/p3NAgQrXFGQEvghZQnkefp+nPf4ShANWCgPx27ckO7du1CyZvUsCbzEs5fKCwJM8dyR0obg65E1Ab9Jw==",
+     "shasum": "32067eec766237307500d7250ae42bfb1f8f533a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD918lrNWZsE0KPrAuTBRR/7zX2aVqhyiuQMEoA6NF1KgIhAN0VaBUGn6TOyIvHbpk+Kj/V3DIJ+BE+ifGb2Ty+Fv6C"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.3.1.tgz",
+     "unpackedSize": 175692
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.3.2",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.3.2_1784545233983_0.06657502448031583"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 117,
+     "integrity": "sha512-83ykmwtIxDrIvmQ9bzAboJCB5inGGnA4wBXzZLxOhu74u3qaWSh1j/vxwZwPXLRkPKCETBRualjJH1CN5Oym+A==",
+     "shasum": "1edaa6f1b780cb0f183a6b34e798536e44252041",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC9c9wlkW2MJN65IqC+mkuCFk5eSyOsQUy9FXywcoL6/QIhAJ82knUA2g8UpL9Z/xJFyAB4p0ImMMt+GaMyLpa3/NC2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.3.2.tgz",
+     "unpackedSize": 179220
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.3.3",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.3.3_1784568819653_0.4430730855494296"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 121,
+     "integrity": "sha512-6CIhp2YyqtKHbuFsbCu/wXW39L7Xgw0Of3qVidVoUp0WwbuCKjgC6V0SwMyZgOqgeStV8IPnShA22pwAFN7FhA==",
+     "shasum": "c2867ecd78165ef7dbf26dc37e3152fad9c78b43",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGpYTAOFNMY41OcsaD1YIGeKfxTP6o724naKVP/U5W2iAiAlrnNSES5vU6SrcVpXgPVlA1QU9IPF9yD+IBobWiAjsA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.3.3.tgz",
+     "unpackedSize": 181010
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.3"
+   },
+   "0.3.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@agentruntime-labs/agentruntime-mcp@0.3.4",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/agentruntime-mcp_0.3.4_1787592211818_0.40140436050071737"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:b9dc582a3f35]",
+     "name": "agentruntimelabs"
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "AgentRuntime"
+    },
+    "dependencies": {
+     "@cfworker/json-schema": "^4.1.1",
+     "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+     "@opentelemetry/api": "^1.9.0",
+     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+     "@opentelemetry/resources": "^1.28.0",
+     "@opentelemetry/sdk-trace-base": "^1.28.0",
+     "@opentelemetry/sdk-trace-node": "^1.28.0",
+     "@opentelemetry/semantic-conventions": "^1.28.0",
+     "js-yaml": "^4.1.0",
+     "zod": "^4.4.3",
+     "zod-to-json-schema": "^3.23.0"
+    },
+    "description": "AgentRuntime MCP SDK (TypeScript) \u2014 parity with agentruntime-mcp-go using @modelcontextprotocol/server",
+    "devDependencies": {
+     "@types/js-yaml": "^4.0.9",
+     "@types/node": "^22.0.0",
+     "typescript": "^5.6.0",
+     "vitest": "^4.1.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 137,
+     "integrity": "sha512-tF5xphYt7fFzWESarPZFofL8DwwYKLr6D+ZytHhMX1xCXzGxvSA/KXVRQcGQ62lw0QIag2q55ZV+neRq1qVLbw==",
+     "shasum": "34a203b22184043d406186bce4b350f3b47403b0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAfT/tlwL35a/wA6rYlp5xZx9nJGdwuxrog4n9jyCZRUAiBbc2/V6k+qTCbmKXg1XcJZBezpcXX0ZamSk4SYANSf8A=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICebyxiTcotKAFGgZoJSODlI4BV7oGOgDW3RFlCijekaAiB3M8gfoKy4szs7bIO2KhxjHwNtpbcAR5pinPHbaWHSpA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@agentruntime-labs/agentruntime-mcp/-/agentruntime-mcp-0.3.4.tgz",
+     "unpackedSize": 203128
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "keywords": [
+     "mcp",
+     "agentruntime",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:b9dc582a3f35]",
+      "name": "agentruntimelabs"
+     }
+    ],
+    "name": "@agentruntime-labs/agentruntime-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build",
+     "test": "vitest run"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.4"
+   }
+  }
+ },
+ "name": "@agentruntime-labs/agentruntime-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@agentruntime-labs%2Fagentruntime-mcp"
+}

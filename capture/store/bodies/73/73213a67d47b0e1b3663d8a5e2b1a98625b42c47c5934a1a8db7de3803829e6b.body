@@ -1,0 +1,1507 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.5.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:fbfd15da1e72]",
+    "name": "ianpascoe_"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.4.0",
+   "0.4.1",
+   "0.4.2",
+   "0.4.3",
+   "0.5.0",
+   "0.5.1",
+   "0.5.2",
+   "0.5.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@ian-pascoe/pi-mcp",
+  "_rev": "15-56627dd1836a21a1c5cde278d79b08ac",
+  "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+  "bugs": {
+   "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+  },
+  "description": "A complete Model Context Protocol Host for Pi",
+  "dist-tags": {
+   "latest": "0.5.3"
+  },
+  "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "pi",
+   "pi-extension",
+   "pi-package"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:fbfd15da1e72]",
+    "name": "ianpascoe_"
+   }
+  ],
+  "name": "@ian-pascoe/pi-mcp",
+  "readme": "# @ian-pascoe/pi-mcp\n\nPi MCP makes [Pi](https://github.com/earendil-works/pi) an MCP Host for named local and remote MCP Servers. It supports the core protocol with automatic current/legacy negotiation; it does **not** support MCP Standard Extensions. In particular, Tasks are deferred indefinitely.\n\n## Install\n\nPi loads the extension directly from TypeScript. From this repository, install the collection and select its source entrypoint:\n\n```bash\npi install git:github.com/ian-pascoe/pi-extensions\n```\n\nFor a filtered Git installation, include this path in the package's `extensions` list:\n\n```json\n\"packages/pi-mcp/src/index.ts\"\n```\n\nThe `pi-mcp` executable is compiled into the npm tarball, not into a Git checkout. After `@ian-pascoe/pi-mcp` is published, install the package with Pi and use its supplied binary:\n\n```bash\npi install npm:@ian-pascoe/pi-mcp\npi-mcp --help\n```\n\nUntil publication, do not add `npm:@ian-pascoe/pi-mcp` to `.pi/settings.json`. Workspace and Git installs use the source extension; build the local CLI explicitly when needed:\n\n```bash\npnpm --filter @ian-pascoe/pi-mcp build:cli\nnode packages/pi-mcp/dist/pi-mcp-cli.js --help\n```\n\nRequires Node.js 22.19 or newer and a compatible Pi installation.\n\n## Configure servers\n\nPut only an `mcp` object in Pi's normal global or trusted project `settings.json`. There is no separate MCP configuration file.\n\n```json\n{\n  \"mcp\": {\n    \"connectTimeoutMs\": 10000,\n    \"requestTimeoutMs\": 60000,\n    \"retry\": {\n      \"maxRetries\": 2,\n      \"initialDelayMs\": 1000,\n      \"maxDelayMs\": 30000,\n      \"backoffFactor\": 1.5\n    },\n    \"servers\": {\n      \"local-docs\": {\n        \"command\": \"node\",\n        \"args\": [\"./tools/docs-mcp.mjs\"],\n        \"cwd\": \".\",\n        \"environment\": { \"DOCS_TOKEN\": \"${DOCS_TOKEN}\" }\n      },\n      \"remote-docs\": {\n        \"url\": \"https://mcp.example.com/mcp\",\n        \"headers\": { \"X-Workspace\": \"${WORKSPACE_ID}\" },\n        \"auth\": { \"type\": \"oauth\", \"scopes\": [\"tools.read\"] }\n      }\n    }\n  }\n}\n```\n\nA **Server Definition** is named by its `servers` key. It is either:\n\n- a local `stdio` definition: `command`, optional `args`, `cwd`, and `environment`; or\n- a remote `http` or explicit legacy `sse` definition: `url`, optional `headers`, and optional `auth`.\n\nExactly one of `command` and `url` is required. `stdio` is the default for `command`; Streamable HTTP is the default for `url`. Remote URLs must be absolute HTTP(S) URLs. Remote definitions cannot contain process fields, and local definitions cannot contain headers or authentication fields. `enabled` defaults to `true`.\n\nAuthentication is omitted for anonymous access, or is one of:\n\n```json\n{ \"type\": \"none\" }\n{ \"type\": \"bearer\", \"token\": \"${MCP_TOKEN}\" }\n{\n  \"type\": \"oauth\",\n  \"clientId\": \"optional-client-id\",\n  \"clientSecret\": \"${MCP_CLIENT_SECRET}\",\n  \"redirectUri\": \"http://127.0.0.1:19876/mcp/oauth/callback\",\n  \"scopes\": [\"tools.read\", \"resources.read\"]\n}\n```\n\n`none` disables OAuth discovery. Bearer authentication supplies the Authorization header and cannot be combined with a configured `Authorization` header. OAuth supports discovery, Client ID Metadata Documents when configured, Dynamic Client Registration where necessary, refresh tokens, and persisted PKCE/state data. The default callback is the loopback URL above; custom redirects must also be HTTP loopback URLs.\n\n### Defaults, merge, masks, and environment values\n\nThe host-wide defaults are:\n\n| Setting                |   Default |\n| ---------------------- | --------: |\n| `connectTimeoutMs`     | 10,000 ms |\n| `requestTimeoutMs`     | 60,000 ms |\n| `retry.maxRetries`     |         2 |\n| `retry.initialDelayMs` |  1,000 ms |\n| `retry.maxDelayMs`     | 30,000 ms |\n| `retry.backoffFactor`  |       1.5 |\n| shutdown budget        |  5,000 ms |\n\nGlobal and project `mcp` objects merge top-level timeout and retry fields. A project Server Definition replaces the whole global definition with the same name; it does not field-merge it. A project definition of `null`, or an inherited definition written as `{ \"enabled\": false }`, masks the global definition. Removing or enabling the project entry reveals the global definition again.\n\n`${NAME}` expands in every string **value** in a Server Definition, using Pi's process environment. Keys are never expanded, values are expanded once only, and a missing variable makes the merged MCP configuration invalid without exposing the secret value. Unknown fields and invalid settings are rejected with path-qualified errors; Pi continues to start with MCP disabled.\n\n## Commands\n\n`/mcp` accepts every command below. The standalone `pi-mcp` binary accepts the first eight only.\n\n| Command                                                                   | Surface | Purpose                                                                                                                                                 |\n| ------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `list [--json]`                                                           | both    | List effective definitions, provenance, enabled/masked state, auth type, and stored-auth presence; `--json` is standalone-only and list never connects. |\n| `add [-l] <name> <url> \u2026`                                                 | both    | Add or replace a remote definition.                                                                                                                     |\n| `add [-l] <name> \u2026 -- <command> [args\u2026]`                                  | both    | Add or replace a local stdio definition.                                                                                                                |\n| `remove [-l] [--logout] <server>`                                         | both    | Remove a definition, optionally removing its stored credentials.                                                                                        |\n| `enable [-l] <server>` / `disable [-l] <server>`                          | both    | Change enabled state.                                                                                                                                   |\n| `auth <server> [--no-open] [--callback URL \\| --code CODE --state STATE]` | both    | Run an explicit OAuth authorization flow.                                                                                                               |\n| `logout <server>` / `logout --all --force`                                | both    | Remove one server's credentials, or explicitly reset corrupt auth storage.                                                                              |\n| `test <server> \\| --all [--json]`                                         | both    | Connect temporary clients and close them without disturbing live connections; `--json` is standalone-only.                                              |\n| `help`                                                                    | `/mcp`  | Show concise runtime command help without querying an MCP Server.                                                                                       |\n| `status`                                                                  | `/mcp`  | Show live connection state, retry details, and active Resource subscriptions.                                                                           |\n| `reconnect <server>`                                                      | `/mcp`  | Reconnect one live server.                                                                                                                              |\n| `prompt <server> <prompt> [--arg NAME=VALUE]\u2026`                            | `/mcp`  | Run an MCP Prompt.                                                                                                                                      |\n| `subscribe <server> <uri>` / `unsubscribe <server> <uri>`                 | `/mcp`  | Manage Resource subscriptions.                                                                                                                          |\n| `logs [server]`                                                           | `/mcp`  | Read retained server logs without sending an MCP logging-level request.                                                                                 |\n\nMutations default to global scope. `-l` or `--local` selects project scope and is allowed only when Pi has saved trust for that project. The standalone CLI also accepts `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one invocation. In a running Pi session, add/enable persists first and then connects in the background; disable/remove persists first and then disconnects. A failed connection never rolls back the setting.\n\nFor a remote server, `add` accepts repeated `--header NAME=VALUE`, `--transport http|sse`, and the OAuth/bearer flags `--auth`, `--token`, `--client-id`, `--client-secret`, `--redirect-uri`, and repeated `--scope`. For a local server, use repeated `--environment NAME=VALUE` (or `--env`) and optional `--cwd` before `--`.\n\nOAuth is always explicit: the authorization URL is printed before a best-effort browser launch. Use `--no-open` for remote/headless use, then provide a full callback URL with `--callback`, or a verified `--code` and `--state` pair. The host permits one active authorization flow per process and validates callback state, issuer, resource, and loopback redirect values.\n\n## MCP Observer UI\n\nThe MCP Transcript Presentation gives every Server Tool and fixed Resource tool a compact row with its original MCP Server and operation names, argument previews, content counts, and text-backed success, warning, failure, or cancellation state. Expanding a row shows bounded structured arguments, model-visible text, stored-content metadata, output-schema failures, and Result Spill paths. Progress replaces the current row instead of adding transcript entries. Pi still renders native result images separately.\n\nPrompt messages show their MCP Server, Prompt name, message roles, text, and image metadata. Resource Update Notices show their MCP Server and URI, and state that the Resource remains unread until the agent explicitly reads it. These renderers use the existing persisted content and details. They do not invoke a Prompt, read a Resource, or change replay and next-turn delivery.\n\nIn TUI mode, the MCP Observer UI always shows the connected/enabled Server ratio in Pi's footer. It groups connecting and retrying Servers as busy, authentication and client-registration states as auth, and terminal failures as failed. It sends one MCP Attention Notice when invalid settings, authentication, client registration, or terminal failure needs a command. `/mcp status` reports invalid settings separately from an empty configuration and includes attempts, retry timing, redacted causes, and sorted active Resource subscriptions.\n\nInteractive TUI and HTML exports use the semantic tool renderers. Prompt and Resource Update custom rendering, footer health, and Attention Notices are TUI-only. Print, JSON, and RPC modes receive no Observer-only output. HTML custom messages keep their durable content-based representation.\n\nObserver copy strips terminal controls and applies exact-value redaction for values resolved from settings. It does not guess secrets from field names, and arbitrary Server Tool data remains faithful in model-visible content and stored session data.\n\n## What the model can use\n\nEvery advertised MCP **Server Tool** becomes an individual Pi tool named:\n\n```text\nmcp__<server>__<tool>\n```\n\nNames are sanitized for Pi and get a deterministic hash suffix only when they collide. Annotations are untrusted metadata; they do not grant permission or alter execution.\n\nPi also registers these fixed tools, only when a connected server supports Resources:\n\n```text\nlist_mcp_resources\nlist_mcp_resource_templates\nread_mcp_resource\n```\n\nThere is no generic raw-MCP request tool or protocol gateway. Prompts, authentication, subscriptions, status, reconnect, and logs remain `/mcp` operations rather than model tools.\n\nInput and output schemas are retained as the Server advertised them. Pi MCP trusts the official MCP Client's parsed Tool contract, registers schemas without eager structural validation, and compiles each exact validator once on first use. Malformed schemas therefore fail lazily at tool invocation or result validation. On Pi 0.84.2 there is no public provider-schema compatibility preflight: a model provider can reject an otherwise valid or malformed exact MCP JSON Schema, which can fail that model turn. Pi MCP deliberately does not maintain a provider matrix, rewrite schemas, inspect Pi internals, or rewrite provider payloads to hide that limitation.\n\n## Host behavior\n\nEnabled servers connect in the background after one event-loop turn at session start, so Pi startup and TUI input do not wait for process or network work. Within one Pi process, matching clients are retained for 30 seconds across `/reload`, `/new`, `/resume`, and `/fork`; this applies to stdio, Streamable HTTP, and legacy SSE. Reuse requires the same canonical project root, trust state, resolved Server Definition, authentication identity, and timeout settings. Concurrent sessions receive exclusive clients, and `/mcp reconnect`, configuration or authentication changes, disable, removal, logout, and quit close affected clients instead of retaining them. `/mcp status` reports reused connections and their age.\n\nEach session still owns its MCP Host, callbacks, retries, desired subscriptions, Instruction Snapshots, logs, and private files. A released session cannot start operations or receive callbacks through a retained client. Current MCP peers are negotiated automatically and legacy 2025-era peers remain supported. Streamable HTTP never silently falls back to SSE.\n\nThe host maps the core protocol surface:\n\n- tools, Resources, Resource Templates, Prompts, completion, and Server Instructions;\n- sampling with Pi's active model and credentials, returning server-executable tool-use blocks;\n- roots (the current Pi working directory), elicitation, logging, progress, and cancellation; and\n- current multi-round input requests (bounded to ten rounds) plus legacy server-initiated callbacks.\n\nInteractive callbacks are request-scoped. Headless environments decline interaction rather than hanging; background work never opens a dialog or browser and never starts a model turn. Resource changes queue a provenance-labelled notice for the next turn; the host does not fetch or inject resource content automatically.\n\nAt each agent start (`before_agent_start`), Pi synchronously captures a deterministic **Instruction Snapshot** without waiting for MCP connection or catalog startup. Host snapshot eligibility follows completed tool catalog synchronization, including debounced deactivation. Only nonempty Server Instructions contribute attributed sections; generated tool rosters are omitted, so roster-only changes do not change system instructions. Real guidance remains a suffix of the chained system prompt, not a user/custom message or Pi policy.\n\nThat agent run retains its system snapshot during tool-loop requests. The next agent start refreshes available, changed, or removed guidance; live tool activation, revocation, and policy enforcement remain independent and can change earlier. Our previous per-request atomicity claim overstated the existing implementation: tools and instructions are not guaranteed to transition together on each provider request. This documents the existing agent-start boundary, not an atomicity fix. A stronger atomic update design requires separate approval and tests.\n\nThis removes redundant system-text churn, not all cache misses. Genuine guidance and directly exposed tool schemas can still change request prefixes. Native deferred tool additions are supported only on compatible Pi/provider/model combinations; offline serialization equality is not a live cache-hit measurement.\n\nFailures stay isolated to the affected Server Definition. Status is one of `disabled`, `connecting`, `connected`, `needs_auth`, `needs_client_registration`, `retrying`, or `failed`. Retryable startup failures and unexpected closes use the shared capped exponential policy. Authentication, invalid configuration, unsupported protocol, disable, and shutdown do not retry. After retries are exhausted, use reconnect, reload, or a new session.\n\nValidated catalog lists are cached with the connection across session handoff, aggregate at most 1,000 pages, reject repeated cursors, and invalidate on their matching MCP notifications. Catalog changes are coalesced for 50 ms, MCP log writes for 50 ms or 64 KiB, and unchanged footer state is not redrawn. Server Tool additions/replacements take effect immediately. Pi has no public deregistration API, so removed tools are deactivated until reload.\n\n## Output, persistence, and reload\n\nText and images map to Pi-native content. Embedded text Resources and Resource Links become provenance-labelled text. Structured content is visible as labelled JSON and retained in tool details. Unsupported audio and binary Resources are saved as private, mode-safe session files rather than discarded.\n\nAll model-facing text uses Pi's 2,000-line / 50-KB limit. Oversized complete output is retained in a private Result Spill and the returned content includes its path. Per-server stderr and MCP logging retain only the newest 256 KB. `/mcp logs` keeps the newest combined text within Pi's display limit and identifies the private retained-log path when it truncates. Stdio stdout is protocol framing only; stderr and MCP logs do not write directly to TUI, JSON, or RPC output.\n\nDesired Resource subscriptions and expanded Prompt messages are persisted as versioned Pi custom entries and replay only on the active session branch. Logs remain session-local and ephemeral. Replacement closes the old session generation and its dormant tool definitions, then gives the new generation an exclusive lease on a matching retained connection when available. Shutdown awaits owned cleanup.\n\nOAuth data lives in a strict, URL-and-client-identity-bound `mcp-auth.json` under Pi's agent directory, protected with mode `0600`. Settings and auth writes use a bounded lock plus atomic replacement. Malformed auth storage is not overwritten by ordinary operations; use the explicit reset command.\n\n## Security boundaries\n\nA project Server Definition can launch an arbitrary local executable with Pi's permissions. Treat project MCP settings as executable configuration: review the command, arguments, working directory, and environment before trusting a project or approving a project-local mutation.\n\nPi MCP owns no permission or approval policy for server tools, Resources, Prompts, or sampling. Another Pi extension may govern the surrounding tool call. Elicitation and OAuth are protocol interactions, not permission grants. Resolved environment values, bearer tokens, OAuth credentials, callback values, and persisted auth bytes are redacted from settings/auth errors and are not intentionally emitted to logs or results.\n\n## License\n\nMIT\n",
+  "readmeFilename": "",
+  "repository": {
+   "directory": "packages/pi-mcp",
+   "type": "git",
+   "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-24T18:09:54.468Z",
+   "0.1.1": "2026-08-24T18:21:57.082Z",
+   "0.2.0": "2026-08-25T18:36:43.137Z",
+   "0.3.0": "2026-08-26T14:01:39.885Z",
+   "0.3.1": "2026-08-27T00:04:26.936Z",
+   "0.3.2": "2026-08-27T12:18:48.723Z",
+   "0.4.0": "2026-08-30T09:47:27.131Z",
+   "0.4.1": "2026-09-03T10:15:30.320Z",
+   "0.4.2": "2026-09-03T13:11:42.166Z",
+   "0.4.3": "2026-09-03T14:41:05.872Z",
+   "0.5.0": "2026-09-05T01:56:59.842Z",
+   "0.5.1": "2026-09-08T10:21:31.867Z",
+   "0.5.2": "2026-09-10T15:53:12.813Z",
+   "0.5.3": "2026-09-13T11:13:25.958Z",
+   "created": "2026-08-24T18:09:54.087Z",
+   "modified": "2026-09-13T11:13:26.284Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.1.0",
+    "_nodeVersion": "26.7.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.1.0_1787594994315_0.8867041217392779"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:fbfd15da1e72]",
+     "name": "ianpascoe_"
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:fbfd15da1e72]",
+     "name": "Ian Pascoe"
+    },
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "deprecated": "Broken CLI entrypoint; use 0.1.1 or later.",
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.27.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-rdqLVzIFARFrUVvVySUHtBobbyHH0ofMH7gVGuxEJA5J2Nk0LBf4Kg5/1ZPiBEuaG8JZwJcpGk4P5iraqJG+zA==",
+     "shasum": "fd221ebcd653c9b31916de075b614d5df446fc2a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBV0NMy8bNnysUMBRyrDquDu10NG6QkRogAc7Juxby0GAiAlNaN1ozNjSDrKQXxp5Kyr6uYVS4gxz9+JfKN4LaNNgA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.1.0.tgz",
+     "unpackedSize": 774264
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "prepack": "pnpm build:cli",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.1.1",
+    "_nodeVersion": "26.7.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.1.1_1787595716905_0.05223436516081059"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:fbfd15da1e72]",
+     "name": "ianpascoe_"
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:fbfd15da1e72]",
+     "name": "Ian Pascoe"
+    },
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.27.7"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 17,
+     "integrity": "sha512-1rXyKLOyG3MpRVOu4dhLhGCPu1GS4lkAHZYIqaZbO+CGWzsArg3qUFQg88exIZRzLuEva4xzddPF1YpMBoVHaQ==",
+     "shasum": "2ad509ad62a2354361e1631d92857ccc6495aac2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEWKpTB9pDFKYVxnpo2DqGaUEYkzFWeGBd5+pSRszjp7AiANNGl0dq/8O58PjzFqlRYDW98G52kAEqPvV5RwXTh2IQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.1.1.tgz",
+     "unpackedSize": 774362
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "prepack": "pnpm build:cli",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.2.0",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.2.0_1787683002994_0.881762186743877"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.27.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.2.0"
+     },
+     "fileCount": 20,
+     "integrity": "sha512-A+j7DRrA5oo9m6bFkN6gQwTw2P+BX+dX9/P361umKkagogGNswRokqhzb3HO/2FRnv/4PTJ9qDXWfZsIyppRlA==",
+     "shasum": "89a62339bd0d0c36ef3b429476d25eaccd7b69ed",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGDEU13y6Y7nd/zyms1QtcYqMlqyRhrKtzkia4jNDZGEAiAsUfiT8KoJa1wlV97TexDU3XT01Cr1PeWn9ewxqxNhZw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.2.0.tgz",
+     "unpackedSize": 841440
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.3.0",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.3.0_1787752899735_0.38955028599351404"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.27.7"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.3.0"
+     },
+     "fileCount": 21,
+     "integrity": "sha512-2B5REo3NRPtQGyDoltwFkyD06qPIM81nSlQUSllOfEwEspCp9QUIDAKYyAdlm2vGgQ22BjyTtnR2o8E0N5vpkQ==",
+     "shasum": "4c1ea2f3c7cbf57f6b4ecf200c72a7bcab7a7925",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEKpMmZO/W6A7FfVCY7dNbyMTCaWvIUlFAtLB1Ugqo1VAiEApRQ0vvLVk90tUeGR/oj8HzJtFEnhUu3YxetG9WW+Q9Q="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.3.0.tgz",
+     "unpackedSize": 842655
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.3.1",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.3.1_1787789066776_0.05814506165542044"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.3.1"
+     },
+     "fileCount": 21,
+     "integrity": "sha512-I9tSnU/Yz8S9u/8a33ZfYU+JuXUj4XIFEhluBVuy8+/n9VmJ2mfyS2+zpkiUGH3VFCBfKh9U/LdXj8yla/japg==",
+     "shasum": "fe26c97392302e39aab66b900e7d76964b037e6e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDjD3NkHjGV60XVbhIBD+iRrV44rBzSMjTr2HNKKgnaOwIgXW4gcYLe5P62EhOPOERHvSilpr+3HVNTRya+sErV9ZA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.3.1.tgz",
+     "unpackedSize": 843760
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.3.2",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.3.2_1787833128587_0.28584264201009124"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.3.2"
+     },
+     "fileCount": 21,
+     "integrity": "sha512-bu/WBH8wkl3XfIoBNnbPPiLcyEwK3BnkyJxGOqpzcKejy5wmfoinoJv/b2y0+ixxpacARN5VUuYj4eLYdcgirw==",
+     "shasum": "eb7a4deb4958980dd64b2e17858f5ab2e0031a21",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCXQqYJctAAaVFrsqicwim+qd79xP8tKaniV4ZTr76vsAIhAMI6aFxAx+RvKmlj9ot99zp/ohVXyqPW9VljLGeFNGi0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.3.2.tgz",
+     "unpackedSize": 843937
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.3.2"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.4.0",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.4.0_1788083246957_0.1910857286355896"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.4.0"
+     },
+     "fileCount": 21,
+     "integrity": "sha512-tD6N/7kneHueNO64n4vX63msyYXIKLaBIy1Wo80ylNBIEq1KzBWBSrM4jv5MPCzj6zsPyzrmdVw8kRH2VND54w==",
+     "shasum": "099c32cea4eda786add4ac220df8f5cab647b9fe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDPB+pr2p2pIiVXAR1GXOmIH7QQKMI+5Vav28Wivx7htAiArJ9GO2wuxS652gcpc07K5XNgx3x2IQLDfk5/ggq0XOg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.4.0.tgz",
+     "unpackedSize": 846393
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.4.1",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.4.1_1788430530184_0.42394099963944853"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.4.1"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-JZ15BzlPpEc773ipVRNizxzFrLMJHyR9PbXzl0+sVkAT0uEt0fXh0AgJySPyx36SAEI1bXUQGwAptKzUItW7zw==",
+     "shasum": "4015a4666a01589cb55128d7f1302674960a2178",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIE+VtaCqzQyPCyWzO3CYrkZKTEPztoQ0hqWZBh9tU3xqAiEAqhwksAiOlKZBAeFsrHWYgk2exln3pb8wJxSPxKOIvLo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.4.1.tgz",
+     "unpackedSize": 847467
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.4.1"
+   },
+   "0.4.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.4.2",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.4.2_1788441102025_0.44161464575066156"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.4.2"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-mk9+zCBglo5f3Atr65mMKbDAuI98LzK7PYytcT2RNuND4YGzus8meSNYgtqNUWM7pWMAivUbE/Lx70DAZGzI6A==",
+     "shasum": "c1faf762232aaff506044be191b4789f9870b5ef",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGZ1PyCgSt4yxSRrJiBsbFFY3I4AqB4fMOuZzma8aGXVAiEAqli55pprtX2TvBlxveWlb6T89ycHIkoqvu0S6R4ekAw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.4.2.tgz",
+     "unpackedSize": 847892
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.4.2"
+   },
+   "0.4.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.4.3",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.4.3_1788446465484_0.22469786387544288"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0",
+     "ajv": "^8.20.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.4.3"
+     },
+     "fileCount": 22,
+     "integrity": "sha512-jBgh8mHjaoPHIuyaLoTT0srwqcxDTAuFFjYVZK7wpfhtophjXUEjIWpy0aXhCcotHntbqC+QsMwJ8oKbT4W7Gg==",
+     "shasum": "0febf8a1fc770732d8d48ac19742f00bdbfb60eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIH6uuORaEpArUqkAjB+tgBHqy/NWA7Ig70es5iAECn8FAiEA+9aaQPYD3J615HOQw5OLa3KfXG74ZUM7Ejzn8vp1u+8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.4.3.tgz",
+     "unpackedSize": 1166034
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.4.3"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.5.0",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.5.0_1788573419701_0.028986504209730368"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0",
+     "ajv": "^8.20.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.5.0"
+     },
+     "fileCount": 23,
+     "integrity": "sha512-VxxB3BXSXV4jsnA/O2uWVP62y0xG69cW4So9lUGj8qkLet4wlCv3E3sFvKE2h+bqP/JIWN8EetTqLN28W1e88Q==",
+     "shasum": "2059dfaa5768da5f6fcee4297ba63024707cf590",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD/ZTmOsuR0TNCXsG6wjUIS/zU7U4ArV00cKhXDMEft7gIhAKkHgVFzXQZk3AUdkStDayRW2NRNZu9yPp3nks7xJWrw"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.5.0.tgz",
+     "unpackedSize": 1203108
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.5.0"
+   },
+   "0.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.5.1",
+    "_nodeVersion": "26.0.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.5.1_1788862891657_0.5263455769418144"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0",
+     "ajv": "^8.20.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.5.1"
+     },
+     "fileCount": 23,
+     "integrity": "sha512-tGcWkGOrdI/BBFAI+cuIkje/gLaC2bTN+EdHrQYaQDWZQKa3QRkGwJBnRVQIncSOTZfaEGu0ROQPicn/Jqj3tg==",
+     "shasum": "c0f340190ab8bee657b7e305ae418c0c18726184",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHUspAk+myieWdFOdmRVIbTR1kqHV5SBzLvj+4DcNTfTAiBboax5RF+WQqoJMr2sxMJibtU51BNL2Kp3lBpaBwUJiQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.5.1.tgz",
+     "unpackedSize": 1218785
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.5.1"
+   },
+   "0.5.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.5.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.5.2_1789055592686_0.9848641912019414"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.1.1",
+     "@modelcontextprotocol/client": "^2.0.0",
+     "ajv": "^8.20.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.5.2"
+     },
+     "fileCount": 23,
+     "integrity": "sha512-yhwITf6RWcyIMUVNCLdZ0m1Pd1GYXpdns4dIwosb3ePQUYqXe9eyqh33YwDZscm8qyquuurghyBanHP7EF1p/A==",
+     "shasum": "9e25b46ad2bbf69c2ea208f5a8065401212cfdcc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDW2gH0+foTRTO0u+il4J54vpvRalzvkP8b8v1oR5lmkgIgCwOiXb9eAneO9K54WOCYjHhVSQOeyyy1iuMt4VfQNJI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.5.2.tgz",
+     "unpackedSize": 1230793
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.5.2"
+   },
+   "0.5.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@ian-pascoe/pi-mcp@0.5.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/pi-mcp_0.5.3_1789298005796_0.843263705282814"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:2e843f80-d584-485e-888f-f89a51f7eef6"
+     }
+    },
+    "author": "Ian Pascoe <[redacted-email:fbfd15da1e72]>",
+    "bin": {
+     "pi-mcp": "dist/pi-mcp-cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ian-pascoe/pi-extensions/issues"
+    },
+    "dependencies": {
+     "@ian-pascoe/pi-utils": "^0.2.0",
+     "@modelcontextprotocol/client": "^2.0.0",
+     "ajv": "^8.20.0"
+    },
+    "description": "A complete Model Context Protocol Host for Pi",
+    "devDependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "esbuild": "0.28.2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ian-pascoe%2fpi-mcp@0.5.3"
+     },
+     "fileCount": 23,
+     "integrity": "sha512-xQRBU/A+rbCdIiU6doxK7x7BiEk37V389CE/ygHmkG+FaEv1raU/7sAD4Vdl0BxIXxOS2lztkHJno2zyS8dLAg==",
+     "shasum": "03455147e696b06b7f34ff0490481b3cde2a07eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFB5qw7DplzJxB46VXBc/tF1Nh+VRXCzpBQYmtyN8VQLAiEA6LM+uau00UVFiyDe/O8SfTcBiM3nvGwTYbox7RTNzqU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ian-pascoe/pi-mcp/-/pi-mcp-0.5.3.tgz",
+     "unpackedSize": 1230793
+    },
+    "engines": {
+     "node": ">=22.19.0"
+    },
+    "homepage": "https://github.com/ian-pascoe/pi-extensions#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "pi",
+     "pi-extension",
+     "pi-package"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:fbfd15da1e72]",
+      "name": "ianpascoe_"
+     }
+    ],
+    "name": "@ian-pascoe/pi-mcp",
+    "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
+     "@earendil-works/pi-coding-agent": "*",
+     "@earendil-works/pi-tui": "*",
+     "typebox": "*"
+    },
+    "pi": {
+     "extensions": [
+      "./src/index.ts"
+     ],
+     "skills": [
+      "./skills"
+     ]
+    },
+    "private": false,
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "directory": "packages/pi-mcp",
+     "type": "git",
+     "url": "git+https://github.com/ian-pascoe/pi-extensions.git"
+    },
+    "scripts": {
+     "build:cli": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && esbuild src/pi-mcp-cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/pi-mcp-cli.js --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/*",
+     "test": "vitest run --config ../../vitest.config.ts --root .",
+     "typecheck": "tsc --noEmit -p tsconfig.json"
+    },
+    "type": "module",
+    "version": "0.5.3"
+   }
+  }
+ },
+ "name": "@ian-pascoe/pi-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ian-pascoe%2Fpi-mcp"
+}

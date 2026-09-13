@@ -1,0 +1,420 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.3.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.3.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@ni-c/woodpecker-ci-mcp",
+  "_rev": "6-de44fce35be152aa0d4ffd6a0f8b55a0",
+  "author": {
+   "name": "Willi Thiel"
+  },
+  "bugs": {
+   "url": "https://github.com/ni-c/woodpecker-ci-mcp/issues"
+  },
+  "description": "MCP server for Woodpecker CI: read repositories, pipelines and logs, and drive builds, secrets and crons",
+  "dist-tags": {
+   "latest": "0.3.1"
+  },
+  "homepage": "https://woodpecker-ci-mcp.ni-c.de",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "woodpecker",
+   "woodpecker-ci",
+   "ci",
+   "cd",
+   "continuous-integration",
+   "pipelines"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:efc7197ecb78]",
+    "name": "ni-c"
+   }
+  ],
+  "name": "@ni-c/woodpecker-ci-mcp",
+  "readme": "# woodpecker-ci-mcp\n\n<!-- badges: start -->\n\n[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/woodpecker-ci-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/woodpecker-ci-mcp/actions/workflows/ci.yml)\n[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ni-c/woodpecker-ci-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/ni-c/woodpecker-ci-mcp)\n<a href=\"https://socket.dev/npm/package/@ni-c/woodpecker-ci-mcp\"><img src=\"https://socket.dev/api/badge/npm/package/@ni-c/woodpecker-ci-mcp\" alt=\"Socket supply-chain report\" height=\"20\"></a>\n[![Glama score](https://glama.ai/mcp/servers/ni-c/woodpecker-ci-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ni-c/woodpecker-ci-mcp)\n<br>\n[![npm version](https://img.shields.io/npm/v/%40ni-c%2Fwoodpecker-ci-mcp)](https://www.npmjs.com/package/@ni-c/woodpecker-ci-mcp)\n[![container image](https://img.shields.io/badge/ghcr.io-ni--c%2Fwoodpecker--ci--mcp-4f46e5?logo=docker&logoColor=white)](https://github.com/ni-c/woodpecker-ci-mcp/pkgs/container/woodpecker-ci-mcp)\n[![HTTP via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-4f46e5?logo=modelcontextprotocol&logoColor=white)](https://mcp-hub.ni-c.de)\n<br>\n[![docs](https://img.shields.io/badge/docs-woodpecker--ci--mcp.ni--c.de-4f46e5?logo=readthedocs&logoColor=white)](https://woodpecker-ci-mcp.ni-c.de)\n[![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)\n<!-- badges: end -->\n\nA [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for\n[Woodpecker CI](https://woodpecker-ci.org), the lightweight container-native CI\nengine \u2014 it runs your pipelines, and this reads and drives them.\n\nLets MCP clients like Claude Code, Claude Desktop or Codex see which pipelines\nfailed, read the build log of the step that broke, and act on it \u2014 restart it,\ncancel a runaway, approve a blocked one, rotate a secret, fix a cron \u2014 with the\nirreversible operations put to a person first and the write tools\nswitchable off entirely.\n\n71 tools is the ceiling, not the floor: `WOODPECKER_ALLOW_TOOLS=essential`\nregisters a curated eight instead, and a model picks the right tool far more\nreliably from eight than from 71 \u2014 see\n[choosing which tools load](#choosing-which-tools-load).\n\n<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://woodpecker-ci-mcp.ni-c.de/architecture-dark.svg\">\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"https://woodpecker-ci-mcp.ni-c.de/architecture-light.svg\">\n  <img src=\"https://woodpecker-ci-mcp.ni-c.de/architecture.svg\" alt=\"An MCP client talks to woodpecker-ci-mcp over stdio; the server calls the Woodpecker CI API over HTTPS.\" width=\"800\">\n</picture>\n\n![Finding a failed pipeline, reading the failing step's log, and restarting it](https://woodpecker-ci-mcp.ni-c.de/demo.gif)\n\n## What makes it different\n\n**It covers the whole API, not the read half.** Repositories, pipelines, logs,\nsecrets, registries, crons, organizations, users, agents, forges, the queue and\nthe log level \u2014 71 tools against Woodpecker 3.18.0. The point of an MCP server\nfor a CI system is doing something about what it tells you.\n\n**Logs arrive as text.** Woodpecker returns a step's output as an array of\nbase64-encoded chunks with line numbers. `get_step_logs` decodes them, puts them\nback in order, reports the step's exit code, and returns the **end** of the log\nby default \u2014 a failing step explains itself in its last lines, and the first 4000\nlines of `npm ci` answer nothing.\n\n**Agent tokens do not reach the model.** `GET /agents` returns every agent's\ntoken in clear text, and that token is enough to attach a machine to the server\nand receive pipeline workloads with their secrets. Listing agents through this\nserver redacts it. `create_agent` still returns one \u2014 that is the only way to get\nit \u2014 and says what it is.\n\n**It knows where this API is sharp.** `/version` and `/healthz` sit outside the\n`/api` prefix that the Swagger document claims for them, so `GET /api/version`\nreturns the web UI with HTTP 200 rather than a 404; a repository that exists in\nthe forge is a 404 here until it is activated; `perPage` above 50 is clamped\nwithout a word; a cron schedule is five fields, not six; and a secret with no\nevent list is refused, because the defaults people expect live in the web UI, not\nin the API.\n\n## Requirements\n\n- Node.js \u2265 22\n- A **Woodpecker** personal access token \u2014 your user settings, \"CLI and API\".\n  There are no scopes: the token carries the full authority of your account.\n\n## Configuration\n\n| Variable                  | Required | Description                                                                        |\n| ------------------------- | -------- | ---------------------------------------------------------------------------------- |\n| `WOODPECKER_URL`          | yes      | Root URL of the server, e.g. `https://woodpecker.example.com`                      |\n| `WOODPECKER_TOKEN`        | yes      | Personal access token from your user settings                                      |\n| `WOODPECKER_READ_ONLY`    | no       | `true` registers only the 34 read tools                                            |\n| `WOODPECKER_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset |\n| `WOODPECKER_DENY_TOOLS`   | no       | Same syntax; removed from whatever `WOODPECKER_ALLOW_TOOLS` left                   |\n| `WOODPECKER_INSECURE_TLS` | no       | `true` accepts self-signed certificates (scoped to this connection)                |\n| `ELICITATION`             | no       | `false` replaces the approval dialog with the two-call token. **Not prefixed**     |\n\n`WOODPECKER_URL` is the server root, not the API root:\n`https://woodpecker.example.com`, not `https://woodpecker.example.com/api`. Both\nare accepted \u2014 the suffix is trimmed \u2014 because the Swagger page spells every\nexample the long way.\n\n> **Use `https://`.** Over plain http the token travels unencrypted; the server\n> prints a warning unless the host is local. For self-signed certificates prefer a\n> proper internal CA over `WOODPECKER_INSECURE_TLS`.\n\nWithout configuration the server still starts and lists its tools (so registries\nand inspectors can introspect it); every call then fails with setup instructions\ninstead of reaching the API. `get_server_info` works without a token, which makes\nit the first thing to call when nothing else does: if it answers,\n`WOODPECKER_URL` is right and the problem is the token.\n\n**Admin-only tools.** Woodpecker inherits repository and organization permissions\nfrom the forge, and reserves users, agents, forges, the queue and the log level\nfor instance administrators. Those tools are registered for everyone and answer\n403 for accounts that may not use them; `get_current_user` reports which kind of\naccount the token belongs to, and `WOODPECKER_DENY_TOOLS` is the tidy way to stop\noffering them at all.\n\n### Choosing which tools load\n\n`WOODPECKER_ALLOW_TOOLS` and `WOODPECKER_DENY_TOOLS` take comma-separated tool\nnames; a trailing `*` matches a whole family. `essential` is a curated preset \u2014\n`list_repositories`, `get_repository`, `list_pipelines`, `get_pipeline`,\n`get_step_logs`, `trigger_pipeline`, `restart_pipeline` and `cancel_pipeline` \u2014\nmarked as such in the\n[tool reference](https://woodpecker-ci-mcp.ni-c.de/reference/tools).\n\n```sh\nWOODPECKER_ALLOW_TOOLS=essential\nWOODPECKER_ALLOW_TOOLS=list_*,get_pipeline,get_step_logs\nWOODPECKER_DENY_TOOLS=delete_*,pause_queue,create_user,update_user\n```\n\nWith 71 tools this is not a nicety. Every visible tool costs context on every\nrequest, and a server that offers `delete_forge` next to `get_step_logs` is a\nserver nobody should point at their production CI without narrowing it first.\n\nAn entry that matches no tool aborts startup and names it, so a typo cannot\nsilently hide a tool \u2014 an absent tool is not something anyone traces back to an\nenvironment variable. A filtered tool is never registered, so it is absent from\n`tools/list` and unknown to `tools/call` alike, exactly like a write tool under\n`WOODPECKER_READ_ONLY`.\n\nIf you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de)\nis the other answer \u2014 its `/hub` endpoint replaces every server's tools with six\nmeta-tools.\n\n## Installation\n\n### Claude Code\n\n```sh\nclaude mcp add woodpecker-ci -- npx -y @ni-c/woodpecker-ci-mcp\n```\n\n### Claude Desktop\n\n```json\n{\n  \"mcpServers\": {\n    \"woodpecker-ci\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/woodpecker-ci-mcp\"],\n      \"env\": {\n        \"WOODPECKER_URL\": \"https://woodpecker.example.com\",\n        \"WOODPECKER_TOKEN\": \"\u2026\"\n      }\n    }\n  }\n}\n```\n\n### Codex\n\n```toml\n[mcp_servers.woodpecker-ci]\ncommand = \"npx\"\nargs = [\"-y\", \"@ni-c/woodpecker-ci-mcp\"]\nenv = { WOODPECKER_URL = \"https://woodpecker.example.com\", WOODPECKER_TOKEN = \"\u2026\" }\n```\n\n### Docker\n\n```sh\ndocker run --rm -i \\\n  -e WOODPECKER_URL=https://woodpecker.example.com \\\n  -e WOODPECKER_TOKEN=\u2026 \\\n  ghcr.io/ni-c/woodpecker-ci-mcp\n```\n\nIf your Woodpecker is only resolvable through your host's split DNS, add\n`--dns <resolver>`: a container does not inherit the host's resolver\nconfiguration, and the public answer for an internal name is usually an address\nthat does not respond.\n\n### Through mcp-hub\n\nA client that cannot spawn a local process \u2014 ChatGPT connectors, Claude on the web,\nCursor, LibreChat \u2014 reaches woodpecker-ci-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one\ncontainer serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login\nbehind a single password and long-lived tokens for the clients that cannot do OAuth. Its\n`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of\nthem without N\u00d7tool schemas in the model's context, and it speaks both protocol revisions\n\u2014 a question this server asks travels through it to the person at the far end.\n\nIts `/config/mcp.json` uses Claude Code's format, so the entry is the one you already\nhave:\n\n```json\n{\n  \"mcpServers\": {\n    \"woodpecker-ci\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@ni-c/woodpecker-ci-mcp\"],\n      \"env\": {\n        \"WOODPECKER_URL\": \"https://woodpecker.example.com\",\n        \"WOODPECKER_TOKEN\": \"\u2026\"\n      }\n    }\n  }\n}\n```\n\n`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not\nthe same thing as `*_ALLOW_TOOLS` in `env` \u2014 the difference, and the mistake it invites,\nare in the [client guide](https://woodpecker-ci-mcp.ni-c.de/guide/clients#through-mcp-hub).\n\n## Tools\n\nRead tools are always registered. \ud83d\udee1 marks the ones that need an instance\nadministrator; \ud83d\udc64 marks the ones that **ask a person** before acting, through MCP\nelicitation, falling back to a two-call `confirm_token` where the client cannot\nshow a dialog.\n\nEvery tool declares an `outputSchema` and answers with `structuredContent`\nalongside the text block, so a client can use the result without parsing prose.\nSeventeen tools that answered with a sentence \u2014 _\"Pipeline 12 was cancelled.\"_ \u2014\nnow answer with the fields as well, and the sentence stays where a reader wants\nit. `get_step_logs` keeps its rendered header-plus-log in the text and states\nthe exit code, the line count and the output as fields.\n\nThe tools that report pushed content carry `untrusted: true` and\n`source: \"woodpecker\"` as fields; branch names, commit messages, pipeline titles\nand above all build logs \u2014 the raw stdout of arbitrary containers \u2014 are written\nby whoever can push. The list follows the call sites: a tool is marked exactly\nwhen it already routed its answer through the untrusted wrapper.\n\nWoodpecker's objects are described as open objects with the top-level keys this\nserver builds. The upstream Go models change what they serialize between\nreleases, and the SDK validates each result against its schema before it goes\nout \u2014 a strict shape would turn a field a release adds into a tool that fails\noutright.\nThe [tool reference](https://woodpecker-ci-mcp.ni-c.de/reference/tools) has the\nparameters.\n\n### Repositories\n\n| Tool                         | Description                                                        |\n| ---------------------------- | ------------------------------------------------------------------ |\n| `list_repositories`          | Repositories, optionally including ones not yet activated          |\n| `get_repository`             | One repository with all its Woodpecker settings                    |\n| `lookup_repository`          | Turns `owner/name` into the id every other tool takes              |\n| `get_repository_permissions` | What this account may do here \u2014 answers \"why that 403\"             |\n| `list_repository_branches`   | Branches, as Woodpecker sees them in the forge                     |\n| `list_pull_requests`         | Open pull requests and their index                                 |\n| `activate_repository`        | Turns Woodpecker on for a forge repository                         |\n| `update_repository` \ud83d\udc64       | Config file, timeout, visibility, approval mode; \ud83d\udc64 to grant trust |\n| `repair_repository` \ud83d\udc64       | Re-installs the webhook; \ud83d\udc64 only for the whole-instance variant    |\n| `move_repository` \ud83d\udc64         | Follows a repository that moved in the forge                       |\n| `chown_repository` \ud83d\udc64        | Takes ownership, so the token Woodpecker uses is yours             |\n| `delete_repository` \ud83d\udc64       | Removes it from Woodpecker with all its history                    |\n\n### Pipelines and logs\n\n| Tool                    | Description                                                  |\n| ----------------------- | ------------------------------------------------------------ |\n| `list_pipelines`        | Pipelines with branch, event, status and time filters        |\n| `get_pipeline`          | One pipeline with its workflows, steps and step ids          |\n| `get_pipeline_config`   | The YAML this run was built from                             |\n| `get_pipeline_metadata` | The `CI_*` environment a step saw, and the previous run      |\n| `list_queued_pipelines` | What is waiting, across all repositories                     |\n| `get_step_logs`         | A step's output as text, tail first, with its exit code      |\n| `trigger_pipeline`      | Starts a pipeline on a branch                                |\n| `restart_pipeline`      | Runs an existing one again, at the same commit               |\n| `cancel_pipeline`       | Stops a pending or running pipeline                          |\n| `approve_pipeline` \ud83d\udc64   | Releases a blocked one \u2014 it runs fork code with your secrets |\n| `decline_pipeline`      | Refuses a blocked one                                        |\n| `delete_pipeline` \ud83d\udc64    | Deletes a pipeline and its logs                              |\n| `delete_step_logs` \ud83d\udc64   | Deletes one step's output \u2014 for when a step printed a secret |\n| `delete_pipeline_logs`  | \ud83d\udc64 The same for every step of a pipeline                     |\n\n### Secrets, registries and crons\n\n`scope` selects the level: `repository`, `organization` or `global`.\n\n| Tool                 | Description                                                   |\n| -------------------- | ------------------------------------------------------------- |\n| `list_secrets`       | Secrets at one level. Values are never returned by Woodpecker |\n| `get_secret`         | One secret's events, images and note                          |\n| `create_secret`      | Creates one. At least one event is required                   |\n| `update_secret` \ud83d\udc64   | Rotates the value (\ud83d\udc64), or replaces the event and image lists |\n| `delete_secret` \ud83d\udc64   | Deletes one; pipelines using it run without it                |\n| `list_registries`    | Container registry credentials at one level                   |\n| `get_registry`       | One entry. The password is stripped by Woodpecker             |\n| `create_registry`    | Stores credentials for pulling private images                 |\n| `update_registry`    | Changes username or password                                  |\n| `delete_registry` \ud83d\udc64 | Removes them                                                  |\n| `list_crons`         | Scheduled runs and when each fires next                       |\n| `get_cron`           | One cron job                                                  |\n| `create_cron`        | Schedules a run \u2014 five-field cron or `@daily`                 |\n| `update_cron`        | Changes it, including `enabled` to pause without deleting     |\n| `run_cron`           | Runs it now, without touching the schedule                    |\n| `delete_cron` \ud83d\udc64     | Removes the schedule                                          |\n\n### Accounts, organizations and instance administration\n\n| Tool                           | Description                                                  |\n| ------------------------------ | ------------------------------------------------------------ |\n| `get_current_user`             | Which account the token belongs to, and whether it is admin  |\n| `get_pipeline_feed`            | The latest pipeline of every visible repository, in one call |\n| `list_organizations` \ud83d\udee1         | Organizations known to the instance                          |\n| `get_organization`             | One organization                                             |\n| `lookup_organization`          | Turns a name into the id org-level tools need                |\n| `get_organization_permissions` | Member and admin flags for this account                      |\n| `delete_organization` \ud83d\udee1\ud83d\udc64      | Removes it with its org-level secrets, registries and agents |\n| `list_users` \ud83d\udee1                 | Accounts that have ever logged in                            |\n| `get_user` \ud83d\udee1                   | One account \u2014 `forge_id` is required                         |\n| `create_user` \ud83d\udee1\ud83d\udc64              | Pre-creates a record; \ud83d\udc64 only when it grants admin           |\n| `update_user` \ud83d\udee1\ud83d\udc64              | Changes email; \ud83d\udc64 to grant admin                             |\n| `delete_user` \ud83d\udee1\ud83d\udc64              | Removes an account \u2014 transfer its repositories first         |\n| `list_agents` \ud83d\udee1                | Build agents, with tokens redacted                           |\n| `get_agent` \ud83d\udee1                  | One agent, token redacted                                    |\n| `list_agent_tasks` \ud83d\udee1           | What an agent is running right now                           |\n| `create_agent` \ud83d\udee1               | Registers one and returns its token \u2014 a credential           |\n| `update_agent` \ud83d\udee1               | Rename, relabel, or drain with `no_schedule`                 |\n| `delete_agent` \ud83d\udee1\ud83d\udc64             | Removes it and invalidates its token                         |\n| `list_forges` \ud83d\udee1                | Forges this instance authenticates against                   |\n| `get_forge` \ud83d\udee1                  | One forge; the OAuth secret is never returned                |\n| `create_forge` \ud83d\udee1\ud83d\udc64             | Adds a forge \u2014 a way to sign in, so it asks first            |\n| `update_forge` \ud83d\udee1\ud83d\udc64             | Changes one \u2014 a wrong value locks everyone out               |\n| `delete_forge` \ud83d\udee1\ud83d\udc64             | Removes one                                                  |\n| `get_server_info`              | Version and health. Works without a token                    |\n| `get_queue_info` \ud83d\udee1             | The server-side queue and agent statistics                   |\n| `get_log_level` \ud83d\udee1              | Current server log level                                     |\n| `pause_queue` \ud83d\udee1\ud83d\udc64              | Stops scheduling for the whole instance                      |\n| `resume_queue` \ud83d\udee1               | Starts it again                                              |\n| `set_log_level` \ud83d\udee1\ud83d\udc64            | Changes it; \ud83d\udc64 to silence the server                         |\n\n## Not exposed, on purpose\n\n- **`POST`/`DELETE /user/token`.** They return and rotate the personal access\n  token of the account this server authenticates as. A tool that hands the model\n  its own credential is not a feature, and one that invalidates the server's own\n  configuration mid-session is worse. The web UI does both, in front of a person.\n- **`POST /hook`.** The forge webhook endpoint. Calling it means forging a push\n  event, which is a way to run a pipeline while making it look like someone\n  committed something. `trigger_pipeline` is the honest version.\n- **`/debug/pprof/*`.** Nine endpoints of Go profiling data. A heap dump is not\n  something to put in a model's context.\n- **`/stream/events` and `/stream/logs`.** Server-sent event streams do not fit a\n  request/response tool. Poll `get_pipeline` instead.\n- **Badge endpoints.** They return SVG and XML for embedding, not information.\n\n## Safety\n\n- **Twenty-four operations ask a person.** Every `delete_*`, plus\n  `move_repository`, `chown_repository`, the whole-instance `repair_repository`,\n  `create_forge`, `update_forge`, `pause_queue` and `approve_pipeline` \u2014 and six more only in the\n  direction that escalates: `update_user` granting `admin`, `create_user` creating\n  one, `update_repository` granting a `trusted_*` flag or lowering the fork gate\n  (`require_approval` down, `visibility` to `public`), `update_secret` overwriting\n  a value or widening who may read it, `update_registry` replacing a password, and\n  `set_log_level` silencing the server.\n\n  Where the client supports MCP elicitation that is a real dialog the model cannot\n  answer on its behalf. Where it does not, the first call returns a short-lived\n  token bound to those exact arguments and only a second call carrying it acts \u2014\n  which proves the call was made twice with the same arguments and nothing more,\n  and the text says so. Either way an approval for one repository is not one for\n  another, and one for a tool is not one for another. `ELICITATION=false` takes the\n  fallback deliberately; it never removes the guard. See\n  [Asking a person](https://woodpecker-ci-mcp.ni-c.de/guide/approval).\n\n- **Agent tokens are redacted on read** \u2014 see above. `create_agent` is the\n  exception, by necessity.\n- **Secret values and registry passwords are never returned**, and not because\n  this server hides them: Woodpecker strips them from every response, including\n  the one immediately after creating them. Store the value somewhere else too.\n- **Build logs, commit messages and pipeline metadata are marked as untrusted\n  data**, because they are written by whoever can push to the repository.\n  Confirmation prompts never quote anything that came from the API.\n- Error bodies are truncated, HTML error pages are dropped, and every response\n  has a byte ceiling enforced while it streams. Log output has a much smaller\n  budget of its own, and says when it was cut.\n- `WOODPECKER_READ_ONLY=true` does not register the write tools at all, and\n  `WOODPECKER_DENY_TOOLS` cuts finer along the same line \u2014 a filtered tool is\n  never built, not refused at call time.\n- The token is deleted from `process.env` once it has been read, is never sent to\n  a redirect target, and is never echoed into an error message.\n\n## Documentation\n\nThe full guide, tool reference and security notes live at\n**[woodpecker-ci-mcp.ni-c.de](https://woodpecker-ci-mcp.ni-c.de)** (source in [`docs/`](docs/)).\n\n## Development\n\n```sh\nnpm install\nnpm run lint && npm run build && npm run test:coverage\n```\n\n## Releasing\n\n1. Add the CHANGELOG entry and bump `package.json`.\n2. `npm run lint && npm run build && npm run test:coverage`\n3. Commit, then push a signed tag: `git tag -s vX.Y.Z -m \"vX.Y.Z\" && git push origin main vX.Y.Z`\n\nThe release workflow publishes to npm (Trusted Publishing, with provenance),\ncreates the GitHub release from the CHANGELOG section and updates the MCP\nRegistry entry.\n\n## Contributing\n\nIssues, discussions and pull requests are welcome \u2014 see\n[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use\n[private reporting](https://github.com/ni-c/woodpecker-ci-mcp/security/advisories/new)\nrather than a public issue; the policy is in [SECURITY.md](SECURITY.md).\n\n## License\n\n[MIT](LICENSE) \u00a9 Willi Thiel\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/ni-c/woodpecker-ci-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-29T12:49:12.560Z",
+   "0.1.0-rc.0": "2026-08-29T12:22:00.665Z",
+   "0.2.0": "2026-09-03T14:22:44.304Z",
+   "0.3.1": "2026-09-07T10:09:29.112Z",
+   "created": "2026-08-29T12:22:00.269Z",
+   "modified": "2026-09-07T10:09:29.433Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/woodpecker-ci-mcp@0.1.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/woodpecker-ci-mcp_0.1.0_1788007752443_0.7595869680159055"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:c531ad5b-bfdb-4aba-8504-a83e13496bcb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "woodpecker-ci-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/woodpecker-ci-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "undici": "^8.10.0",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Woodpecker CI: read repositories, pipelines and logs, and drive builds, secrets and crons",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@resvg/resvg-js": "^2.6.2",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "eslint": "^10.9.1",
+     "prettier": "^3.9.6",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fwoodpecker-ci-mcp@0.1.0"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-62jZ3mNdE161Zo1GeCb3wc7q/8BgOSYQ6Y36n7HsrwmGQ3cyvcR78Bs7zbDWEYPgv/x1hmBlsh7mYXGeyz/Y/Q==",
+     "shasum": "8e5bb9af01a025d74ff4b58c60177e994a1cd921",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDaT30MqhmGo+499KtKZzBcX2KnC4VZuF+aGIg9w97FWAiEAyKtMCLZuaoLRIhSVUrIW/e/EVVjPt9y5OX8PtxBIDas="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/woodpecker-ci-mcp/-/woodpecker-ci-mcp-0.1.0.tgz",
+     "unpackedSize": 239641
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "ef9d25b414fd931a33169b142e8cf6581cb17680",
+    "homepage": "https://woodpecker-ci-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "woodpecker",
+     "woodpecker-ci",
+     "ci",
+     "cd",
+     "continuous-integration",
+     "pipelines"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/woodpecker-ci-mcp",
+    "name": "@ni-c/woodpecker-ci-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/woodpecker-ci-mcp.git"
+    },
+    "scripts": {
+     "assets": "node scripts/gen-assets.mjs",
+     "assets:check": "node scripts/gen-assets.mjs --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "eslint . && prettier --check .",
+     "prepublishOnly": "npm run lint && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/woodpecker-ci-mcp@0.2.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/woodpecker-ci-mcp_0.2.0_1788445364161_0.826442165215481"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:c531ad5b-bfdb-4aba-8504-a83e13496bcb"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "woodpecker-ci-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/woodpecker-ci-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.0",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "undici": "^8.10.0",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Woodpecker CI: read repositories, pipelines and logs, and drive builds, secrets and crons",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "4.1.11",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fwoodpecker-ci-mcp@0.2.0"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-z1Y8uedtA0ckkpaNFuUbliPOi0XjrpGDOzF0K7SVw0WqyaAfBM8Dm0283eT3Yo+trDilqrhw8OP4ZuJy+HGHyQ==",
+     "shasum": "6ccb3323a1f07c7bd332c0a53cbb9c7796e63f14",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDW8S6H7q6MK4ze50nNsa/0G0MojPIEdKM1VW7Gbg3nRAIgK92rCSXMFn7IFdUmeTZ1Je4ZIRYYLqmUFhlQvmruOR4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/woodpecker-ci-mcp/-/woodpecker-ci-mcp-0.2.0.tgz",
+     "unpackedSize": 283886
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "694c1d06f6f7b48ae90cb0b966bba5a6790ae499",
+    "homepage": "https://woodpecker-ci-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "woodpecker",
+     "woodpecker-ci",
+     "ci",
+     "cd",
+     "continuous-integration",
+     "pipelines"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/woodpecker-ci-mcp",
+    "name": "@ni-c/woodpecker-ci-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/woodpecker-ci-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@ni-c/woodpecker-ci-mcp@0.3.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/woodpecker-ci-mcp_0.3.1_1788775769022_0.8467812563462203"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:c531ad5b-bfdb-4aba-8504-a83e13496bcb"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Willi Thiel"
+    },
+    "bin": {
+     "woodpecker-ci-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ni-c/woodpecker-ci-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "mcp-approval": "^0.8.2",
+     "mcp-internal-hosts": "^0.2.1",
+     "mcp-tool-allowlist": "^0.2.1",
+     "undici": "^8.10.0",
+     "zod": "^4.5.2"
+    },
+    "description": "MCP server for Woodpecker CI: read repositories, pipelines and logs, and drive builds, secrets and crons",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.4.0",
+     "@vitest/coverage-v8": "5.0.0",
+     "fast-check": "^4.9.0",
+     "mcp-integration-harness": "^0.4.0",
+     "oxlint": "^1.80.0",
+     "prettier": "^3.9.6",
+     "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.3.0/svg-asset-set-0.3.0.tgz",
+     "typescript": "^7.0.2",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@ni-c%2fwoodpecker-ci-mcp@0.3.1"
+     },
+     "fileCount": 57,
+     "integrity": "sha512-Mhbjeez37alKTHusJYtYDlatfnbg8OUxfxLJuP3hXlLEdRdft40DQ/lJ6mfk3FduCs7Kc9LV0xiFAdvtL6Dklw==",
+     "shasum": "971224f7177c28680fa58271461f020e7251900a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZLh/AzYlRUBJlq+3KPSqBBZCJz5AFZdQsFL/2xZg5aAIhAMpSebuXuxyi/A6C0WMvRy0L0A0gRbOzKwwNHuW/04XA"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCAhsauuDKAv8AvOUNyOQwKUn+ALPVFVj5UoGuHC33SuwIhAONWM+RJ9vmIVEHUb4AkeabtvTNZsGZ4HloWHO25fgMh"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@ni-c/woodpecker-ci-mcp/-/woodpecker-ci-mcp-0.3.1.tgz",
+     "unpackedSize": 304304
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "funding": "https://github.com/sponsors/ni-c",
+    "gitHead": "755ad5ede469da9c7bda633603818dff51b67752",
+    "homepage": "https://woodpecker-ci-mcp.ni-c.de",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "woodpecker",
+     "woodpecker-ci",
+     "ci",
+     "cd",
+     "continuous-integration",
+     "pipelines"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:efc7197ecb78]",
+      "name": "ni-c"
+     }
+    ],
+    "mcpName": "io.github.ni-c/woodpecker-ci-mcp",
+    "name": "@ni-c/woodpecker-ci-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/ni-c/woodpecker-ci-mcp.git"
+    },
+    "scripts": {
+     "assets": "svg-asset-set",
+     "assets:check": "svg-asset-set --check",
+     "build": "tsc",
+     "format": "prettier --write .",
+     "lint": "oxlint --deny-warnings && prettier --check .",
+     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "typecheck": "tsc --project tsconfig.test.json",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   }
+  }
+ },
+ "name": "@ni-c/woodpecker-ci-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@ni-c%2Fwoodpecker-ci-mcp"
+}

@@ -1,0 +1,1289 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.7.0-3660044",
+  "maintainers": [
+   {
+    "email": "[redacted-email:145cc7b6aae6]",
+    "name": "tarikneradin"
+   },
+   {
+    "email": "[redacted-email:58609b4a1674]",
+    "name": "crs-mcp"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0-1b9ede0",
+   "0.1.0-2bad4fe",
+   "0.1.0-2f8ac77",
+   "0.1.0-76ce272",
+   "0.1.0-a04547f",
+   "0.1.0-ba4afed",
+   "0.1.0-eff2af8",
+   "0.1.1-3d2b39b",
+   "0.2.0-cbc96e9",
+   "0.2.0-fac1a77",
+   "0.3.0-61c51ea",
+   "0.4.0-0c53dac",
+   "0.5.0-23af60a",
+   "0.6.0-06bd3a8",
+   "0.7.0-3660044"
+  ]
+ },
+ "manifest": {
+  "_id": "@crscreditapi/finstack-mcp-server",
+  "_rev": "15-00c5854b86481d3fc2a6ec85cea10054",
+  "bugs": {
+   "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+  },
+  "description": "MCP server for Finstack",
+  "dist-tags": {
+   "latest": "0.7.0-3660044"
+  },
+  "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+  "maintainers": [
+   {
+    "email": "[redacted-email:145cc7b6aae6]",
+    "name": "tarikneradin"
+   },
+   {
+    "email": "[redacted-email:58609b4a1674]",
+    "name": "crs-mcp"
+   }
+  ],
+  "name": "@crscreditapi/finstack-mcp-server",
+  "readme": "# finstack-mcp-server\n\nMCP server exposing CRS B2B (Finstack) customer data over the [Model Context Protocol](https://modelcontextprotocol.io). Backed by the mware-portal chatbase API.\n\n## Tools\n\n| Name | Purpose |\n|---|---|\n| `finstack_search_customer` | Fuzzy-match a customer by name and return candidate CIDs. Use when only a name is known. |\n| `finstack_get_customer_summary` | Non-PII summary for one customer: portal account status and account type, onboarding progress, products, sales opportunities (type + stage), API credentials, inspection status, recent billing. |\n| `finstack_get_customer_revenue` | Revenue for one customer over a date range, bucketed by `day` / `week` / `month` / `quarter` / `year`. |\n| `finstack_get_customer_invoices` | Paginated list of finalized invoices for one customer with full line-item breakdown. |\n| `finstack_get_customer_pricing_config` | Full configured pricing state for one customer: products, pricing addendums, and environment-user productPricing. Use to cross-check invoiced rates against contracted pricing. |\n| `finstack_get_pricing_addendum_text` | Extracted text from a pricing addendum PDF (with or without disclaimer). Server-side parses the PDF and returns plain text. |\n| `finstack_get_customer_users` | Portal users and no-portal-access contacts for one customer, with names, emails, phones, roles (labelled as on the portal Users tab), owner flag, invitation status and lock/MFA state. The only tool that returns people for an account. |\n| `finstack_get_customer_cohort` | Bulk, paginated list of all customers with portal status, account type, and sales opportunities (type + stage). For cohort/tracker refreshes instead of per-customer summary calls. Optional `status` / `stage` filters. |\n| `finstack_get_leadiq_analytics` | System-wide LeadsIQ analytics for a trailing window: totals vs previous period, the complete list of customers that pulled (revenue desc), entitled/active/invited split, and enrolled-but-never-pulled accounts. |\n| `finstack_get_leadiq_customer` | One customer's LeadsIQ detail: enrollment state, window/YTD/lifetime stats, match rate and append hit rates, most commonly used pull filters, recent pulls. |\n| `finstack_get_vendors` | Look up who to contact at an external vendor/partner (credit bureaus and data vendors like Equifax, TransUnion, Experian, CIC). OR-matches `query` across company, name, role, notes, location, and specialty tags; optional `connection` degree filter. |\n\n## Install\n\n```bash\nnpm install -g @crscreditapi/finstack-mcp-server\n```\n\nAfter install, the `finstack-mcp-server` binary is on your `PATH`.\n\n## Configuration\n\nThe server reads configuration from environment variables (also loaded from a local `.env` file via `dotenv`).\n\n| Variable | Required | Default | Description |\n|---|---|---|---|\n| `FINSTACK_PROD_BASE_URL` | yes | \u2014 | Base URL of the mware-portal API (production). |\n| `FINSTACK_CHATBASE_SECRET` | yes | \u2014 | Shared secret sent as `X-Chatbase-Secret` on every request. |\n| `FINSTACK_DEV_BASE_URL` | no | falls back to prod | Base URL for the dev environment. Used when a tool call passes `environment: \"dev\"`. |\n| `FINSTACK_TIMEOUT_MS` | no | `30000` | Per-request timeout in milliseconds. |\n| `MCP_TRANSPORT` | no | `stdio` | Transport mode: `stdio` (for Claude Code and other CLI clients) or `http` (for n8n and remote clients). |\n| `MCP_PORT` | no | `3002` | Port for the HTTP transport. Ignored when `MCP_TRANSPORT=stdio`. |\n\nA starter file is included as `.env.example`.\n\n## Usage\n\n### Stdio (Claude Code, Claude Desktop, other CLI clients)\n\nAdd an entry to your MCP config (`.mcp.json` for Claude Code, `claude_desktop_config.json` for Claude Desktop):\n\n```json\n{\n  \"mcpServers\": {\n    \"finstack\": {\n      \"command\": \"finstack-mcp-server\",\n      \"env\": {\n        \"MCP_TRANSPORT\": \"stdio\",\n        \"FINSTACK_PROD_BASE_URL\": \"https://portal.example.com\",\n        \"FINSTACK_CHATBASE_SECRET\": \"<your-secret>\"\n      }\n    }\n  }\n}\n```\n\nThe client launches the process; tool calls travel over stdio. No port to open.\n\n### HTTP (n8n, remote MCP clients)\n\nRun it as a long-lived service:\n\n```bash\nMCP_TRANSPORT=http \\\nMCP_PORT=3002 \\\nFINSTACK_PROD_BASE_URL=https://portal.example.com \\\nFINSTACK_CHATBASE_SECRET=<your-secret> \\\nfinstack-mcp-server\n```\n\nEndpoints:\n\n- `POST /` and `POST /mcp` \u2014 MCP requests (streamable HTTP transport)\n- `GET /health` \u2014 health check, returns `{\"status\":\"ok\",\"uptime\":<seconds>}`\n\nPoint your client at `http://<host>:3002/mcp`.\n\n### Docker\n\n```dockerfile\nFROM node:20-alpine\nRUN npm install -g @crscreditapi/finstack-mcp-server\nENV MCP_TRANSPORT=http MCP_PORT=3002\nEXPOSE 3002\nCMD [\"finstack-mcp-server\"]\n```\n\nPass the `FINSTACK_*` variables at runtime (e.g. via `--env-file` or an orchestrator's secret store).\n\n## Tool call reference\n\n### `finstack_search_customer`\n\n```json\n{ \"q\": \"rentvine\", \"threshold\": 0.8 }\n```\n\n`q` (required, min 2 chars) is matched case-insensitively. `threshold` (optional, 0.0\u20131.0, default `0.9`) controls fuzziness \u2014 lower it if nothing comes back.\n\n### `finstack_get_customer_summary`\n\n```json\n{ \"customer_code\": \"CID18068\" }\n```\n\n### `finstack_get_customer_revenue`\n\n```json\n{\n  \"customer_code\": \"CID18068\",\n  \"type\": \"month\",\n  \"start_date\": \"2025-05-08\",\n  \"end_date\": \"2026-05-08\"\n}\n```\n\nRange caps depend on `type`: `day` \u2264 92 days, `week` \u2264 2 years, `month`/`quarter` \u2264 10 years, `year` \u2264 50 years.\n\n### `finstack_get_customer_invoices`\n\n```json\n{ \"customer_code\": \"CID18068\", \"page\": 1, \"per_page\": 50 }\n```\n\nIdentify the customer with either `customer_code` or `user_id`. `page` defaults to `1`, `per_page` defaults to `50` and is silently capped at `100`. Returns `{customer_code, page, per_page, total_count, total_pages, invoices: [...]}`, where each invoice carries its full `items[]` line-item breakdown.\n\n### `finstack_get_customer_pricing_config`\n\n```json\n{ \"customer_code\": \"CID18068\" }\n```\n\nReturns `{products, pricing_addendums, environment_users}`. `pricing_addendums[]` entries carry `id`, `name`, `status`, `quote_id`, timestamps, `has_pdf`, `has_pdf_without_disclaimer`, and `pdf_url` / `pdf_without_disclaimer_url`. The PDF URLs require the chatbase secret to hit directly \u2014 use `finstack_get_pricing_addendum_text` to read the contents instead.\n\n### `finstack_get_customer_users`\n\n```json\n{ \"customer_code\": \"CID18068\" }\n```\n\nIdentify the customer with either `customer_code` or `user_id`. Returns `{customer, users_count, users: [...], contacts_count, contacts: [...]}`. Each `users[]` row is a portal login: `id`, `name`, `email`, `phone`, `title`, `roles` (customer-facing role names), `role_labels` (as shown on the portal Users tab \u2014 `Admin (owner)`, `Admin`, `Developer`, `Agent`, `Billing`, `Main billing contact`, `Generic`), `is_owner`, `status` (`active` / `invited` / `not_invited`), `locked`, `mfa_enabled`, `sign_in_count`, and sign-in / invitation timestamps; the owner comes first, then alphabetical. `contacts[]` are the \"Contacts (No portal access)\" rows: `id`, `name`, `email`, `phone`, `title`, `roles`. This payload carries PII by design and is backed by the MCP-only `customer_users` chatbase endpoint (mware-portal); credentials and tokens are never included.\n\n### `finstack_get_customer_cohort`\n\n```json\n{ \"page\": 1, \"per_page\": 500, \"status\": \"active\", \"stage\": \"closed_won\" }\n```\n\nAll parameters optional. `page` defaults to `1`; `per_page` defaults to `500`, capped at `1000`. `status` filters by portal account status (`active`, `inactive`, `blacklisted`, `locked`, `obsolete`); `stage` keeps only customers with at least one sales opportunity in that stage (`closed_won` / `closed_lost` / `churned`). Returns `{page, per_page, total_count, total_pages, customers: [...]}` where each customer carries `customer_code`, `name`, `status`, `account_type`, and `sales_opportunities[]`. Read `total_pages` and fetch the remaining pages to cover the whole cohort.\n\n### `finstack_get_pricing_addendum_text`\n\n```json\n{ \"id\": 1234, \"variant\": \"with_disclaimer\" }\n```\n\n`variant` is optional and defaults to `\"with_disclaimer\"`. Returns `{addendum_id, variant, page_count, text}`. The server fetches the PDF over the chatbase API and extracts text with `pdf-parse`; complex table layouts may run columns together but remain readable for LLM reasoning.\n\n### `finstack_get_leadiq_analytics`\n\n```json\n{ \"days\": 30 }\n```\n\n`days` is optional (default `7`, clamped server-side to 1\u2013366). Returns `{period, totals, prev_period_totals, customers, customers_truncated, entitlement, never_pulled}`. `customers[]` is the complete list of accounts with \u2265 1 pull in the window, highest revenue first (`customers_truncated` is only `true` if the 50-account safety cap trimmed it). Definitions match the portal's admin LeadsIQ customer dashboard: a pull is one top-level LeadsIQ job, records count the export leg only, and revenue is the job's cost.\n\n### `finstack_get_leadiq_customer`\n\n```json\n{ \"customer_code\": \"CID18068\", \"days\": 30 }\n```\n\nIdentify the customer with either `customer_code` or `user_id`; `days` is optional (default `30`) and only scopes the `period` block. Returns `{customer, entitlement, contacts, period, year_to_date, lifetime, top_filters, recent_pulls}`. `top_filters[]` aggregates each pull's submitted form filters (dashboard formatting) with per-filter usage share and most common values.\n\nAll tools accept an optional `environment: \"prod\" | \"dev\"` (default `\"prod\"`).\n\n## Development\n\n```bash\ngit clone https://github.com/StitchCredit/finstack-mcp-server.git\ncd finstack-mcp-server\nnpm install\ncp .env.example .env   # fill in FINSTACK_PROD_BASE_URL and FINSTACK_CHATBASE_SECRET\nnpm run build\nnpm start\n```\n\nFor stdio mode while iterating, set `MCP_TRANSPORT=stdio` in `.env` and wire the local `dist/index.js` into your MCP client's config.\n\n## License\n\nPrivate \u2014 internal use within CRS Credit API.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+  },
+  "time": {
+   "0.1.0-1b9ede0": "2026-05-07T12:33:18.503Z",
+   "0.1.0-2bad4fe": "2026-05-07T11:31:42.110Z",
+   "0.1.0-2f8ac77": "2026-05-12T14:43:00.200Z",
+   "0.1.0-76ce272": "2026-05-11T16:02:33.380Z",
+   "0.1.0-a04547f": "2026-05-08T14:47:26.305Z",
+   "0.1.0-ba4afed": "2026-05-07T11:45:49.108Z",
+   "0.1.0-eff2af8": "2026-05-13T12:34:08.474Z",
+   "0.1.1-3d2b39b": "2026-05-13T13:40:17.342Z",
+   "0.2.0-cbc96e9": "2026-05-15T15:28:06.259Z",
+   "0.2.0-fac1a77": "2026-06-17T14:54:03.242Z",
+   "0.3.0-61c51ea": "2026-06-24T14:54:30.640Z",
+   "0.4.0-0c53dac": "2026-08-27T09:30:31.992Z",
+   "0.5.0-23af60a": "2026-08-31T16:21:29.023Z",
+   "0.6.0-06bd3a8": "2026-09-01T06:44:20.472Z",
+   "0.7.0-3660044": "2026-09-10T14:49:23.946Z",
+   "created": "2026-05-07T11:31:41.892Z",
+   "modified": "2026-09-10T14:49:24.124Z"
+  },
+  "versions": {
+   "0.1.0-1b9ede0": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-1b9ede0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-1b9ede0_1778157198341_0.9952454511087627"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-ZQIrB8Qlv/pe92O7am2UzZJalCj7BcIKWpQ6F4lLfKkvvWB1+X/WmZKcpwPO69LtyVLEZYOzeairnUYslhhHdg==",
+     "shasum": "d3cba5861bd440502e7c6128c04527cf43890bb8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDpefL7lCy3Nr69lYZ6dSwy8vtrjF+6uofJ4fWM0zzWagIhAITbHZw7fDTdTJmZiZb36GCriYIWjilREg9YurFAhVdU"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-1b9ede0.tgz",
+     "unpackedSize": 19030
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "1b9ede0d2dfed72eac288cbb7c13954c6bd1fe9f",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-1b9ede0"
+   },
+   "0.1.0-2bad4fe": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-2bad4fe",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-2bad4fe_1778153501976_0.3557280321012217"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-nCJFdHCivGhaOJlX8WYTMP5sGTrLYQZrf+iSqSXFhAd5ILvHN5rEd2yW+oHNms0cEUzdKNfQD1MK2MU41/YJaw==",
+     "shasum": "f9bface3de3e1cbcfa3938271217dc5f5746f5db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC2cH8LqEjSpVq6a+qhoNIpoAgw5geDxMhTxRE5gjikigIgCa+JaHAPYpn0075sXJk39LSRGVDq6qPr1KLfQb6T9LU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-2bad4fe.tgz",
+     "unpackedSize": 16181
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "2bad4fe39a7d556dd88dd512158ae5b8537f1112",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-2bad4fe"
+   },
+   "0.1.0-2f8ac77": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-2f8ac77",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-2f8ac77_1778596980045_0.965178539594062"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-hLGrVM2BDiyIQ6gMZ3rCtbptVV/Fwz0AP+9hdIcBemivQb+RFb7bKJpQZwF0m+Cn1IZYDFHIhQ9JluPgj1mVHA==",
+     "shasum": "d578bec69d84265eaf6d39ef27e9b53a17c5bac3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDDmaUj5M9sLmjuVBB8+3FIcW8HpYn1pQNs7yBHRqwQ4AiEA40pF/uTfc7ADIq6cas3ytHNRJdVyNnGgyzbcG2f8QyY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-2f8ac77.tgz",
+     "unpackedSize": 31812
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "2f8ac7713bd7bf778fb4867c1f39b1f4f1c13d86",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-2f8ac77"
+   },
+   "0.1.0-76ce272": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-76ce272",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-76ce272_1778515353163_0.33147631677541445"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-3qg13kcwlX0NgBZ4pif14jV6dtUjaWKU1LYqa4XX+No3Tn8c0uMRPdZ241VhC4B5+K55MBDY+ocqfhm12rnHLQ==",
+     "shasum": "9f709b36ba5caf7ceb55afe36a47f6fc3abd28bd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDWnUKWPiWueoJgDP2fkflPsm8iCd8oIdCxkVT1eS8kLAiEAgtOtuRxxE4/WHBFjPOzn61TAtl+CtrTIHhLWq1gXm5k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-76ce272.tgz",
+     "unpackedSize": 26680
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "76ce272d13e346bb7b89d8116b5b83cefcdc0925",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-76ce272"
+   },
+   "0.1.0-a04547f": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-a04547f",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-a04547f_1778251646151_0.42470258487412815"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-7MpINpKBsJKPWSNdnRq6JVNbHwyIEyEPcTGIUXn0YeeSI0GavyzkX/oNmrnpM2aZEyRHkNhU46thuReuIKxWbQ==",
+     "shasum": "544f183995c6040caf69e676a856a906fa442a78",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCPcm1yOsUnEOWn9kJTA4+RfrYDMwnuq1t9LmoPCglPZQIgRLR8E1jf5T+ZJSu2sRpD386TiYNjfmYfB3Nfs5T/8rQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-a04547f.tgz",
+     "unpackedSize": 22573
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a04547f4f5e1ba7292ac6755210078f1b75e74b7",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-a04547f"
+   },
+   "0.1.0-ba4afed": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-ba4afed",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-ba4afed_1778154348971_0.519508257178892"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 26,
+     "integrity": "sha512-VjmsgO1posjX5r+ZbKF2cWzWcVIB8ZEYL3XuyA6FxB7i4ACuLor5iegPs27fkjciX9gGNrAk8bJtk0LlPua0+A==",
+     "shasum": "27ff63ed623f49e6a8f4c3d22a4e659fec25bbb3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDiaQvcSfdHShmfK7SnnV7bmZ7wonBcRuDSsLfuEFvcFgIhAOYBdEYgIBflu46bJxU2xY6SM54xLcco7AziqDrdTm1Y"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-ba4afed.tgz",
+     "unpackedSize": 16199
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "ba4afed4db7abaf01e9d27c1926932e789863268",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-ba4afed"
+   },
+   "0.1.0-eff2af8": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.0-eff2af8",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.0-eff2af8_1778675648350_0.8443375714243255"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-iaG+QP5N2+94nK89sdQ19gu+JvooY268IyLcVEKtqvTXnHyuZtp6xi6tjb0uJ6Y/+xC2/oVcwyq3Kr2I9Vq/Lw==",
+     "shasum": "af72aba9a8ad3a5c8fac3aa9b64200a829f4cf83",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTjKzbG2a1iLwJinT14wp8JkO9OtC4rIf7txD/ehsmcQIhAPkGY+8+hBwpg0EfUPdkD58gwidLkCr9hG6TFz+uaWz2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.0-eff2af8.tgz",
+     "unpackedSize": 31684
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "eff2af8ee6b8e2b410c281969e489b4fafa9cfe9",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.0-eff2af8"
+   },
+   "0.1.1-3d2b39b": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.1.1-3d2b39b",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.1.1-3d2b39b_1778679617170_0.6652451813252238"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-E3296hBMgKBzPOzHmN9wQVeDiFyFuOQL80zngocYDaxP+Dfz1sb7t+eqKbB2+QFjtZMpN1ANbzqZvI3k0OctnQ==",
+     "shasum": "0c7a55f9cef9f1e58124e49e8b51609a5ab57b0d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCx09ohp0dM2+6AHoR9DL2VOzwyW9O8A3WZIz7tXppmdgIgNLi5WMtjmsYTzr/8ioFfV4FmfYDDKCml6vyWJ/KGyPA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.1.1-3d2b39b.tgz",
+     "unpackedSize": 31684
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3d2b39bcc8f1d9d02ddc1b098a812b79fc85b92a",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.1.1-3d2b39b"
+   },
+   "0.2.0-cbc96e9": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.2.0-cbc96e9",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.2.0-cbc96e9_1778858886106_0.37648993342939074"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 27,
+     "integrity": "sha512-yUN4V2GVCJ45GpYcju/kHatM2eLvs9yPE8uZX5T/H9fmoAupbWg7b5w1NE75L7RC2ypVwAdb7A3Vk8g5UkzEGg==",
+     "shasum": "15a8d91353f1ddd4ed7f66c4bba3d46a1ae82079",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCYhdJsLT1KrE1rIaQjnoivOCuwUnM9GP/jAl6cdae6CgIhAN6Po8RVvQrdk3v93fkebfOHN4gaRSNGKQxx1awzFm9F"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.2.0-cbc96e9.tgz",
+     "unpackedSize": 39890
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "cbc96e9fca9c8c8d8bae8b9e29fc241ccc48a345",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0-cbc96e9"
+   },
+   "0.2.0-fac1a77": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.2.0-fac1a77",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.2.0-fac1a77_1781708043119_0.8098731197633109"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 33,
+     "integrity": "sha512-7Qmiz2V8iedb3i383QEtgdZuvYuyDFJ/htjCRHprQ5aOy+ZsG3FR7uP2WLAkt9blEFubA3/yRHj4xZEOHed9SA==",
+     "shasum": "bcd282f943736d5db9aebf665c68812ed84f6b79",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB/FVEa6TUjVA8q6Ia1DOOC3ljplkLfUtIXEibBkPIguAiEA49ju3FieAbYHTRPz1MPmI3UkihPsdBnPHbF+JiFmv04="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.2.0-fac1a77.tgz",
+     "unpackedSize": 47252
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "fac1a77b3b52dd3c1c25ff4a04f18a80f38adc1c",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.0-fac1a77"
+   },
+   "0.3.0-61c51ea": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.3.0-61c51ea",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.3.0-61c51ea_1782312870519_0.18476269295686598"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 33,
+     "integrity": "sha512-a5RXbk8wIvIcnnoCRJOadodo08Wcf7hrCYqdUUcZwXMCeku3kh26Lc5e4tEY2QWbNmNAtejUOEG4h0bOjwv6IQ==",
+     "shasum": "dcd3f8306fc58e343fcd4e9a91000ee4c3412779",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICoUR0TtpMTqe3/J1j/5oG2ZRRoN/5IhVMWmJQAar1ATAiAtsxcRiZYcRKN6B6hrcQUlSxqjEsmWkkC1cEAk6JIDcA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.3.0-61c51ea.tgz",
+     "unpackedSize": 47139
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "61c51eab20bce8a1b875267f6a0a60bd63a88027",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0-61c51ea"
+   },
+   "0.4.0-0c53dac": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.4.0-0c53dac",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.4.0-0c53dac_1787823031902_0.7700660087823201"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 33,
+     "integrity": "sha512-gDIwL2VknJSqcmiTtwUC8zoDjVG3amurERNCSbzNg3n146Il3m2tk3V5u5czz5mYwEfAH9Mj+SBO0uv0DQvs8A==",
+     "shasum": "4ab5f2c40aacdb3be175ad39490c702e86f702ea",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD3FmqF6KcjYH4Af6mAwR3Sw2Z5mmTfX9gDvH6w8UhLewIgfRT02S7oTNhU9say9om5AMAjcaw6JgfUTOxOUrl537Q="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIESiTIzNT9llB5tS1IRpvBtzB+c09kmjIVI0HZwB5ZamAiBW0fTn5u1cPfx5vdPZkNQGAF4H9yWaUj8Pt78NFu+3Pg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.4.0-0c53dac.tgz",
+     "unpackedSize": 48310
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "0c53dac53c413f26577bcfe5031ea7029fee8d55",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.4.0-0c53dac"
+   },
+   "0.5.0-23af60a": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.5.0-23af60a",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.5.0-23af60a_1788193288938_0.6111190790512318"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-ZApizCe1N7cW4qvr1nGnOwqBgxp1WWHyRz8PC0ApYDcXhKyNsZkQCHxZyJpVGsTcxuVAENip2VQttlI/ZvTbBA==",
+     "shasum": "ce89279ee342b38825cf5ac2344580be5c580199",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCH15w7+Z9OaV46gItNsAhaFpHFNlDHHf2/vCcCEW0FgQCIQC/YjNrkuHR6UyQZC7aLKNkhqIsuviWxczuRMpnYYSv8Q=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCd5T9knflRKVNovNKSECKmz8+YPhKSEY07ty8TFtk3ggIhAKjqDw3hITAupbdRAaDiBLMemeVBMc5VLwDVToWLjBTm"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.5.0-23af60a.tgz",
+     "unpackedSize": 59125
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "23af60ad882b6756f70a18da42e2d0b19f397002",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.5.0-23af60a"
+   },
+   "0.6.0-06bd3a8": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.6.0-06bd3a8",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.6.0-06bd3a8_1788245060376_0.2752769641050621"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-7fDENx1A/10sDdfUKOdOmwhtu6wzK2wChR5D7gI3jmxaFyKemN0bLtI7n2snb8IvJJrzLRRtA81h2z/kz7qnoQ==",
+     "shasum": "e119012c5b792d2389958507fa0af0c2d2ea45c9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC0GeAM0lffHMOj8yXVgslkCI0d8YVzTCl1xdZ8kiZFVwIhAK1VnKdg/KmpvyoAwUm/dFhfjWTyct2ff39l7UoviJl+"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCTXJf7PZMYoX2Z/IemI1cGFX8FY35qONpzg15+tHdIpgIhAO9LpHzpZEf/qEWgS2KguVImrog0QkA1VJumNfpRnOGe"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.6.0-06bd3a8.tgz",
+     "unpackedSize": 64315
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "06bd3a88c59fb28c562ead264754e9e96cdbea69",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.6.0-06bd3a8"
+   },
+   "0.7.0-3660044": {
+    "_hasShrinkwrap": false,
+    "_id": "@crscreditapi/finstack-mcp-server@0.7.0-3660044",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/finstack-mcp-server_0.7.0-3660044_1789051763839_0.2844799361893289"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:58609b4a1674]",
+     "name": "crs-mcp"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "finstack-mcp-server": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/StitchCredit/finstack-mcp-server/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "dotenv": "^16.3.0",
+     "express": "^5.2.1",
+     "pdf-parse": "^2.4.5"
+    },
+    "description": "MCP server for Finstack",
+    "devDependencies": {
+     "@types/express": "^5.0.6",
+     "@types/node": "^20.11.0",
+     "@types/pdf-parse": "^1.1.5",
+     "typescript": "^5.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 39,
+     "integrity": "sha512-e/QwAgXcW63zfac9uQku5LJc7CMuPK2Pvaje/cp50D5v9oONwvziJ/hw3Ciy+zjIfabn0cN1P8OPO7iWZO2jBw==",
+     "shasum": "593d94305aa6d47c268876724df2c83683bcd50a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCKqbuz9mZD1HGtjrl4lIr1Ug64pOi0XZV8SuovneeougIgOUshkWsplB+8ogh9TcKgSlw1PjUDzJ15b9XSQ5wBDCw="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxlP5JIsbnBpfH2Rn+kC8//IfEMfb2EMvHqq+N6tNH9AIhAI/mDWYZpjHKLeuy60ztOm2BELZ99lCskTsew7FPPeP+"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@crscreditapi/finstack-mcp-server/-/finstack-mcp-server-0.7.0-3660044.tgz",
+     "unpackedSize": 70054
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3660044559dbaa30334436833ca53388df5b4edf",
+    "homepage": "https://github.com/StitchCredit/finstack-mcp-server#readme",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:145cc7b6aae6]",
+      "name": "tarikneradin"
+     },
+     {
+      "email": "[redacted-email:58609b4a1674]",
+      "name": "crs-mcp"
+     }
+    ],
+    "name": "@crscreditapi/finstack-mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/StitchCredit/finstack-mcp-server.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "prepublishOnly": "npm run build",
+     "start": "node dist/index.js"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.7.0-3660044"
+   }
+  }
+ },
+ "name": "@crscreditapi/finstack-mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@crscreditapi%2Ffinstack-mcp-server"
+}

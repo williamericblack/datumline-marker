@@ -1,0 +1,2135 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.8.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0aedf3b8b40e]",
+    "name": "guyghost"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.0",
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.3.4",
+   "0.3.5",
+   "0.4.0",
+   "0.4.1",
+   "0.5.0",
+   "0.6.0",
+   "0.7.0",
+   "0.7.1",
+   "0.7.2",
+   "0.7.3",
+   "0.8.0",
+   "0.8.1",
+   "0.8.2",
+   "0.8.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@guyghost/swarm-dao-mcp",
+  "_rev": "19-1785d594b1bbf3da22346af570440c02",
+  "author": {
+   "name": "guyghost"
+  },
+  "bugs": {
+   "url": "https://github.com/guyghost/swarm-dao/issues"
+  },
+  "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+  "dist-tags": {
+   "latest": "0.8.3"
+  },
+  "homepage": "https://github.com/guyghost/swarm-dao#readme",
+  "keywords": [
+   "swarm-dao",
+   "mcp",
+   "model-context-protocol",
+   "dao",
+   "governance",
+   "multi-agent",
+   "deliberation",
+   "ai-agents",
+   "quality-gates",
+   "copilot",
+   "claude",
+   "codex"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0aedf3b8b40e]",
+    "name": "guyghost"
+   }
+  ],
+  "name": "@guyghost/swarm-dao-mcp",
+  "readme": "# @guyghost/swarm-dao-mcp\n\nSwarm DAO governance as an **MCP (Model Context Protocol)** stdio server.\nExposes the full Swarm DAO toolset \u2014 propose, deliberate, control, execute,\nship, rollback, audit \u2014 as MCP tools that any MCP-compatible host can call.\n\n> **Integrating a host?** Read [`docs/MCP_INTEGRATION.md`](../../docs/MCP_INTEGRATION.md)\n> \u2014 the canonical workflow, spawn patterns, and operating rules shared by all\n> adapters (Copilot, Claude Code, Codex, and this server).\n\n## Install\n\n```bash\nnpm install @guyghost/swarm-dao-mcp\n```\n\n## Run\n\n```bash\n# Boots the stdio MCP server, using $DAO_ROOT (or cwd) as the DAO root.\nswarm-dao-mcp\n```\n\n## Configure in a host\n\nAny MCP host can register this server. Example (VS Code / Claude / generic):\n\n```json\n{\n  \"mcpServers\": {\n    \"swarm-dao\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@guyghost/swarm-dao-mcp\"],\n      \"env\": { \"DAO_ROOT\": \".\" }\n    }\n  }\n}\n```\n\nFor ready-made host packages (native config + instructions + slash commands),\nsee the sibling adapters:\n\n- [`@guyghost/swarm-dao-copilot-adapter`](../copilot-adapter)\n- [`@guyghost/swarm-dao-claude-adapter`](../claude-adapter)\n- [`@guyghost/swarm-dao-codex-adapter`](../codex-adapter)\n\n## Tools\n\n30 tools covering the full governance lifecycle:\n\n| Group | Tools |\n| --- | --- |\n| Onboarding | `dao_help`, `dao_setup` |\n| Proposals | `dao_propose`, `dao_update_proposal`, `dao_propose_amendment`, `dao_list` |\n| Deliberation | `dao_deliberate`, `dao_record_outputs`, `dao_roundtable` |\n| Delivery | `dao_plan`, `dao_artefacts`, `dao_dry_run`, `dao_control`, `dao_execute`, `dao_ship`, `dao_rollback` |\n| Tracking | `dao_dashboard`, `dao_audit`, `dao_rate`, `dao_attention` |\n| Agents | `dao_agents` |\n| GitHub | `dao_config_github`, `dao_github_create_branch`, `dao_github_open_pr` |\n| Workflow runs | `dao_graph_status`, `dao_graph_submit`, `dao_product_status`, `dao_product_submit`, `dao_improve_status`, `dao_improve_once` |\n\nWorkflow-run tools expose Graph Engineering and product-loop runs to AI\nagents with a hard authority boundary: the host sets `source: \"ai\"` on every\nsubmitted signal, and only AI-artifact event types are accepted. Human events\n(approvals, rejections, retries, cancellations) never pass through MCP \u2014 they\nbelong to the `swarm-dao` CLI human channel.\n\n## Programmatic API\n\n```ts\nimport { createSwarmDaoMcpServer, ensureDaoStorage, createMcpHostAdapter } from \"@guyghost/swarm-dao-mcp\";\n\nawait ensureDaoStorage(\"/path/to/repo\");\nconst server = createSwarmDaoMcpServer(\"/path/to/repo\");\nawait server.connect(yourTransport);\n```\n\n## How deliberation works over MCP\n\nMCP hosts cannot have the server spawn sub-agents, so Swarm DAO uses\n**manual deliberation** here:\n\n1. `dao_deliberate` returns a dispatch plan (agents + models).\n2. The host spawns one sub-agent per plan entry itself.\n3. `dao_record_outputs` feeds the sub-agent outputs back into the DAO.\n\n## License\n\nMIT\n\n## Long-running tools\n\n`dao_improve_once` executes real worker agents (herdr) during the sampling and\nauditing phases \u2014 a single call routinely takes one to several minutes. MCP\nclients default to a 60-second request timeout, which kills the call mid-flight\n(leaving the series state untouched, but orphaning the spawned herdr workspace;\nthe next call cleans it up). Hosts driving improvement series should raise\ntheir request timeout:\n\n```ts\n// per call\nconst result = await client.callTool(\n  { name: \"dao_improve_once\", arguments: { seriesId: \"\u2026\" } },\n  undefined,\n  { timeout: 15 * 60_000 },\n);\n// or globally\nconst client = new Client(info, { defaultRequestTimeout: 15 * 60_000 });\n```\n\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/guyghost/swarm-dao.git"
+  },
+  "time": {
+   "0.2.0": "2026-07-08T01:25:15.492Z",
+   "0.3.0": "2026-08-30T13:19:10.787Z",
+   "0.3.1": "2026-08-30T13:57:25.069Z",
+   "0.3.2": "2026-08-30T22:21:44.597Z",
+   "0.3.3": "2026-08-31T12:48:20.776Z",
+   "0.3.4": "2026-08-31T16:57:26.231Z",
+   "0.3.5": "2026-08-31T17:34:26.845Z",
+   "0.4.0": "2026-09-01T09:34:05.685Z",
+   "0.4.1": "2026-09-01T17:10:40.046Z",
+   "0.5.0": "2026-09-01T17:18:17.772Z",
+   "0.6.0": "2026-09-01T17:39:23.069Z",
+   "0.7.0": "2026-09-01T18:00:44.965Z",
+   "0.7.1": "2026-09-01T18:20:17.042Z",
+   "0.7.2": "2026-09-01T18:30:49.660Z",
+   "0.7.3": "2026-09-01T19:52:03.789Z",
+   "0.8.0": "2026-09-04T05:30:29.467Z",
+   "0.8.1": "2026-09-05T21:56:14.474Z",
+   "0.8.2": "2026-09-05T22:31:26.500Z",
+   "0.8.3": "2026-09-07T13:15:40.529Z",
+   "created": "2026-07-08T01:25:15.129Z",
+   "modified": "2026-09-07T13:15:40.836Z"
+  },
+  "versions": {
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.2.0",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.2.0_1783473915367_0.30971162490440984"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0aedf3b8b40e]",
+     "name": "guyghost"
+    },
+    "_npmVersion": "10.9.8",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-rQwSLgfGvhe2rknXOiGg0AjJTtwUBlmU12xB7FShp1VCQ9kC0AUlSrFp66L0nanIpm88x+F7TNZdUFuXeTZTrA==",
+     "shasum": "9c720a189b81cf0e35a6f8d64134f3fb573e49f3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCTyNBjaRn42NJpNCe84biT0faa1cZKvcxPnuN7iIHOsgIgflGIzs11ylj6j2wRQ3l8J5YhbBbGU6X6mISR36j2KZY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.2.0.tgz",
+     "unpackedSize": 42094
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5807e471a5c5049aa43f86f5f6796baafdf1824d",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.0_1788095950655_0.7480635507508289"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.5.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.3.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-Qz/R0W+9E8SPp6awUTWOW9TATKEG46YNYmVdaoYgfJFPtGaRI8tzZ7gCEqDBRV0EGDXF2fb0wrdQz+dWuMwT4A==",
+     "shasum": "bb6538e98d4273cf7177f826b1b70f340b5183fa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICttLvdGKI3dRenBf20iSeTHEKJMkt6zJxwtjTtKRYaHAiBTI3TFxMRkcmq/Nh4x0On4rwEfj7Gj/KUB+qK2zodrPA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.0.tgz",
+     "unpackedSize": 43619
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "370307969d17bb8f2e3e742aefb75b3eb913a455",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.1_1788098244805_0.395242782345113"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.6.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.3.1"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-3FD51cTO5N21F70KpsXp84PUpNtclHL5ERHodOvAEtLhrxCdfaC9bYuM9E9jE5nIaVstLqEcEKkPJ8H2/TDUKA==",
+     "shasum": "8ea3c82f11f258116b4a8bba744629d043b9ef6d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDLi8SA5Qd1MziPjFutR5BkGcH5fI0/NGbEGT69U7bH5gIgHkLpKrpAVYom4h/SQ3iXmVu2StLAln80EPKbCuK2BZw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.1.tgz",
+     "unpackedSize": 43619
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3c5c94d2a91902927525a4c12ca2dff6dd8bdb26",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.2_1788128504469_0.7280829114851182"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.3.2"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-T6XKavSwT3PrbZzPbPfNi8sNAxPRg4T4VzC/onB7289DhDPypqTvopZCPgx7SKH9Pj74BaYW2ifzK52RTw2F2g==",
+     "shasum": "e56515e8e4fa4dedbe07c560db6ca4fb874497f6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDsbrCvKYXJtvPaP3Z7jZxqCYOtdrm8Y/DJXUQwTXc+CQIhAJ88zkHv7O/o7S6KwWeHm0PPcaXJdfnTnaMYknG9wb1m"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.2.tgz",
+     "unpackedSize": 43619
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1a187827e3b494552e018a0ef8522957136572ab",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.3_1788180500648_0.7934191180591061"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.8.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.3.3"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-XZkx456tGw3yf4+m8bDHxzZt80k0ISXZWOuMd5Ml4nnSYYMnrLbcQ9Y7hLyHiRNZIHRIQU0XYJVvfUI6XGcqVQ==",
+     "shasum": "ed223ed3cfd2d557f291676f80c9d3d1d5d65cff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD01mzt8/Y8aZLT7LHf38Kei/ktWEhMZ4gZhcP6ZVu7KwIgHod/RtMzFgJYRf9veuiXl4xE+B70cId6Ot3IfaWGB1g="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.3.tgz",
+     "unpackedSize": 43619
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7bb25d55a1884eb88cc10564c2b5f729a79798ef",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.3"
+   },
+   "0.3.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.4",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.4_1788195446093_0.2976739200116565"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.9.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.3.4"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-+NjNz7ijIP+uhyQiPxA215Evl6wJqaYWphpnwwwD5QivLXDD8wMl8YVlxboe/d304MxU263GcoDk6gK1CoziiA==",
+     "shasum": "6319a912cec8048885178df78be99ab1fbc672fc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE4lWnl719RW7Tax6UkeszUQlP705xh59y/YPH2PNtJjAiBpIrJjNUTD1K0qJfStDKR3eQUKyjvP6BZ0HWSqmMazVA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.4.tgz",
+     "unpackedSize": 43619
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5d6d3e271c2e5e25e69446b16de3eee33de263fc",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.4"
+   },
+   "0.3.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.3.5",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.3.5_1788197666717_0.486673392587589"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0aedf3b8b40e]",
+     "name": "guyghost"
+    },
+    "_npmVersion": "10.9.8",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.10.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 18,
+     "integrity": "sha512-JKB1S4kI5munYVtXr3okTTc278G/0rVI833PJMcxM6L6cNwfZ/nIc+qPfLlsLUVoWzYW4+Sz+qbPqN2UxnC7cA==",
+     "shasum": "cd88c2e417cd1dc2c7fa216bd3e2810b642666b2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH/iOyJYzGks0El/3K/P/suWJ/kFJPB1DoD8QoghQjbAAiAaAjrf+KInAhIi9zjlxHFG/Kk2r7FXO3tBo1VwIXz97w=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.3.5.tgz",
+     "unpackedSize": 43620
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0f642955a1cd198829fd6ae895114f544380df96",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.5"
+   },
+   "0.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.4.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.4.0_1788255245536_0.5892931464290294"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.10.3",
+     "@guyghost/swarm-dao-graph": "^0.2.0",
+     "@guyghost/swarm-dao-product": "^0.2.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.4.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-4h9JJWCO1skhAm1GN4QlqnSB+l44BNs2WZqqwWnku0oyByoym45NJB3Zi9hRiEigEqURzM+McVO0gnqSchW63w==",
+     "shasum": "dd52c77472e27841459040d1e255752cca65f135",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICezgydRpgoDEv+skB4OPieu32uJWNzm6fDAdoGhT66rAiBl670CoQxCD+YK+Uq6Jxf687Ft+37HjalUflX/JvBTJQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.4.0.tgz",
+     "unpackedSize": 57155
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "837e778c35f57746c81e12ed3ba277858a53787f",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.4.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.4.1_1788282639907_0.1483093424813291"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.0",
+     "@guyghost/swarm-dao-graph": "^0.2.1",
+     "@guyghost/swarm-dao-product": "^0.2.1",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.4.1"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-Uka/vE7m2pG0ybcy6bD04t20mY153Ki0CkWE6w/nGSlls1Re3vCYL+y1AocQfoKK4+Ju1IsMc6RmYIOv9uSfPg==",
+     "shasum": "44e41373ed6fb94dfe48a8d934d5cd2fd123db28",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAG7Y3cT6N7OET4VvzIH0BuFTsyLM9wDBFx1ByR6+OKzAiEAla9IcukTz5QSzwj9d9HfH8/V7uBFfSO5AqFLICdF5ag="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.4.1.tgz",
+     "unpackedSize": 57155
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "241e0d11802e722d46ce57db2104585d2d57702d",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.1"
+   },
+   "0.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.5.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.5.0_1788283097655_0.4343407156355097"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.1",
+     "@guyghost/swarm-dao-graph": "^0.2.1",
+     "@guyghost/swarm-dao-product": "^0.2.1",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.5.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-cUvej7h4rsjWP+k+blKnltWkKosA2LMdeAbg2llEMOONIx8jAlwy27ab7tvvBSvbUY8IzKnwVnTopGC1Ol+N0Q==",
+     "shasum": "deec67d664a88abb262e8d82f8e5cd86feefc539",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIG2ajqcnDXyYkB/e2XEN8SUbEfr+K1tGFf6RVZ+ZmcrDAiACC3VU+C7OxQ6WJBsj7JXL7xGARFjCYw9+vJnLUVVG+A=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.5.0.tgz",
+     "unpackedSize": 59970
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c2da895a90ac9de4670c4332ef2da1550999e4eb",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.5.0"
+   },
+   "0.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.6.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.6.0_1788284362946_0.9836908531871273"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.2",
+     "@guyghost/swarm-dao-graph": "^0.3.0",
+     "@guyghost/swarm-dao-improvement": "^0.3.1",
+     "@guyghost/swarm-dao-product": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.6.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-wObh6vyYqEWFl6dufDSAtXrre7DRLELKXW5N7J9MDLsfZwxKZph/dvwvtYPuiJB68FEDL37pXX1aOM+vAolKzw==",
+     "shasum": "d0433136315508228ecce7761902f87b07a63c1d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAUE5PO048OYx8ZAyPb+T9k+xMDtLYzjHngXqqi1lukvAiAJO+IhNX4KhoYZ0VnF8ZWYQwbvb8XZUG6GVMqJdYJ2Lw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.6.0.tgz",
+     "unpackedSize": 61220
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "c713f12f2e4319ef41666af9fb629fe4745a5b66",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.7.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.7.0_1788285644816_0.10402487877817812"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.3",
+     "@guyghost/swarm-dao-graph": "^0.3.0",
+     "@guyghost/swarm-dao-improvement": "^0.4.0",
+     "@guyghost/swarm-dao-product": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.7.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-a15qmOIznDPl1Cco2invYFi4tJc/opjBi9dsfimkiJ8vuQumygbnNKAM8JMhonU+pCCxQTLI9L4Mqlh84N+T2w==",
+     "shasum": "45211f67c6ff06d210bc1145e2e5eab7cf933e9a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIBrqflurTS2er4qLXfAEXN/jPro1E3WeZZg5/KwhqODcAiBoM76igNZCXA/RHiuWxW+c1+uej1Nm3V5KP2tTv3+NMg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.7.0.tgz",
+     "unpackedSize": 63519
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "65c198d6476ccb9b31d24b0af294451ce1addef3",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.7.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.7.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.7.1_1788286816903_0.735636177302309"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.4",
+     "@guyghost/swarm-dao-graph": "^0.3.0",
+     "@guyghost/swarm-dao-improvement": "^0.5.0",
+     "@guyghost/swarm-dao-product": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.7.1"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-cpbExrTSpGexfn9tTLSi2CshjAcsYnSYxTAXA1Y9pSEMdZXeE3WbWcw4sKFoPumXBMam0n8oO19WLc2yO8iH6g==",
+     "shasum": "db9c397363804cba54ef771465b68cba643d91b7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAIRIYxNiLDmmbOXQlTrRuMsoaBVYTB6DuCcG3+uTwpiAiEA26fD8BoI+zHCI7Zh1OZakEWY8xPOTWVTAJVi/yKFj4I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.7.1.tgz",
+     "unpackedSize": 63923
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "85d5e421a07bbcfefcf8450db7eff53b87b1122f",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.1"
+   },
+   "0.7.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.7.2",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.7.2_1788287449517_0.3821345659780553"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.11.4",
+     "@guyghost/swarm-dao-graph": "^0.3.0",
+     "@guyghost/swarm-dao-improvement": "^0.5.1",
+     "@guyghost/swarm-dao-product": "^0.3.0",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.7.2"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-ijBpKf4FWLlsBOy7cTi4OyrAnnY4PlIt3B2NdrCBQWb0gnM+vlhu5xMgLkj+W3Ne6Tzdog2AW4R/3+eSfnAYTQ==",
+     "shasum": "cf2331ef04cb6a5590163ca34da2908d8f7a3f81",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFdlsdJKpY2sYzlMZvmXw4DGPNBJCR6G3mMEd/6vOw+4AiEAvXJEIjdxJq4mVvYTOezR9Cd9Nt+Q7l2XDAI/Qese7P0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.7.2.tgz",
+     "unpackedSize": 64695
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e85c857b713efd3e14891ed09b59be4ec60d1e06",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.2"
+   },
+   "0.7.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.7.3",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.7.3_1788292323660_0.6462637725474831"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.12.0",
+     "@guyghost/swarm-dao-graph": "^0.3.1",
+     "@guyghost/swarm-dao-improvement": "^0.5.3",
+     "@guyghost/swarm-dao-product": "^0.3.1",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.7.3"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-xqlxvqjddVKh8SLj02+sfWgb/lQY5a75vXQ7YN/vqS41Iek4jQD3iRZ4hyEE8yr+uLQNcbktdj17rUASQe23nA==",
+     "shasum": "705e044bd09d245bc9550cf3056b0ea918443606",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDaXr0TZ56TcKtAVvCeWF7T4TCNWXLLys1A0M6dii1OGgIgGjWbgUkdbF6GYwY0aO0juVqXGyCVsjrvumBTy2wvL5c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.7.3.tgz",
+     "unpackedSize": 64695
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "e0d1490f9323cc6b970df16873ac0300d1080670",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.3"
+   },
+   "0.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.8.0",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.8.0_1788499829326_0.5692305619043181"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.13.0",
+     "@guyghost/swarm-dao-graph": "^0.3.2",
+     "@guyghost/swarm-dao-improvement": "^0.5.5",
+     "@guyghost/swarm-dao-product": "^0.3.2",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.8.0"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-5kGNgyNVa1be90yVL4WYNKBHMomFdL8goXqiWrELV8/iSx0GhVl8aG/MvXvpMhAKsiReQm2j/XcFuh+kGtUF7Q==",
+     "shasum": "1b54b58c1b4a2f09ab53c4053943770fc746979c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCSwwbXZzHUBXddf1qU51omXClueY7vQC+AZSSfXyhPqAIgAWnBskeu6d7jrEoKGDEKuQNOgVrnsuCoJ6TkxcjpEpw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.8.0.tgz",
+     "unpackedSize": 65889
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4a2401281e918b40a328997655c878e81af7ae2a",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.8.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.8.1",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.8.1_1788645374348_0.940464263818753"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.14.0",
+     "@guyghost/swarm-dao-graph": "^0.3.3",
+     "@guyghost/swarm-dao-improvement": "^0.5.6",
+     "@guyghost/swarm-dao-product": "^0.3.3",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.8.1"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-aMarS7OYmTdCbh06IYWULsUE7stNh3ZplxXl4xA309WhyVF6IjMZEPt9FH/SME7LARlUpvkJUinH68ZmbZ4ZsQ==",
+     "shasum": "5b019299c06713af661060db17f57ebe84913241",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAxDVD1vNEsFfgHRDMtd8cl4LkET+k3a+v3UK3Y41rEXAiEAovh8ObeMBy4lMrTcB/1InpNrMyDpnalsyQiJr+w6s7k="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.8.1.tgz",
+     "unpackedSize": 65889
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "76302dad7a99aa4d093ace78d7387c65aa4e146c",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.1"
+   },
+   "0.8.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.8.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.8.2_1788647486365_0.09306585038080262"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.15.0",
+     "@guyghost/swarm-dao-graph": "^0.3.4",
+     "@guyghost/swarm-dao-improvement": "^0.6.0",
+     "@guyghost/swarm-dao-product": "^0.3.4",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.8.2"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-a1Galq7hgIeNw9ym7jUBQ25IKeL3FZJaSl5GXJvgva8w7eokvOFlQ1t2d3zpQhNBDLM8sjYVru0IB/d6YF/jYw==",
+     "shasum": "a4731336f7eb9ddb2645a50de29436c399c4de4f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC6M64gQJkBDiaPqGgpHZuMQRJ5optqpb/e39hbvljrpAIgY1PRwakKiYACe+tB8Jz3cfW1+kH7fXScqcezo6bxq3M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.8.2.tgz",
+     "unpackedSize": 65889
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "2347c11fdf3c87692fcc146f108d3e90b00614d0",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.2"
+   },
+   "0.8.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@guyghost/swarm-dao-mcp@0.8.3",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/swarm-dao-mcp_0.8.3_1788786940398_0.11067714484449453"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:f57ba8d3-f306-440f-815f-e4afd694344d"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "guyghost"
+    },
+    "bin": {
+     "swarm-dao-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/guyghost/swarm-dao/issues"
+    },
+    "dependencies": {
+     "@guyghost/swarm-dao-core": "^0.16.0",
+     "@guyghost/swarm-dao-graph": "^0.3.5",
+     "@guyghost/swarm-dao-improvement": "^0.6.1",
+     "@guyghost/swarm-dao-product": "^0.3.5",
+     "@modelcontextprotocol/sdk": "^1.29.0"
+    },
+    "description": "Swarm DAO Model Context Protocol server \u2014 exposes DAO governance tools to any MCP-compatible host (Copilot, Claude, Codex, \u2026)",
+    "devDependencies": {
+     "@types/bun": "latest",
+     "@types/node": "^22.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@guyghost%2fswarm-dao-mcp@0.8.3"
+     },
+     "fileCount": 18,
+     "integrity": "sha512-xgtCensWdGeU+RuEe2Ly4ucehLz+8RUlr/2lNfZlkIYY6tuU+OfDCObaYLQkCVYokQSZ+H6+xSBfP+Kj5UqStA==",
+     "shasum": "f60b354e28f817aa18a777c1caf10b01a2d29e76",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD9kmf9LgahJByhL0E7qNF37blk/dTerdoF7xlk/95V4gIgUXPgXWqNBtFV6U3fSppYGwvwq11vgtbddiS4M8EHUcE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@guyghost/swarm-dao-mcp/-/swarm-dao-mcp-0.8.3.tgz",
+     "unpackedSize": 65889
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d39d0a9725d0b118ef2ebd6af926bfcc93033941",
+    "homepage": "https://github.com/guyghost/swarm-dao#readme",
+    "keywords": [
+     "swarm-dao",
+     "mcp",
+     "model-context-protocol",
+     "dao",
+     "governance",
+     "multi-agent",
+     "deliberation",
+     "ai-agents",
+     "quality-gates",
+     "copilot",
+     "claude",
+     "codex"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:0aedf3b8b40e]",
+      "name": "guyghost"
+     }
+    ],
+    "name": "@guyghost/swarm-dao-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/guyghost/swarm-dao.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "lint": "biome check .",
+     "prepublishOnly": "bun run build",
+     "test": "bun test",
+     "typecheck": "tsc --noEmit"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.3"
+   }
+  }
+ },
+ "name": "@guyghost/swarm-dao-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@guyghost%2Fswarm-dao-mcp"
+}

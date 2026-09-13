@@ -1,0 +1,2910 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "4.44.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:bb1ae8b9da8f]",
+    "name": "klausfaerber"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "4.13.0",
+   "4.14.0",
+   "4.14.1",
+   "4.15.0",
+   "4.16.1",
+   "4.17.0",
+   "4.18.0",
+   "4.19.0",
+   "4.20.0",
+   "4.21.0",
+   "4.22.0",
+   "4.23.0",
+   "4.24.0",
+   "4.25.0",
+   "4.26.0",
+   "4.27.0",
+   "4.28.0",
+   "4.29.0",
+   "4.30.0",
+   "4.32.1",
+   "4.33.0",
+   "4.35.0",
+   "4.39.0",
+   "4.40.0",
+   "4.41.0",
+   "4.42.0",
+   "4.43.0",
+   "4.43.1",
+   "4.44.0",
+   "4.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@dev-flow-tech/mcp-server",
+  "_rev": "30-6b524f797b569274c26f3b6014c8d12f",
+  "bugs": {
+   "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+  },
+  "description": "MCP Server for DevFlow - Claude Code Integration",
+  "dist-tags": {
+   "latest": "4.44.0"
+  },
+  "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+  "keywords": [
+   "devflow",
+   "mcp",
+   "claude-code",
+   "ai-development"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:bb1ae8b9da8f]",
+    "name": "klausfaerber"
+   }
+  ],
+  "name": "@dev-flow-tech/mcp-server",
+  "readme": "# DevFlow MCP Server\n\n[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\n\nMCP server for integrating [DevFlow](https://dev-flow.tech) with AI code assistants. Enables structured development workflows with enforced planning, task tracking, and code review gates.\n\n## What is DevFlow?\n\nDevFlow brings structure to AI-assisted development. Instead of letting AI agents write code without oversight, DevFlow enforces a workflow:\n\n```\nidea -> planning -> approval -> ready -> in_progress -> review -> done\n```\n\nEvery feature or bugfix goes through planning, gets approved, is tracked with tasks, and must pass review before completion. The MCP server connects your AI coding assistant to DevFlow, making this workflow seamless.\n\n## Installation\n\n### As a Claude Code Plugin (recommended)\n\nDevFlow is listed in the official Claude Code community marketplace. Install in one line:\n\n```bash\n/plugin marketplace add anthropics/claude-plugins-community\n/plugin install devflow\n```\n\nThis installs everything in one shot: MCP server (auto-registered via `mcpServers` in the plugin manifest), enforcement hooks, state-specific skills, and slash commands (`/devflow-start`, `/devflow-status`, `/devflow-next`, `/devflow-tasks`, `/devflow-create`, `/devflow-list`, `/devflow-review`). No separate MCP setup step needed.\n\n> **Since 4.23.0:** the MCP server no longer modifies your `CLAUDE.md`. The plugin's skills, hooks, and MCP tool responses cover the rules that the old `<!-- DEVFLOW-RULES-START -->` block used to inject. If you have an existing block from a pre-4.23 install and want it cleaned up, run `npx @dev-flow-tech/mcp-server uninstall --client claude` once.\n\n> **Since 4.26.0 (DF-339):** Two new auto-review skills fire when transitioning state. `devflow-plan-critic` reminds at `planning \u2192 approval` to deep-review the plan against 7 dimensions. `devflow-code-critic` does the same at `in_progress \u2192 review` for the implementation. Both support iterative loop (max 3), trivial-flow-skip, and auto-approve-gate based on `project_configs.allow_agent_self_approval`.\n\n> **Since 4.30.0 (DF-374/DF-377):** The DevFlow backend is the primary gate for state-transitions (unified `flowGate` service with conditions like `plan-required`, `tasks-required`, `agent-summary`, `testing-instructions`, `knowledge-gaps-resolved`, `pr-state-consistent`, `adr-compliance-clean`). The plugin's strictness checks are now informational warnings \u2014 the backend's `409 gate.failures[]` response is the source of truth. This makes Multi-Client setups (Claude Code, Codex, Cursor, Gemini) consistent \u2014 the gate behavior is the same regardless of which client connects.\n\nUpdates: `/plugin update devflow`.\n\n### Manual Setup (fallback)\n\nIf you'd rather skip the plugin and wire the MCP server directly:\n\n#### Claude Code\n\n```bash\nnpx github:KlausFreiberufler/devflow-mcp setup\n```\n\n#### Cursor\n\n```bash\nnpx github:KlausFreiberufler/devflow-mcp setup --client cursor\n```\n\n#### Gemini CLI\n\n```bash\nnpx github:KlausFreiberufler/devflow-mcp setup --client gemini\n```\n\n#### Windsurf\n\n```bash\nnpx github:KlausFreiberufler/devflow-mcp setup --client windsurf\n```\n\n**Restart your AI client after setup.**\n\n### Server-Split (since DF-334)\n\nFor clients with per-server tool-caps (e.g. Cursor 40-tool/server cap), DevFlow ships **three** entry-points:\n\n| Bin | Domain | Tool-Count |\n|---|---|---|\n| `devflow-mcp` | combined (default, BC) | ~65 |\n| `devflow-mcp-flows` | workflow (flow_*, task_*, agent_session_*, devflow_*, release_*) | \u226440 |\n| `devflow-mcp-wiki` | knowledge (adr_*, wiki_*, doc_page_*, knowledge_*, planning_context) | \u226440 |\n\nCursor (or any cap'd client) registers BOTH split-bins to get full tool-coverage:\n\n```json\n{\n  \"mcpServers\": {\n    \"devflow-flows\": { \"command\": \"npx\", \"args\": [\"-y\", \"@dev-flow-tech/mcp-server\", \"devflow-mcp-flows\"] },\n    \"devflow-wiki\":  { \"command\": \"npx\", \"args\": [\"-y\", \"@dev-flow-tech/mcp-server\", \"devflow-mcp-wiki\"]  }\n  }\n}\n```\n\nClaude Code uses the combined `devflow-mcp` bin (no cap, simpler config).\n\n## Getting Started\n\n1. Run `devflow_status()` to check the connection\n2. The browser opens for authentication on first use\n3. Link your project \u2014 a `.devflow.json` file is created in your project directory\n4. Start working: `flow_list()` to see available flows, or `flow_create()` to create one\n5. Initialize your session: `devflow_init({ flowId: \"...\" })`\n\n## Compatible Clients\n\n| Client | MCP Support | Status |\n|--------|-------------|--------|\n| [Claude Code](https://claude.ai/code) | Native | Fully supported |\n| [Cursor](https://cursor.sh) | MCP | Supported |\n| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | MCP | Supported |\n| [Windsurf](https://codeium.com/windsurf) | MCP | Supported |\n\n## Flow States\n\n| State | Description |\n|-------|-------------|\n| `idea` | New idea, no plan yet |\n| `planning` | Agent creates implementation plan |\n| `approval` | User approves the plan (wait state) |\n| `ready` | Plan approved, ready for implementation |\n| `in_progress` | Implementation in progress |\n| `review` | User reviews the implementation (wait state) |\n| `done` | Completed |\n\n### Required Fields for State Transitions\n\n| Transition | Required Fields |\n|------------|----------------|\n| -> `approval` | `implementationPlan` |\n| -> `review` | `agentSummary`, `testingInstructions` |\n\n## Available MCP Tools\n\n### Session & Flows\n\n| Tool | Description |\n|------|-------------|\n| `devflow_init` | **Required before all other tools.** Starts a flow session |\n| `devflow_status` | Show connection status, link/unlink projects |\n| `flow_list` | List flows (filtered by project) |\n| `flow_get` | Get flow details including plan and audit trail |\n| `flow_create` | Create a new flow |\n| `flow_update` | Update state, plan, agent messages |\n| `flow_get_feedback` | Get user feedback on plan or code |\n\n### Tasks\n\n| Tool | Description |\n|------|-------------|\n| `task_list` | List tasks of a flow |\n| `task_create` | Create a new task |\n| `task_update` | Update task or mark as completed |\n\n### Agent Sessions\n\n| Tool | Description |\n|------|-------------|\n| `agent_session_create` | Create agent session (tracking) |\n| `agent_session_log` | Log progress to a session |\n| `agent_session_complete` | Complete an agent session |\n| `agent_session_list` | List sessions of a flow |\n\n### Documentation & Search\n\n| Tool | Description |\n|------|-------------|\n| `doc_page_list` | List documentation pages |\n| `doc_page_get` | Get a documentation page |\n| `doc_page_create` | Create a documentation page |\n| `doc_page_update` | Update a documentation page |\n| `project_guidelines_get` | Get project guidelines |\n| `search` | Search flows, tasks, and projects |\n\n### Releases\n\n| Tool | Description |\n|------|-------------|\n| `release_list` | List releases |\n| `release_get` | Get release details |\n| `release_create` | Create a new release |\n| `release_update` | Update release status/details |\n\n### Knowledge \u2014 Wiki & ADRs (v4.5.0)\n\n| Tool | Description |\n|------|-------------|\n| `wiki_search` | Full-text search over flows, doc-pages, reviews, releases |\n| `wiki_get_page` | Resolve a slug / title / display-id to a concrete asset + backlinks |\n| `wiki_list_by_type` | List assets of a specific document-type (adr, pattern, runbook, \u2026) |\n| `wiki_backlinks` | Reverse lookup: all assets that link to X |\n| `wiki_graph_neighbors` | Graph (nodes + edges) of the project or a subset |\n| `wiki_get_flow_context` | A flow's outgoing + incoming wiki links |\n| `wiki_get_project_context` | Project knowledge graph summary |\n| `adr_list` | List ADRs (optional status filter) |\n| `adr_get` | ADR detail with supersedes chain |\n| `adr_accept` | Accept an ADR from a flow-attachment |\n| `adr_update_status` | Move ADR through proposed \u2192 accepted \u2192 deprecated / superseded |\n\n### Knowledge Drafts (v4.6.0)\n\n| Tool | Description |\n|------|-------------|\n| `knowledge_backfill_request` | Get done-flows + existing ADRs + instructions \u2014 you classify and call `knowledge_draft_create` for each draft |\n| `knowledge_draft_create` | Create a draft (dedup-aware: same (project, type, title) merges `sourceFlowIds`) |\n| `knowledge_draft_list` | List drafts (optional status filter) |\n| `knowledge_draft_accept` | Accept a draft (creates the ADR / doc-page) |\n| `knowledge_draft_reject` | Reject a draft with optional reviewer note |\n\n### Knowledge Harvest / Check (v4.7.0)\n\n| Tool | Description |\n|------|-------------|\n| `knowledge_harvest` | Per-flow harvest \u2014 returns a single done-flow + context + instructions for draft proposal |\n| `knowledge_check_flow` | Flow analysis \u2014 drift (against existing ADRs) + missing-knowledge suggestions |\n\n### Code Drift (v4.9.0)\n\n| Tool | Description |\n|------|-------------|\n| `knowledge_check_drift` | Returns ADR content + its `affects_paths` + instructions. You use your own Glob/Read/Grep to compare claims vs code and report drift |\n\n## MCP Resources (v4.8.0)\n\nURI-addressable project assets for reading via `ReadResource`.\n\n| URI | Description |\n|-----|-------------|\n| `devflow://project/{id}/adr/{number}` | ADR content as markdown |\n| `devflow://project/{id}/flow/{displayId}` | Flow with plan + agent summary |\n| `devflow://project/{id}/graph` | Project knowledge-graph summary |\n| `devflow://project/{id}/search?q=...` | FTS search formatted as markdown |\n\n## MCP Prompts (v4.8.0)\n\nGuided one-shot workflows \u2014 each auto-assembles relevant project context.\n\n| Prompt | Args | Purpose |\n|--------|------|---------|\n| `ask_project` | `query` | Answer a free-form question; loads ADRs + recent done-flows as context |\n| `plan_with_project_knowledge` | `flowId` | Pre-build a planning prompt with relevant ADRs + related flows |\n| `review_with_drift_check` | `flowId` | Auto-run knowledge-check-prepare and produce a review prompt |\n\n## Pipeline Integration\n\nProjects with pipeline configuration get extended features:\n\n### Pipeline Model\n\nEach pipeline step has four dimensions:\n\n| Field | Description | Values |\n|-------|-------------|--------|\n| `actor` | Who works on this step? | `human`, `agent`, `both`, `auto`, `skip` |\n| `transitionPolicy` | Who can complete the step? | `human_only`, `agent_only`, `human_or_agent`, `auto` |\n| `kind` | Semantic step type | `work`, `review`, `handoff`, `terminal` |\n| `skippable` | Can the step be skipped? | `true`, `false` |\n\n### Gate Handling\n\nGates are controlled via `transitionPolicy`:\n- `human_only` \u2014 Agent is blocked (403), human must act in the UI\n- `agent_only` \u2014 Only agents can proceed\n- `human_or_agent` \u2014 Both can complete the step\n- `auto` \u2014 System transition, no actor needed\n\n## Configuration\n\n### Environment Variables\n\n| Variable | Description | Default |\n|----------|-------------|---------|\n| `DEVFLOW_URL` | Backend URL | `https://api.app.dev-flow.tech` |\n| `DEVFLOW_TOKEN` | Auth token (skips browser auth) | - |\n| `DEVFLOW_PROJECT_ID` | Project scoping | from `.devflow.json` |\n\n### Manual Configuration\n\nAdd to your client's MCP configuration:\n\n```json\n{\n  \"mcpServers\": {\n    \"devflow\": {\n      \"command\": \"node\",\n      \"args\": [\"/path/to/devflow-mcp/dist/index.js\"],\n      \"env\": {\n        \"DEVFLOW_URL\": \"https://api.app.dev-flow.tech\"\n      }\n    }\n  }\n}\n```\n\n## Development\n\nSee [CONTRIBUTING.md](CONTRIBUTING.md) for setup and development workflow.\n\n## License\n\n[MIT](LICENSE) - DevFlow (dev-flow.tech)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+  },
+  "time": {
+   "4.13.0": "2026-04-24T13:57:45.194Z",
+   "4.14.0": "2026-04-24T18:17:19.169Z",
+   "4.14.1": "2026-04-27T11:33:22.059Z",
+   "4.15.0": "2026-04-27T17:49:27.243Z",
+   "4.16.1": "2026-04-29T08:00:57.560Z",
+   "4.17.0": "2026-05-01T13:26:59.429Z",
+   "4.18.0": "2026-05-01T14:30:55.201Z",
+   "4.19.0": "2026-05-01T14:41:49.307Z",
+   "4.20.0": "2026-05-02T08:16:44.326Z",
+   "4.21.0": "2026-05-05T10:48:22.331Z",
+   "4.22.0": "2026-05-05T11:45:45.577Z",
+   "4.23.0": "2026-05-05T15:27:19.174Z",
+   "4.24.0": "2026-05-06T08:14:58.205Z",
+   "4.25.0": "2026-05-06T09:09:38.546Z",
+   "4.26.0": "2026-05-06T20:40:03.100Z",
+   "4.27.0": "2026-05-07T13:52:51.160Z",
+   "4.28.0": "2026-05-07T14:40:12.591Z",
+   "4.29.0": "2026-05-09T12:07:35.113Z",
+   "4.30.0": "2026-05-11T06:43:51.212Z",
+   "4.32.1": "2026-05-19T10:54:10.079Z",
+   "4.33.0": "2026-05-21T11:26:26.678Z",
+   "4.35.0": "2026-05-21T21:37:33.395Z",
+   "4.39.0": "2026-07-05T15:08:45.671Z",
+   "4.40.0": "2026-07-05T15:39:44.374Z",
+   "4.41.0": "2026-07-05T16:25:28.984Z",
+   "4.42.0": "2026-07-09T16:44:06.529Z",
+   "4.43.0": "2026-07-28T07:47:21.477Z",
+   "4.43.1": "2026-08-17T15:48:18.565Z",
+   "4.44.0": "2026-08-29T20:55:55.494Z",
+   "4.9.0": "2026-04-22T21:25:14.580Z",
+   "created": "2026-04-22T21:25:14.272Z",
+   "modified": "2026-08-29T20:55:55.695Z"
+  },
+  "versions": {
+   "4.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.13.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.13.0_1777039065033_0.5328633384181576"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 211,
+     "integrity": "sha512-MYr9ndmFpcB3Ng6Fix/Tm4WcU+5THpbaWitjl9VqH6DTxq1da/ZvjOMaLAF3SOHkHkeJn817JXhlTl4yPDOZgg==",
+     "shasum": "56c3b06130ac3a0942cd08ad812dfa4f00e8283d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEvHWnA+SgylgMtkAWi2fjlnZHNmpsI+u9rsq3Lb1l/tAiAArKcCx7V3hHHyuEPgx6TazqnVxIODgc1FdUN3JE+Hnw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.13.0.tgz",
+     "unpackedSize": 618542
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a8dc73690924cc0093220239cb5138d951c1cf09",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:devflow": "bash scripts/build-package.sh",
+     "publish:npm": "npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.13.0"
+   },
+   "4.14.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.14.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.14.0_1777054638998_0.9806341422737315"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 215,
+     "integrity": "sha512-EYUdiyLp9jMD5B9YlX8kVcvdqGRzC0EUpxr3RxU1Ymaybz06XPaxvxityaMa3MQa0e6OwS57OMJ3Ryn30vLDIw==",
+     "shasum": "bce9a8df7506f781f92ec3da1ee6a03d8e06c9ff",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDpmEDzJZmNe/0hWHSIeCHZtN7Ly1wPBoX2KxcF2oE4oAIhAM8MWV1qAMJzvr3qxMOcuGgvgL1UTJ2+pXPenQ3j8Tti"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.14.0.tgz",
+     "unpackedSize": 637065
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "0ba7859763eb971d1ec0051401c1470a7fe4df05",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:devflow": "bash scripts/build-package.sh",
+     "publish:npm": "npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.14.0"
+   },
+   "4.14.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.14.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.14.1_1777289601858_0.22074261689329133"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 215,
+     "integrity": "sha512-wUkQ6Opjegg6nNhn0rdGBa2Fd6BfRdc8v7yEi343KAsitSGHE8LFj7RRiqa0T8TXvizPLPoO49KcWZnayERBOA==",
+     "shasum": "430a92ae30e96d1a7c8d2daf47d5d224e9e234f2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCxnRtTlqdBwWm+Aw9rymkMqP3DvK9pk1BCsZF6+jpigwIgcWWF7flkudwTJyQrzwNNfDIpRlhiFh5Okqzcqzpk1Ak="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.14.1.tgz",
+     "unpackedSize": 637344
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "e9072f42c03e88a99efe899a4ef05074d20f4ab9",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.14.1"
+   },
+   "4.15.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.15.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.15.0_1777312167015_0.5868510482211404"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 56,
+     "integrity": "sha512-vXiMFUtwNgNHTnue+Jn+v9EIzPSdkgph+By+tH41FJ07mnmqetN0sXuPgM+Ceb0kcBS1XyCN8Iqp+BG1GK7sJg==",
+     "shasum": "93816ad59728a6252e90800817d1df4241fe4eb0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFBvYRY3i0xTz2ySA+sHriw+VzFSz67/c4l2Rsi8IfrqAiAyuE+R0L5fTSLj0efuynSSdeG1UFW4TjoBb5ivwBGwqA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.15.0.tgz",
+     "unpackedSize": 998111
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3b1eae3b011acc2aa579166bad514624a24e664b",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.15.0"
+   },
+   "4.16.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.16.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.16.1_1777449657391_0.968358838190214"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-Ig+5sy3zzzijGy1tgevChvxsmlf7vjvmWK36HKxWhMyOFvjobpIxRqyzXrAMxayuB60XcdyxA56ssk5qgCN62A==",
+     "shasum": "287befaaf698b6fc4888f441cb394e4f5a3b845c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCoNWFidvvBZ4aEcLPMB6Dr4Z8Zf1gREBDhkjtcC19FmQIgBmXh1NbekohxaaqGpIOpnlL7JKZHynzibwrksNFn7+s="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.16.1.tgz",
+     "unpackedSize": 1002747
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "064dc33b1f7702ce35d78b838ca1677ed6c83bd3",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.16.1"
+   },
+   "4.17.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.17.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.17.0_1777642019271_0.21715190011021002"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-yfjZ74tlZNBFTU0dOwfNWz/BImwanl5Eg7+SmIGJucmO+a0DeTDEJ0hbW5Z0YIMEpiADEpZB89Py99ccndDfvw==",
+     "shasum": "1abb8705c125888ff8787f407eb96ffb5e1dfe8e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGOl/z+NKIZnYwvtiZ0oqwOU87n5M5FyiwM94NBGgxIfAiEA6cCszOhZWDdEV/KWA2rvaXLpCUZe35Dh0FvQApyRaDg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.17.0.tgz",
+     "unpackedSize": 1010701
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "11ce6211ac2002aafbab650517d88a048be4134a",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.17.0"
+   },
+   "4.18.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.18.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.18.0_1777645854957_0.2798307034595495"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-7tDpCHUHEKbB70CRSFWi0rDyywjBMP7IP7AIAZBM6KGKd2NttW7yaRJcF6m0Z2npYfso5OCDmQZiqyJknM/2Gw==",
+     "shasum": "3e27b0ecb4e0169a70255c8cbdb67156860fb8ee",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDEldw4xDzgDQpzYlQXpTQeVstaaA1hIXUZ3iuOlvYASwIhAKfLJ3Xfyapv8uISkOPu+6B9Uf74yDioJewMaSY6i9pq"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.18.0.tgz",
+     "unpackedSize": 1012374
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "11ce6211ac2002aafbab650517d88a048be4134a",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.18.0"
+   },
+   "4.19.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.19.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.19.0_1777646509093_0.6649119947115063"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-vp2w2CIoDMrX0KHgijhrhSFTO3unoiNpPhEB9EPuhk1qRiF1lPy6Q3tDIVGQJFZkAm99iD7beZ3qOnmedQv2bw==",
+     "shasum": "be37baa13a241f3cb0cb4760d0cf5af3740ea0cd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAhJ4M+Od60jEHmAsR2yBOBQ07KIggN/brKIghAiwuEdAiEAjtbd8kTio+Rtu56UJNGDp3GXSrDQHj7sUG6w6nBHm5c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.19.0.tgz",
+     "unpackedSize": 1014740
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9836797084242a38a4bcc554a709f96ef9b97afc",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.19.0"
+   },
+   "4.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.20.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.20.0_1777709804143_0.4230764277599808"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-WnDsC8710Vf7y+G/mL6FLbjTQHmy/83BGG5Kw1vlzOS5FqIOrNhVkBBZkqKqi2NslmIHK27X52aBeNxtKwPEBA==",
+     "shasum": "7048e707f8d633bed6d86d143119830b4e7f0839",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDQFVRoMhqcSa6P/e5pEz0vjMdyogktJSOtbERbNE2dNgIgN3VQU3pckFHkyDEjjVAn5+sX9C2FcM8EGN4U1e/9JyM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.20.0.tgz",
+     "unpackedSize": 1016283
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9761c958f4884c2b2f53dbb2e3b5bf3931383243",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.20.0"
+   },
+   "4.21.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.21.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.21.0_1777978102175_0.11586318600468926"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-wpczkToTDi/AUIyTQ5eSu7AkBaJ06wkSVCtlJbfAbf/03Fgp216mbCpyssXfqePXKSTEOCsJ/RF1SrH8lSu2yw==",
+     "shasum": "d216b1f5c25e69dcf0ccc15bcc1d4c166a12ba1e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC8hbxBpLUaaX/eFmaVm8NZJwC9BFzI8sU+VLXabR8wAgIhAMPUZnd9IYW4OyRlQwuBSwbVr6Nye8aKAHvWiImR19yO"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.21.0.tgz",
+     "unpackedSize": 1016314
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "69d70cd8a78a9a944c60579a6588328bfebccbf6",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.21.0"
+   },
+   "4.22.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.22.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.22.0_1777981545389_0.9303143038947632"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-RQxXEcIt4YpWicVK1a5bOP7VpkBWDQzQVG4yJdjV08DX0gqu7xf1l4L6614/P1B9u8dMuPql/XKz/zqumpgs6Q==",
+     "shasum": "1a543820f568e4282590ee64bbef542dcc28b723",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQD3WXberYQN3GDKhis4LcwOWrSnyLwLvlr9NXEthf3DbAIgIVKr2mzN/L1/SAgWBiS4xXpJDS25w2xV/LNrpxSWRYA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.22.0.tgz",
+     "unpackedSize": 1016314
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "086759efbbe27243eb0322662624c8c5c18903a2",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.22.0"
+   },
+   "4.23.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.23.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.23.0_1777994838988_0.6509632208062346"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 55,
+     "integrity": "sha512-h9f+7/uGYGv177aKo5WSAa+fMe2LQko+S6r5d3dkoGHtvSfRfUrVRFk9YVqFpAD/qgxsV1RfhxHYbYEeM50pKg==",
+     "shasum": "a8aa10ad51cf2834cf29dc954b6f7585e60f38db",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFRVnU1kSxwu3ml3edvxaepvj6aC19pvnHcBEtGTw8EGAiEApYqaJHkLrYfn5b1Qc09bxSy6Agmk7YCmWZruJoo5adc="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.23.0.tgz",
+     "unpackedSize": 1003024
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "8272899ca1ee3e00e636ab862770b7d5a62bdd68",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.23.0"
+   },
+   "4.24.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.24.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.24.0_1778055298013_0.5695682480229349"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 55,
+     "integrity": "sha512-Y57RXFuNMDhXnX3e53mZXGb/AsBAWnb1/vG0GKRXyyVQ1cTWL/TkVGGrqMB93Zf6aT8aqMTFVNyUkekBC9UR5Q==",
+     "shasum": "029a1c3141e8edf523b925a3359f264420e174bc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBQhdPdvM1O9FfsJRrM0PLR0dhRycgDgnw1pPBiC7FXOAiEAvK9e4MiizV7WFX5ZgonL+5G7xyO4CWcTGx9gZ1cbkso="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.24.0.tgz",
+     "unpackedSize": 1004326
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "c5fe1cc2a1f520fa23808306e9220b82144f2560",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.24.0"
+   },
+   "4.25.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.25.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.25.0_1778058578331_0.4978225030061383"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 55,
+     "integrity": "sha512-912Mu1PLL8gJXLCIptoV6w5a0KO63LLvIluOpOmA/YfQDYJgUliInRAIRSs9nEqyNBcFHl49nroYwaP+ibFMAg==",
+     "shasum": "320939beb61d2e0dfad13f3a89f9a00379c72daa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCs1094D7CwCFkoEwA34qpKQSdbBKfgmAudgf3+7mHRqAIhAJNPiI0jON4VpzN55RDW2C0MdX/tDDGb30uBwQiNvE06"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.25.0.tgz",
+     "unpackedSize": 1007732
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "16472ad9800206359bcc18650085ed9efdd0ec9a",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.25.0"
+   },
+   "4.26.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.26.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.26.0_1778100002886_0.7270354261964158"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 110,
+     "integrity": "sha512-M+AJNvSIROtpjeI/5GPZzjYhfpiJ9s7Z7ALeRwoh16Je3mhtRw89lb0d/4mwugpNhR2py94Ewy9n3tIDN/flTw==",
+     "shasum": "4169e0b9dae1faaa3283fdf1ead95bd3bf99003b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFiviN08jOBXBp5y3e4ofuT+7QTfM/pZ4WpOnChCowwjAiEA9hffsT1fmTRRzxZLomNvi/BqjClCTMjKmimeYWc+XdU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.26.0.tgz",
+     "unpackedSize": 2850454
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "420a1e52cc56aa3f86e5dc6080cdeecbc51ed9f4",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.26.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.27.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.27.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.27.0_1778161970941_0.4975787428445819"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 110,
+     "integrity": "sha512-KbEb5goBlml2wfX5hDLAGjyVglUiU3fUf6d3HkklDDAJm6mGoHYK4MUIcjAn/aRTI6yBVrSuNGLT36E8YTiMGA==",
+     "shasum": "50ed6d287867d432fedf15cb15bbc3d262f04ebf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDDtBs7cIJuFEUL86/L87jxFB93yRsQ3ThwcOpdldvdxAIhAPYtdyhuiTJxkunfTSnvf/hM2Ds/I9/MZ0qJ31phlpR3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.27.0.tgz",
+     "unpackedSize": 2851446
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "622ce676ee126db1d3a32e3687388b96c53b3bda",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.27.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.28.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.28.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.28.0_1778164812375_0.5026489151298499"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 112,
+     "integrity": "sha512-FYE1o/8W54chpuWBwsutpc7yUHlNMJbu5dxg7wEyIZR8UiHzkzp5igCH505zVlImVIJ9BAMLLnYqdEToFcFXxQ==",
+     "shasum": "68649b4f75c662d306eff5b5d7c412a996ed4750",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDEThBRLNj7V/D8WBuglslbN+HjS+ucWngDypzXS7hmAAiEAsn9i0gWy5ERHW89FxWWyLLo5u6xWDVtvRuMjB0kvCR4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.28.0.tgz",
+     "unpackedSize": 2857413
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a4be10ea2e5afe92a5067c91ad085e4bb0889051",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.28.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.29.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.29.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.29.0_1778328454852_0.7433757453531611"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 113,
+     "integrity": "sha512-vIcoKK6s14mqEFlioWux6vOaWEjzIZWQgaw7o5vl8I1QcDb4/wXQWKENYMKWrakRh+vecgiXUpKD1HoqwLnuVw==",
+     "shasum": "24d1e015efe1aa143176fe4129eaf4e529fb9ce0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEhhTIYgHO7+INbpOcrgDNGSjhFXumI4b2y+NKDAUn9RAiEAz4t1C03+3P1CaJO3Sfsv0dQ9r8odjRm3oUrvlz9xWh4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.29.0.tgz",
+     "unpackedSize": 2873481
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "d8ed8100db3f46e6cd4b14184239ce279f8d3f68",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.29.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.30.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.30.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.30.0_1778481831040_0.06077067816382353"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 113,
+     "integrity": "sha512-yt+szkvtawHuPenSmNUuq6ofucDJ5vdpgOhV0KV7iHTqQhSVPx/6p/hNBsTPoQloxMynxo6OBMsE72/XZKXcbg==",
+     "shasum": "5d2831b91d5decbd75741a6bcad92a0009011dfb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEORDu4axaMtnt3gzQNCLE0B4PQ/m9wlu7LYgVbE81rCAiEA9DYs9d4njh5m9cXdDJ6yAnhYpxk5C97p7xwfuq3uIUI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.30.0.tgz",
+     "unpackedSize": 2872871
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "560506b6d8296ae79cbd912392aa99772b079135",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.30.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.32.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.32.1",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.32.1_1779188049846_0.02832586960583794"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 113,
+     "integrity": "sha512-GTkvCBCT4dlYQBC5rx17xNXWWwwUIr7rABADkCfYIGjd0FL6B4jtwPg/2LgzFczhxKSl2NbDejLf/IgQk6WFBg==",
+     "shasum": "7e9b82fcb27139600b4dacaf116de8e110ed80c7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCLoccIEudGEfvayFwm0hQ4bjs+sJ4n78dQ3qKOESJWdgIhAOiL395ByaZtlISw747z2X2bqr0+kfmqdoZrk3gUcxLz"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.32.1.tgz",
+     "unpackedSize": 2879755
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "a553eb0181d8ae487c0e596d5c8f4c223f51debd",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.32.1",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.33.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.33.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.33.0_1779362786441_0.1380979630691841"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 113,
+     "integrity": "sha512-df/LKYFuPYyz8h25fCbE6E8efsNJc8wLoHNp2Fhs4e+7XyjSFn+jUF4LTV0kMZmnuMuYOqQGP9xU/Yw41L/T+A==",
+     "shasum": "4ecff91492e8c0be3eb42d08f295f5c6d6e1e67f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFgG8wrIi6qLobK8g4vuHo8bbpTgPCu39d1nzXKjU62sAiAbtsEBf+8xg5JCmcHN3jaLe1n+xsqbXurerXX5y9ZDVg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.33.0.tgz",
+     "unpackedSize": 2880575
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "2b5b20cc61a43645eb173f7a2a92e98af59c5a46",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.33.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.35.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.35.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.35.0_1779399453201_0.4096445915063527"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 115,
+     "integrity": "sha512-l8BmMxhxlRYBL6JX6XDlnGVll/Q8NpoXH77F/ChAjf425abtJe5u8dTcfF5plUYABvK6zP+zoybHHXgqmIZ1Nw==",
+     "shasum": "e7234e45f67cea77dd418f5dc73cac1d68c62ab0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFge6SL08FyigMQEA3uKGtS8OjD2JTFDUMHPerDcc7UPAiEAu8cJ2aIHZTUwI2QR5t1uhoBwe0X4q3WUnTFvPD7zoBA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.35.0.tgz",
+     "unpackedSize": 2895952
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "ebc649ff8e98592b1a58b6cd65d1aab3c318a63a",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.35.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.39.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.39.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.39.0_1783264125435_0.9986792597548184"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-LOSgSJPuXOHrWekk2tZQcfiZJmYmdekdmd/ucIGReDpMxbYWlxkmKXyREVXsGBP+9xfsdpQzRDweyBUjlpstMA==",
+     "shasum": "b439c979644337eaa0bf59c4b8eb983303790f87",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDQGBikqUebu2QOsi1n42gAin9ui7gV11NHrZMoSQETggIgOvHOuntjy/NOCGQQnxxNMBDCIeZQYDWFglCeqQGy4lw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.39.0.tgz",
+     "unpackedSize": 2920701
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "13964bec19edba91335c2dfb34ebdd51e12914b6",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.39.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.40.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.40.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.40.0_1783265984204_0.006213234077703689"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-Lzytcxpb26TV+d0to9aK2H43u//3Nzhgf9Z0y/tjH+b6r6+pIiIh0sXYhAa6clN6QXYTtgtjTapAzINxQl6sOg==",
+     "shasum": "9026a4fecb3cdba3cf07c6225e51f3cc97cd74dd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHG1sCqIO2N3YL/8+H2HdNW3theIR/dvOmoL13YapppaAiBrm0vU458zuHlmyPlBLuQ+YiNlwtoJe5O74X7aTWLEHQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.40.0.tgz",
+     "unpackedSize": 2924326
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "645155a1f47e32e881e0655b2ca34db82a4b6aba",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.40.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.41.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.41.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.41.0_1783268728826_0.7231442186476071"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-H0mW3gMu27P5iOKlmPWCrdiSUczgEqPhtxYHkjrCTdyhtiahS2flJU0cQs3KvxwCK0rN+kqOTOCxKE6PEMRMJw==",
+     "shasum": "ac6face0b680e6af4ff02311f9a86079644a72fc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIGO35IqoW/D4wy26Hqjzqx1hF6GjxIlvsUv2iHi63ZCIAiA3xOm2NzXtsxHhe2YSLs7AS0yElRungHHqKPG9Au43zQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.41.0.tgz",
+     "unpackedSize": 2927814
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "5df1cc7232afcb170756241ddf2804c08a0ad999",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.41.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.42.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.42.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.42.0_1783615446252_0.7490575396166179"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-FP9DlBxxXWXubW6y2TXmoVSRW/9yj2aJemE7iID8l0pPWmLifQxn3nApWnFfa5an5x2zorVixHPm1NEndnuR8A==",
+     "shasum": "93dcf07c92e5fcb3de4bb0a817e6ac64c0b111dd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDyih2DnVY4FnXXc5qVUuvaBricWFV7vzMS4xttBFXYHQIge57GIS2GGxJ42RcC/Z1iKWQq1AehRG1Vlz+990GbY5I="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.42.0.tgz",
+     "unpackedSize": 2929085
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "ad348d5300accf59e18e93666267081fbc0d2949",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.42.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.43.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.43.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.43.0_1785224841321_0.14960626954150813"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-g5stz6l/BrSO3vzFPhrlBMmXzpK4Lu3EAUTWhwOF/wOyX3iQjJRq9/0lbDc65F4AD9/K4phqo20aQ8AOQZvXng==",
+     "shasum": "e2b82eb09419772c6116bcd9c37371ef8d63430d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICFRx7zRhJGd3UKZf43IEd7GCsPsbw4shGa0ckz28iAuAiEA2TpdwXAT7q6OPYri5w3XX7auNzKh7brp/9WhhSlzun8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.43.0.tgz",
+     "unpackedSize": 2932231
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "7e6ec6e9e85eccb26878ad5cc066d05df0206401",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.43.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.43.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.43.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.43.1_1786981698370_0.43950648840640727"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-rUEGscRaF9IFU7GPhnkV+9cFtWREMn296QOLBtSbxBGNBKf79MVNyrvzlSwTPUiNN51qmvwJBStQTVNWrNxJhg==",
+     "shasum": "3209fb136f3c09f83312a6fcc5451b5607a299e0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEC3nH2ZghqCFMKgpxh3YMzpva2adnJu8voKZx9BHckpAiABJHKbwe7HjiMLx4F6ijX2Gthw27SVz7CYXBA+8Xa4ww=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.43.1.tgz",
+     "unpackedSize": 2943108
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "1df2555ad07f168bc1f2545fe60ede540a7d2795",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.43.1",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.44.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.44.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.44.0_1788036955329_0.7321074621880772"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-flows": "dist/index-flows.js",
+     "devflow-mcp-setup": "dist/setup/setup.js",
+     "devflow-mcp-wiki": "dist/index-wiki.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "esbuild": "^0.28.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 116,
+     "integrity": "sha512-kyd0NbkTvzmr/T/4SJnvZLw7i8JTOuo1s8jSMyoL20fmrNk543Ffr5cCLg65MFYSskZj3WSdG7T9u2s6Q9oTPw==",
+     "shasum": "39a24fda993a58689730c960763514b894062e09",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEO7fqNSgXbSJGq2KUwdlBs5y1FHymuRQBvaLSsouZrgAiEAtdQm9OD7f1C9T/Vpv08yv4fCi4c0WsWKihoirsH72b0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.44.0.tgz",
+     "unpackedSize": 2949057
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "d78e9c62e462313fd3ddbaa9e3f94fd7e18f8982",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "node scripts/build.js",
+     "build:codex-plugin": "node scripts/build-codex-plugin.js",
+     "build:cursor-bundle": "node scripts/build-cursor-bundle.js",
+     "build:gemini-extension": "node scripts/build-gemini-extension.js",
+     "build:tsc": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:npm": "npm run version:check && npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "skills:build-index": "node packages/skills/scripts/build-index.js",
+     "start": "node dist/index.js",
+     "test": "vitest run && npm run build:codex-plugin && npm run build:gemini-extension && npm run build:cursor-bundle && node --test packages/skills/__tests__/skill-schema.test.js __tests__/server-split.test.js __tests__/codex-plugin.test.js __tests__/gemini-extension.test.js __tests__/cursor-bundle.test.js scripts/tests/hooks-matcher.test.js scripts/tests/pre-flow-update-suffix-match.test.js scripts/tests/post-flow-update.test.js scripts/tests/version-check-lib.test.js scripts/tests/check-plugin-update.test.js scripts/tests/session-start-config.test.js scripts/tests/stop-check.test.js scripts/tests/pre-flow-create-validate.test.js scripts/tests/hook-output.test.js scripts/tests/pre-flow-update-self-approval.test.js",
+     "test:watch": "vitest",
+     "version:bump": "node scripts/bump-version.js",
+     "version:check": "node scripts/check-versions.js"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.44.0",
+    "workspaces": [
+     "packages/*"
+    ]
+   },
+   "4.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@dev-flow-tech/mcp-server@4.9.0",
+    "_nodeVersion": "22.22.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_4.9.0_1776893114408_0.3760027636715766"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:bb1ae8b9da8f]",
+     "name": "klausfaerber"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "devflow-mcp": "dist/index.js",
+     "devflow-mcp-setup": "dist/setup/setup.js"
+    },
+    "bugs": {
+     "url": "https://github.com/KlausFreiberufler/devflow-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0"
+    },
+    "description": "MCP Server for DevFlow - Claude Code Integration",
+    "devDependencies": {
+     "@types/node": "^20.11.0",
+     "typescript": "^5.3.3",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 199,
+     "integrity": "sha512-Z/cvQsLL6KNVMLhEb1gBGEjd/UqoRq+NMaP0L3gLE+rdA5guP5hzHYaob2dK/zSVgpy7/L+wDkgt/nWWc9RMQw==",
+     "shasum": "aec32714cdefe370a19825c5e8cb24727ac66d00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDcjaZBon7KitOy9jCZE/a3ztdnt5atkr0ZExJJtOUFSQIhAOPscCMYQCR8GIQOIDm8eJ7BWC1jxHHNnJ+AhRStjRPa"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@dev-flow-tech/mcp-server/-/mcp-server-4.9.0.tgz",
+     "unpackedSize": 603471
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "cfc5282e7f0d0c7c4f291f8af26f52f132d4abfd",
+    "homepage": "https://github.com/KlausFreiberufler/devflow-mcp#readme",
+    "keywords": [
+     "devflow",
+     "mcp",
+     "claude-code",
+     "ai-development"
+    ],
+    "license": "MIT",
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:bb1ae8b9da8f]",
+      "name": "klausfaerber"
+     }
+    ],
+    "name": "@dev-flow-tech/mcp-server",
+    "private": false,
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/KlausFreiberufler/devflow-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "prepare": "npm run build",
+     "publish:devflow": "bash scripts/build-package.sh",
+     "publish:npm": "npm run build && npm publish",
+     "setup": "node dist/setup/setup.js",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "4.9.0"
+   }
+  }
+ },
+ "name": "@dev-flow-tech/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@dev-flow-tech%2Fmcp-server"
+}

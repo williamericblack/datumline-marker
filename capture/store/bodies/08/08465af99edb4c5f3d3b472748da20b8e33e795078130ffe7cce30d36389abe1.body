@@ -1,0 +1,757 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.10.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:22c3663f608f]",
+    "name": "ragnorco"
+   },
+   {
+    "email": "[redacted-email:c9433046582b]",
+    "name": "andrew-og"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.10.0",
+   "0.4.0",
+   "0.6.0",
+   "0.6.1",
+   "0.7.0",
+   "0.8.0",
+   "0.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@modernrelay/omnigraph-mcp",
+  "_rev": "8-f31201f2dbfe446e5f1dfd02987b646f",
+  "bugs": {
+   "url": "https://github.com/ModernRelay/omnigraph/issues"
+  },
+  "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+  "dist-tags": {
+   "latest": "0.10.0"
+  },
+  "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:22c3663f608f]",
+    "name": "ragnorco"
+   },
+   {
+    "email": "[redacted-email:c9433046582b]",
+    "name": "andrew-og"
+   }
+  ],
+  "name": "@modernrelay/omnigraph-mcp",
+  "readme": "# @modernrelay/omnigraph-mcp\n\nMCP server exposing an [Omnigraph](https://github.com/ModernRelay/omnigraph) database to LLM clients via the [Model Context Protocol](https://modelcontextprotocol.io/). Built on `@modelcontextprotocol/sdk` v1.x and the `@modernrelay/omnigraph` SDK.\n\n## Usage\n\n### Claude Desktop / any MCP host with stdio\n\n```json\n{\n  \"mcpServers\": {\n    \"omnigraph\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modernrelay/omnigraph-mcp\"],\n      \"env\": {\n        \"OMNIGRAPH_BASE_URL\": \"http://127.0.0.1:8080\",\n        \"OMNIGRAPH_TOKEN\": \"your-bearer-token\",\n        \"OMNIGRAPH_DEFAULT_BRANCH\": \"main\",\n        \"OMNIGRAPH_GRAPH_ID\": \"alpha\"\n      }\n    }\n  }\n}\n```\n\n### Programmatic embedding\n\n```ts\nimport { createOmnigraphMcpServer } from '@modernrelay/omnigraph-mcp';\nimport { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';\n\nconst server = createOmnigraphMcpServer({\n  baseUrl: 'http://127.0.0.1:8080',\n  token: process.env.OMNIGRAPH_TOKEN,\n  graphId: 'alpha', // required \u2014 omnigraph-server 0.7.0 is cluster-only\n});\nawait server.connect(new StdioServerTransport());\n```\n\n### Env vars\n\n| Variable | Purpose |\n|---|---|\n| `OMNIGRAPH_BASE_URL` | Required. `omnigraph-server` URL. |\n| `OMNIGRAPH_GRAPH_ID` | Required (server 0.7.0+ is cluster-only). Graph this server operates on \u2014 routes every graph-scoped call under `/graphs/${id}/...`. The `bin` entrypoint refuses to start without it. |\n| `OMNIGRAPH_TOKEN` | Optional bearer token. Required against a server with auth enabled. |\n| `OMNIGRAPH_DEFAULT_BRANCH` | Branch used when a tool input omits one. Defaults to `main`. |\n\n## Surface\n\n### Tools\n\nRead-only (`readOnlyHint: true`):\n\n| Tool | Purpose |\n|---|---|\n| `health` | Server liveness + version |\n| `snapshot` | Snapshot of a branch (`datasets`, type names, entity counts, graph manifest version) |\n| `query` | Run a `.gq` read query; returns the exact read's `graphCommitId` |\n| `schema_get` | Active `.pg` schema source |\n| `branches_list` | List user-visible branches |\n| `commits_list` | List commits on a branch |\n| `commits_get` | Retrieve a single commit |\n| `commits_changes` | One bounded page of a commit's entity changes relative to its first parent |\n| `changes_poll` | One bounded page of the branch's at-least-once change feed |\n| `graphs_list` | List registered graphs in the cluster (requires a `graph_list` policy grant) |\n\nMutating (`destructiveHint: true` where appropriate \u2014 hosts should surface confirmation):\n\n| Tool | Purpose |\n|---|---|\n| `mutate` | Run a `.gq` mutation; optional `ifGraphCommit` selects the conditional-write route |\n| `load` | Bulk-load NDJSON (`mode: 'merge'` for upserts). Without `from`, a missing branch is a 404. |\n| `branches_create` | Create a new branch |\n| `branches_delete` | Delete a branch |\n| `branches_merge` | Merge `source` into `target` |\n\nThere is **no `schema_apply` tool**: a cluster-managed graph rejects HTTP schema apply (409). Schema is read-only here (`schema_get`); evolve it via `omnigraph cluster apply`.\n\n### v0.10 writes, errors, and change pages\n\nSuccessful `mutate` and `load` results include the exact `commit` receipt from\npublication. `mutate` returning `commit: null` means a successful no-op. Comparing\nbranch heads before and after is not a receipt: another writer may advance the\nhead, and a timed-out operation may still be running.\n\nFor read-modify-write, pass `query`'s `graphCommitId` as `mutate`'s\n`ifGraphCommit` argument. The SDK uses `/mutate/if-graph-commit`; it never silently\nfalls back to an unconditional write. HTTP 412 with `body.preconditionFailure`\nmeans no effects: re-read and reconsider the mutation.\n\nSDK request failures set `isError: true` and return JSON with `error`, `status`, `code`,\n`requestId` when available, and the structured server `body`. Request headers and\nrequest/response objects are not included. No request is retried automatically.\nA 409 is not one universal retry condition: `fullTextIndexRebuildRequired` needs\nan operator's branch-scoped `rebuild-full-text-indexes`, `keyConflict` needs an\nidentity/operation decision, and merge conflicts need reconciliation.\n`recoveryRequired` needs operator recovery. A lost response leaves the outcome\nunknown; inspect intended content and relevant history before deciding to replay.\n\n`commits_changes` accepts `commitId`, optional `pageToken`, `limit`, and array\nfilters `kind`, `type`, and `op`. `changes_poll` accepts the same filters plus\n`branch` and exactly one of `start`, `cursor`, or `pageToken` (or none, meaning\n`start: \"now\"`). Follow `nextPageToken` with unchanged branch/filters. Only a\nterminal feed `cursor` is durable; apply complete commit blocks idempotently by\n`graphCommitId` and persist that cursor with the applied data. A 410\n`changeFeedGap` requires the SDK's streamed baseline/reset workflow. Full baseline\nexports and binary Blob payloads are deliberately not buffered into MCP results.\n\n### Resources\n\n- `omnigraph://schema` \u2014 text/plain `.pg` source\n- `omnigraph://branches` \u2014 application/json branch name list\n- `omnigraph://graphs` \u2014 application/json `[{ graphId, uri }]` (requires a `graph_list` policy grant; the management surface is closed by default)\n- `omnigraph://best-practices/index` \u2014 index of the bundled query, data, schema, and search references\n\nBest-practice references are fetched from the same pinned upstream contract as\nthe SDK, not moving `main`. Operator/CLI examples are not additional MCP tools;\navailable types, properties, and vector dimensions come from the live schema.\nThe older `remote-ops` reference is intentionally excluded until its blanket\nretry and branch-head verification advice is refreshed for v0.10. The write/error\nrules above and the server's initialization instructions are authoritative for\nthis MCP version.\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "packages/mcp",
+   "type": "git",
+   "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+  },
+  "time": {
+   "0.10.0": "2026-08-31T21:35:37.300Z",
+   "0.4.0": "2026-05-14T19:10:19.848Z",
+   "0.6.0": "2026-06-01T08:36:51.992Z",
+   "0.6.1": "2026-06-09T15:10:57.647Z",
+   "0.7.0": "2026-06-16T16:19:16.256Z",
+   "0.8.0": "2026-07-02T01:26:43.523Z",
+   "0.9.0": "2026-08-09T20:58:58.042Z",
+   "created": "2026-05-14T19:10:19.553Z",
+   "modified": "2026-08-31T21:35:37.761Z"
+  },
+  "versions": {
+   "0.10.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.10.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.10.0",
+    "_integrity": "sha512-11JIcLRWzMsF9YrVRemhyfwWIJCb59fNyOGkvLqSIpBzjAkTdPBzaoRw2scqkuMCeMRDoyySFXVL30DvaVt1dg==",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.10.0_1788212137162_0.2055632872653732"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:c9433046582b]",
+     "name": "andrew-og"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/f5ea57e3da050ab8499900024171399b/modernrelay-omnigraph-mcp-0.10.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.10.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.10.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-11JIcLRWzMsF9YrVRemhyfwWIJCb59fNyOGkvLqSIpBzjAkTdPBzaoRw2scqkuMCeMRDoyySFXVL30DvaVt1dg==",
+     "shasum": "4d3be2cebbc464404df5a8d4caac6fc98c2e0197",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCjJqVg6cl6B4wOh8e5b98VtQk2NadoOJOXD4QD+hgk1gIhAPE/yazXKtfN3V/Fy7Y4rr2U46QRHBmC3DBVDcZKDdXw"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.10.0.tgz",
+     "unpackedSize": 125740
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     },
+     {
+      "email": "[redacted-email:c9433046582b]",
+      "name": "andrew-og"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.10.0"
+   },
+   "0.4.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.4.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.4.0",
+    "_integrity": "sha512-1Vk4wUkGVxgAA3ZvOLLB6U1JYTc3NNjVHcq1H4oVrYUCGzW1n5XwW25xUYglewQYkRXOm+FfbW5Wot1VjmVYQw==",
+    "_nodeVersion": "22.22.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.4.0_1778785819684_0.2002214268822613"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:22c3663f608f]",
+     "name": "ragnorco"
+    },
+    "_npmVersion": "10.9.7",
+    "_resolved": "/tmp/ba56b6c56ed1d32b4cfe72f690081804/modernrelay-omnigraph-mcp-0.4.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.4.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.4.0"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-1Vk4wUkGVxgAA3ZvOLLB6U1JYTc3NNjVHcq1H4oVrYUCGzW1n5XwW25xUYglewQYkRXOm+FfbW5Wot1VjmVYQw==",
+     "shasum": "0372d40d5c2db13fc16acffb590fe921fccf83a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC3YEbTZAC3m+9WEfjeFGP25z+YcCurvkGBf8tUQrFc+AIgdHtuHjhLeY9YyqZjHNqYzo94KmTLeCuMUtW/ghLL3S4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.4.0.tgz",
+     "unpackedSize": 31561
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.6.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.6.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.6.0",
+    "_integrity": "sha512-FUOf48aXfgTJq55CGucUBHDjFnxxnE2IJ+g87xYg3Dg7TR88jwehdVJG3tWWkKh3bmuTgg0gM3RKrr4oTgYdfg==",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.6.0_1780303011876_0.8332013900650321"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:22c3663f608f]",
+     "name": "ragnorco"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/137dcc927fe6aa60b50f5f3d26f71dee/modernrelay-omnigraph-mcp-0.6.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.6.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.6.0"
+     },
+     "fileCount": 9,
+     "integrity": "sha512-FUOf48aXfgTJq55CGucUBHDjFnxxnE2IJ+g87xYg3Dg7TR88jwehdVJG3tWWkKh3bmuTgg0gM3RKrr4oTgYdfg==",
+     "shasum": "899012422d16fde2b14240c95bd1e83bd94daf7f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDdXdNBI/7BtlQanK/+pEGMsFFKzGSd6sQvEUtR4OnPcgIhAPS2CSlnPfFUTcb/LC6iGIl9ZDQbzFFcE0mbWZFUTnt0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.6.0.tgz",
+     "unpackedSize": 122721
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.0"
+   },
+   "0.6.1": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.6.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.6.1",
+    "_integrity": "sha512-8cJsErKCq9WuBogRIRfXSqsX9xeAjwpguvtow87/rN3qnQpuZmLXQoTN9tx8y19hQEUCV/2VOp2L21Z44WQreg==",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.6.1_1781017857499_0.906211409778412"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:22c3663f608f]",
+     "name": "ragnorco"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/4ad1a23dd7c48290389d5508ef5464aa/modernrelay-omnigraph-mcp-0.6.1.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.6.1",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.6.1"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-8cJsErKCq9WuBogRIRfXSqsX9xeAjwpguvtow87/rN3qnQpuZmLXQoTN9tx8y19hQEUCV/2VOp2L21Z44WQreg==",
+     "shasum": "d712dbbd3dde8e800596c81df9e62ed167a5e868",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIETInraB3ZURf+sqROYe56oLyi5pjn9DQRQ3hiHrUS0+AiEA3J6oENBbZYSVTF0KjOFK6D6LAStY45fyN92qYImns4c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.6.1.tgz",
+     "unpackedSize": 123800
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.6.1"
+   },
+   "0.7.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.7.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.7.0",
+    "_integrity": "sha512-tHZboqpN8R5dU3A+5D/vSogFU/EJq4+KVRzm7Ovf8Hs+zceS6I7xb/UiCdUrIsYB5FqJaRrKgGr7NPYgflzqUA==",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.7.0_1781626756090_0.23049712626059504"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:22c3663f608f]",
+     "name": "ragnorco"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/18348b08053cba103f8977b0322817d9/modernrelay-omnigraph-mcp-0.7.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.7.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.7.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-tHZboqpN8R5dU3A+5D/vSogFU/EJq4+KVRzm7Ovf8Hs+zceS6I7xb/UiCdUrIsYB5FqJaRrKgGr7NPYgflzqUA==",
+     "shasum": "12e3fa69df5250ee71418ebb4f548966936df022",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHDvj5IkZFfDpnpiYOU9Ln+PqVnBnweeXB0NR0L3TrebAiEArmlTwBmU9gdfmWup/22//nznZtjxjZPKs9UbPQogaEA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.7.0.tgz",
+     "unpackedSize": 127124
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.7.0"
+   },
+   "0.8.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.8.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.8.0",
+    "_integrity": "sha512-0I6bVGO3TiSYkW9RfPXgIxnal0ipAOwR5+eHOedOFSnPPRQ1CR2EtxNIU6UZH8J+HVXvw8PWylTDZsVi0/eS/g==",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.8.0_1782955603388_0.48376783821692726"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:22c3663f608f]",
+     "name": "ragnorco"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/65cc9e2251b411edc2861a666526bbfb/modernrelay-omnigraph-mcp-0.8.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.8.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.8.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-0I6bVGO3TiSYkW9RfPXgIxnal0ipAOwR5+eHOedOFSnPPRQ1CR2EtxNIU6UZH8J+HVXvw8PWylTDZsVi0/eS/g==",
+     "shasum": "4e69a71453a1351563b617d6b7c5ea660e8cacc1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICEpHPJ/fD0ftGXjI8skcEARnclIS5ljA+mIZncbLnmvAiAbETLK/sOv6lAAzPiwu4vxYFuFAQEqWqgj1vmAsAFBSg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.8.0.tgz",
+     "unpackedSize": 127124
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.8.0"
+   },
+   "0.9.0": {
+    "_from": "file:modernrelay-omnigraph-mcp-0.9.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@modernrelay/omnigraph-mcp@0.9.0",
+    "_integrity": "sha512-dGxu6qeAtfNWdHwdtgpYhUiqHBIUkM4OSYPjMhGJgitn0zj6fAnzDZ7hrq0iExvw6MlSALZkaDCnpBJGpOAhBQ==",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/omnigraph-mcp_0.9.0_1786309137914_0.8892135298337325"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:c9433046582b]",
+     "name": "andrew-og"
+    },
+    "_npmVersion": "10.9.8",
+    "_resolved": "/tmp/6d977497f851ea3dc4d92639622b3b06/modernrelay-omnigraph-mcp-0.9.0.tgz",
+    "bin": {
+     "omnigraph-mcp": "dist/bin.js"
+    },
+    "bugs": {
+     "url": "https://github.com/ModernRelay/omnigraph/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "@modernrelay/omnigraph": "0.9.0",
+     "zod": "^3.23.8"
+    },
+    "description": "MCP server exposing an Omnigraph database to LLM clients (Tools + Resources, stdio transport).",
+    "devDependencies": {
+     "@types/node": "^22.10.5",
+     "tsup": "^8.3.5",
+     "tsx": "^4.19.2",
+     "typescript": "^5.7.3",
+     "vitest": "^2"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modernrelay%2fomnigraph-mcp@0.9.0"
+     },
+     "fileCount": 10,
+     "integrity": "sha512-dGxu6qeAtfNWdHwdtgpYhUiqHBIUkM4OSYPjMhGJgitn0zj6fAnzDZ7hrq0iExvw6MlSALZkaDCnpBJGpOAhBQ==",
+     "shasum": "6ca0d3d2eeabeab5d7b14d5abd8ce483d8996893",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEyhMCQIfbsZI1hwHpqaFlQhs8jyum/iL5KgLmoKVR/ZAiAiKqgMMt9O6BINfy9Tp1KId/lirWy7PmzFu5rMiqz7xA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modernrelay/omnigraph-mcp/-/omnigraph-mcp-0.9.0.tgz",
+     "unpackedSize": 129748
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "homepage": "https://github.com/ModernRelay/omnigraph-ts",
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:22c3663f608f]",
+      "name": "ragnorco"
+     },
+     {
+      "email": "[redacted-email:c9433046582b]",
+      "name": "andrew-og"
+     }
+    ],
+    "module": "./dist/index.js",
+    "name": "@modernrelay/omnigraph-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "packages/mcp",
+     "type": "git",
+     "url": "git+https://github.com/ModernRelay/omnigraph-ts.git"
+    },
+    "scripts": {
+     "build": "tsup",
+     "clean": "rm -rf dist src/best-practices.gen.ts",
+     "prebuild": "pnpm run sync-cookbook",
+     "pretest": "pnpm run sync-cookbook",
+     "pretypecheck": "pnpm run sync-cookbook",
+     "sync-cookbook": "tsx scripts/sync-cookbook.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.9.0"
+   }
+  }
+ },
+ "name": "@modernrelay/omnigraph-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@modernrelay%2Fomnigraph-mcp"
+}

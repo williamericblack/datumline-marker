@@ -1,0 +1,431 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.2.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.2.0",
+   "0.2.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@mgcrea/mcp-keycloak",
+  "_rev": "3-008cfd84519841fe27b22608bf544eb2",
+  "author": {
+   "email": "[redacted-email:3ebf74febb7d]",
+   "name": "Olivier Louvignes"
+  },
+  "bugs": {
+   "url": "https://github.com/mgcrea/mcp-keycloak/issues"
+  },
+  "description": "Model Context Protocol server for the Keycloak Admin REST API",
+  "dist-tags": {
+   "latest": "0.2.1"
+  },
+  "homepage": "https://github.com/mgcrea/mcp-keycloak#readme",
+  "keywords": [
+   "admin",
+   "iam",
+   "keycloak",
+   "mcp",
+   "model-context-protocol",
+   "oidc"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:89637939b888]",
+    "name": "mgcrea"
+   }
+  ],
+  "name": "@mgcrea/mcp-keycloak",
+  "readme": "# @mgcrea/mcp-keycloak\n\nA [Model Context Protocol](https://modelcontextprotocol.io) server for the **Keycloak Admin\nREST API**. It lets an agent explore and administer a Keycloak instance \u2014 realms, users,\ngroups, roles, clients, sessions, events, client scopes, protocol mappers, identity\nproviders and authentication flows.\n\nThe server is **read-only by default**. Mutating tools are not merely refused when writes\nare off \u2014 they are never registered, so an agent cannot call them at all.\n\n## Features\n\n- Curated tools across the whole admin surface, with descriptions that spell out Keycloak's\n  traps (`clientId` vs `id`, `search` vs `exact` vs `q`, roles-by-name vs roles-by-id).\n- **Read-only by default.** `KEYCLOAK_ALLOW_WRITES=1` adds the write tools; the destructive\n  ones then additionally require an explicit `confirm: true` on every call.\n- Two auth grants: an **OAuth client-credentials service account** (recommended) or the\n  **password grant** via `admin-cli` (handy for local testing). Tokens are cached, refreshed\n  ahead of expiry, reused via the refresh token when Keycloak issues one, and re-fetched on a\n  mid-session 401.\n- List results are **summarized**, so listing a few hundred users doesn't flood the context;\n  `get_*` tools still return the full representation.\n- A `keycloak_request` escape hatch for any endpoint without a curated tool (GET-only unless\n  writes are enabled).\n- Native `fetch`, no runtime dependencies beyond the MCP SDK and Zod.\n\n## Install\n\nNo install step \u2014 run it straight from npm:\n\n```bash\nnpx -y @mgcrea/mcp-keycloak\n```\n\nOr pull the image the CI publishes on every tag:\n\n```bash\ndocker run --rm -i --env-file .env ghcr.io/mgcrea/mcp-keycloak:latest\n```\n\nTo hack on it, see [Development](#development).\n\n## Configure\n\nThe server needs admin credentials for your Keycloak. Pick one of the two grants.\n\n### (A) Service account \u2014 recommended\n\n1. In the realm you want to authenticate against, create a client (e.g. `mcp-keycloak`) with\n   **Client authentication: ON** and **Service accounts roles: ON**.\n2. Grant it admin rights: **Clients \u2192 your client \u2192 Service account roles \u2192 Assign role \u2192\n   filter by clients \u2192 `realm-management`**, then pick the roles you want. `realm-admin` is\n   the composite that grants everything; for a read-only server, `view-realm`, `view-users`,\n   `view-clients`, `view-events`, `view-identity-providers` are enough.\n3. Copy the **Client ID** and **Client secret** into `.env`.\n\nTo administer _other_ realms from one client, create it in `master` and give it the `admin`\nrealm role instead.\n\n### (B) Password grant \u2014 for quick local testing\n\nSet `KEYCLOAK_CLIENT_ID=admin-cli` (a public client \u2014 leave the secret empty) plus\n`KEYCLOAK_USERNAME` / `KEYCLOAK_PASSWORD`. This runs as that human admin, with everything\ntheir account can do.\n\n```bash\ncp .env.example .env\n```\n\n| Variable                          | Required | Description                                                                                   |\n| --------------------------------- | -------- | --------------------------------------------------------------------------------------------- |\n| `KEYCLOAK_URL`                    | yes      | Base URL, e.g. `https://keycloak.example.com`. No `/auth` prefix on Keycloak \u2265 17.            |\n| `KEYCLOAK_REALM`                  | no       | Realm the tools operate on. Defaults to `master`. Every tool can override it per call.        |\n| `KEYCLOAK_AUTH_REALM`             | no       | Realm to authenticate against. Defaults to `KEYCLOAK_REALM`; set to `master` for cross-realm. |\n| `KEYCLOAK_CLIENT_ID`              | no       | Defaults to `admin-cli`.                                                                      |\n| `KEYCLOAK_CLIENT_SECRET`          | (A)      | Service-account secret. Its presence selects the `client_credentials` grant.                  |\n| `KEYCLOAK_USERNAME` / `_PASSWORD` | (B)      | Admin credentials for the password grant.                                                     |\n| `KEYCLOAK_GRANT_TYPE`             | no       | Force `client_credentials` or `password`. Otherwise inferred from the above.                  |\n| `KEYCLOAK_ALLOW_WRITES`           | no       | Set to `1` to register the write tools. Off by default.                                       |\n| `KEYCLOAK_MAX_RETRIES`            | no       | Retry budget for 401 / 429 / 5xx. Defaults to `3`.                                            |\n| `KEYCLOAK_REFRESH_SKEW_SECONDS`   | no       | Refresh this long before expiry. Defaults to `30`, clamped to half the token's lifetime.      |\n| `KEYCLOAK_DEBUG`                  | no       | Set to `1` to log debug output to stderr.                                                     |\n\n## Run\n\n```bash\nnpx -y @mgcrea/mcp-keycloak   # speaks JSON-RPC over stdio\n```\n\n### Wire into Claude Code\n\nAdd to `.mcp.json` (project) or `~/.claude.json` (global):\n\n```json\n{\n  \"mcpServers\": {\n    \"keycloak\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@mgcrea/mcp-keycloak\"],\n      \"env\": {\n        \"KEYCLOAK_URL\": \"https://keycloak.example.com\",\n        \"KEYCLOAK_CLIENT_ID\": \"mcp-keycloak\",\n        \"KEYCLOAK_CLIENT_SECRET\": \"...\"\n      }\n    }\n  }\n}\n```\n\nWrites are off unless you add `\"KEYCLOAK_ALLOW_WRITES\": \"1\"` to that `env` block.\n\n### Inspect the tools\n\n```bash\nnpx @modelcontextprotocol/inspector npx -y @mgcrea/mcp-keycloak\n```\n\n## Development\n\n```bash\npnpm install\npnpm build\npnpm start          # node dist/cli.js\npnpm test\n```\n\nPoint a client at a working tree with `\"command\": \"node\", \"args\": [\"/absolute/path/to/mcp-keycloak/dist/cli.js\"]`.\n\n## Tools\n\nEvery tool takes an optional `realm` to override the configured default. Tools marked **W**\nexist only when `KEYCLOAK_ALLOW_WRITES=1`; those marked \u26a0\ufe0f are destructive and additionally\nrequire `confirm: true`.\n\n**Start with `keycloak_whoami`.** It reports which realm you authenticated against, as whom,\nand which `realm-management` roles the token actually carries \u2014 which is what a 403 from any\nother tool is nearly always about.\n\n| Area               | Tools                                                                                                                                                                                                                                                                                                           |\n| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| Realms             | `whoami`, `get_server_info`, `list_realms`, `get_realm` \u00b7 **W** `create_realm`, `update_realm`, \u26a0\ufe0f `delete_realm`                                                                                                                                                                                               |\n| Users              | `list_users`, `count_users`, `get_user`, `get_user_groups`, `get_user_role_mappings`, `get_user_sessions` \u00b7 **W** `create_user`, `update_user`, `send_user_action_email`, `set_user_groups`, `set_user_realm_roles`, `set_user_client_roles`, \u26a0\ufe0f `delete_user`, \u26a0\ufe0f `reset_user_password`, \u26a0\ufe0f `logout_user`      |\n| Groups             | `list_groups`, `get_group`, `get_group_members`, `get_group_role_mappings` \u00b7 **W** `create_group`, `update_group`, `set_group_realm_roles`, \u26a0\ufe0f `delete_group`                                                                                                                                                   |\n| Roles              | `list_realm_roles`, `get_realm_role`, `get_realm_role_members`, `get_role_composites`, `list_client_roles` \u00b7 **W** `create_realm_role`, `update_realm_role`, `create_client_role`, \u26a0\ufe0f `delete_realm_role`                                                                                                       |\n| Clients            | `list_clients`, `get_client`, `get_client_secret`, `get_client_service_account_user`, `get_client_installation_config` \u00b7 **W** `create_client`, `update_client`, \u26a0\ufe0f `delete_client`, \u26a0\ufe0f `regenerate_client_secret`                                                                                              |\n| Sessions & events  | `get_realm_session_stats`, `get_client_sessions`, `get_client_session_count`, `get_events_config`, `list_events`, `list_admin_events` \u00b7 **W** \u26a0\ufe0f `delete_session`, \u26a0\ufe0f `logout_all_sessions`, \u26a0\ufe0f `clear_events`                                                                                                  |\n| Scopes & mappers   | `list_client_scopes`, `get_client_scope`, `get_client_assigned_scopes`, `list_protocol_mappers`, `evaluate_client_scopes` \u00b7 **W** `create_client_scope`, `update_client_scope`, `assign_client_scope`, `unassign_client_scope`, `create_protocol_mapper`, \u26a0\ufe0f `delete_client_scope`, \u26a0\ufe0f `delete_protocol_mapper` |\n| Identity providers | `list_identity_providers`, `get_identity_provider`, `list_identity_provider_mappers` \u00b7 **W** `create_identity_provider`, `update_identity_provider`, `create_identity_provider_mapper`, \u26a0\ufe0f `delete_identity_provider`                                                                                           |\n| Auth flows         | `list_authentication_flows`, `get_authentication_flow_executions`, `list_required_actions`, `get_realm_flow_bindings` \u00b7 **W** `create_authentication_flow`, `copy_authentication_flow`, `update_authentication_execution`, \u26a0\ufe0f `delete_authentication_flow`                                                      |\n| Escape hatch       | `keycloak_request` \u2014 any admin endpoint. GET-only unless writes are enabled.                                                                                                                                                                                                                                    |\n\nAll names are prefixed `keycloak_`.\n\n> **Sensitive:** `keycloak_get_client_secret` returns a client's secret in plain text (it needs\n> `manage-clients` to work at all). It's registered as a read tool because it is a GET; to put\n> it out of reach entirely, move its registration inside the `allowWrites` block in\n> [src/tools/clients.ts](src/tools/clients.ts).\n\n## Notes on Keycloak\n\nA few things the tool descriptions repeat, because they cause most of the confusion:\n\n- **`clientId` is not `id`.** Every `/clients/{id}/\u2026` endpoint wants the client's UUID, while\n  the console only ever shows the `clientId` string. List tools return both.\n- **Searching users**: `search` is a loose match over username/name/email; `username` + `exact`\n  is a precise lookup; `q` (`\"key:value\"`) is the only way to match custom attributes.\n- **Events are off by default.** A realm with logging disabled returns an empty list rather than\n  an error, so `list_events` checks and tells you when that's what happened. There is no backfill.\n- **Access tokens live ~60 seconds.** The token provider refreshes ahead of expiry and clamps its\n  skew to half the token's lifetime, so a short lifespan doesn't mean re-authenticating on every call.\n\n## Develop\n\n```bash\npnpm dev           # rebuild on change\npnpm test          # vitest\npnpm lint          # oxlint\npnpm format        # oxfmt\npnpm typecheck     # tsc --noEmit\n```\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/mgcrea/mcp-keycloak.git"
+  },
+  "time": {
+   "0.1.0": "2026-08-31T07:55:47.121Z",
+   "0.2.0": "2026-08-31T11:56:22.601Z",
+   "0.2.1": "2026-09-01T14:12:49.711Z",
+   "created": "2026-08-31T07:55:46.662Z",
+   "modified": "2026-09-01T14:12:49.994Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-keycloak@0.1.0",
+    "_nodeVersion": "24.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.1.0_1788162946970_0.1767399130143228"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:89637939b888]",
+     "name": "mgcrea"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "keycloak-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Keycloak Admin REST API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-IKJ3vYwuj0fltdV6decCRdN1uLZo0SFsDafr41YNwlDsamicZt8eVLHpVZg/vZxfSKZl+dlSu11OZ+zQbRR8vA==",
+     "shasum": "99171b7f86d238f15a891f2a7e61a38ea46d5912",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCeBKg3FfJtt6nUw29zAds/IY/Wx0hc1jtZ8QENalI+PgIhAJAQDLzYdBDJg3wcuV+U85LJaAPOnUUCxTddIhyymwLd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-keycloak/-/mcp-keycloak-0.1.0.tgz",
+     "unpackedSize": 300922
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "7cfab5871123bf5b3842fef4a8b40f901d911199",
+    "homepage": "https://github.com/mgcrea/mcp-keycloak#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "admin",
+     "iam",
+     "keycloak",
+     "mcp",
+     "model-context-protocol",
+     "oidc"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-keycloak",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-keycloak:latest && docker push mgcrea/mcp-keycloak:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-keycloak@0.2.0",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.2.0_1788177382461_0.585848351998626"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:06c3c5fc-3744-4596-a5bf-9589e93f9298"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "keycloak-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Keycloak Admin REST API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-keycloak@0.2.0"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-fhE9Q2m6IVNxklxx+pB8qsfEl07R50M1viqNvRn2Nurll3AykqTGMIfQPpCsrFAt0+32qds0NWIi4yuXwiq8fQ==",
+     "shasum": "0e4dad003ad04b84c1256dc0fbad51ab4b7a25ba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDAf3qNTu3GNyQZeHhediu6ye1uBYsQs2xGZ9dRBSTsCQIhAL8lrgH0ZHYlgMP8x1wD7LKED7nnoW2NeEnSP8LanIai"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-keycloak/-/mcp-keycloak-0.2.0.tgz",
+     "unpackedSize": 300960
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3e3ce23507ac1fda0ff814b8907023eacea16c5f",
+    "homepage": "https://github.com/mgcrea/mcp-keycloak#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "admin",
+     "iam",
+     "keycloak",
+     "mcp",
+     "model-context-protocol",
+     "oidc"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-keycloak",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-keycloak:latest && docker push mgcrea/mcp-keycloak:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@mgcrea/mcp-keycloak@0.2.1",
+    "_nodeVersion": "24.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-keycloak_0.2.1_1788271969581_0.6505976252415877"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:06c3c5fc-3744-4596-a5bf-9589e93f9298"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "author": {
+     "email": "[redacted-email:3ebf74febb7d]",
+     "name": "Olivier Louvignes"
+    },
+    "bin": {
+     "keycloak-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/mgcrea/mcp-keycloak/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/server": "^2.0.0",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for the Keycloak Admin REST API",
+    "devDependencies": {
+     "@modelcontextprotocol/client": "^2.0.0",
+     "@types/node": "^26.2.0",
+     "oxfmt": "^0.62.0",
+     "oxlint": "^1.77.0",
+     "tsdown": "^0.22.14",
+     "tsx": "^4.23.11",
+     "typescript": "^7.0.2",
+     "vite": "^8.2.1",
+     "vitest": "^4.1.10"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@mgcrea%2fmcp-keycloak@0.2.1"
+     },
+     "fileCount": 11,
+     "integrity": "sha512-ww726WS7vQ8qyPxc35N2EhQPx54ewtQwJ+ddqOZN3aT6J35GhL1O1Fsn7Gw9djQO8RCZEW5KpeFkRbMPbKKxFw==",
+     "shasum": "afcd49b9e2fa17626fdbae91971fbb0fca3ed2cf",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDxaUbvEY/mIl3Ox++0/pOzn/1+65NMbxhUDzME4xlDEAIhANRefET/4q+rHMH9f4NDPgOA+srfM1PMmZeex+d/ldUX"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@mgcrea/mcp-keycloak/-/mcp-keycloak-0.2.1.tgz",
+     "unpackedSize": 301531
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "f0adcbe3aff07db09700500c397c7e434c752fb0",
+    "homepage": "https://github.com/mgcrea/mcp-keycloak#readme",
+    "imports": {
+     "#/*": "./src/*.ts"
+    },
+    "keywords": [
+     "admin",
+     "iam",
+     "keycloak",
+     "mcp",
+     "model-context-protocol",
+     "oidc"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:89637939b888]",
+      "name": "mgcrea"
+     }
+    ],
+    "name": "@mgcrea/mcp-keycloak",
+    "packageManager": "pnpm@11.13.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/mgcrea/mcp-keycloak.git"
+    },
+    "scripts": {
+     "build": "tsdown",
+     "dev": "tsdown --watch",
+     "docker:build": "BUILDER=build scripts/docker-build.sh",
+     "docker:buildx": "BUILDER=buildx scripts/docker-build.sh",
+     "docker:push": "docker push mgcrea/mcp-keycloak:latest && docker push mgcrea/mcp-keycloak:$npm_package_version",
+     "docker:release": "BUILDER=buildx scripts/docker-build.sh --push",
+     "format": "oxfmt --write .",
+     "format:check": "oxfmt --check .",
+     "lint": "oxlint",
+     "lint:fix": "oxlint --fix",
+     "prepublishOnly": "pnpm build",
+     "release": "pnpm dlx release-it",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   }
+  }
+ },
+ "name": "@mgcrea/mcp-keycloak",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@mgcrea%2Fmcp-keycloak"
+}

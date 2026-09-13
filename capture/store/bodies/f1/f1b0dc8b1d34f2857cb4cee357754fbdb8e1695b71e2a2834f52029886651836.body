@@ -1,0 +1,619 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.4.2",
+  "maintainers": [
+   {
+    "email": "[redacted-email:0ca14482f482]",
+    "name": "grizzle"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.2.1",
+   "0.3.0",
+   "0.4.0",
+   "0.4.1",
+   "0.4.2"
+  ]
+ },
+ "manifest": {
+  "_id": "@growth-labs/mcp-server",
+  "_rev": "8-a68dd057ca05a933643091ac0ca1d290",
+  "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+  "dist-tags": {
+   "latest": "0.4.2"
+  },
+  "maintainers": [
+   {
+    "email": "[redacted-email:0ca14482f482]",
+    "name": "grizzle"
+   }
+  ],
+  "name": "@growth-labs/mcp-server",
+  "readme": "# `@growth-labs/mcp-server`\n\nServer framework for Growth Labs MCP services. Wraps a transport-agnostic\nJSON-RPC dispatcher with the conventions every MCP service needs:\n`defineMcpTool` primitive, `createMcpServer` composition, audit logging,\nmetrics, error envelopes, role-based authorization, input/output validation\n(strict-in / warn-out-by-default), and rate limiting.\n\n## Why hand-rolled vs. the official SDK?\n\nThe official MCP TypeScript implementation has split into two packages:\n`@modelcontextprotocol/sdk` (stable, but Node-stream-based \u2014 does not run\non Cloudflare Workers) and `@modelcontextprotocol/server` (Workers-compatible,\nbut `2.0.0-alpha` with only two published versions and a peer-dep on\nanother alpha package).\n\nFor substrate that downstream services depend on, alpha churn is\nunacceptable. v1 hand-rolls a minimal MCP JSON-RPC dispatcher mirroring\n[`fulcrum-labs/memory`](../../) (kb-server)'s production-tested pattern.\nThe transport is behind a swappable `Transport` interface, so adopting\n`@modelcontextprotocol/server` once it stabilizes is a transport\nimplementation change \u2014 not a public-API change for consumers.\n\n## Install\n\n```bash\npnpm add @growth-labs/mcp-server @growth-labs/mcp-auth\n```\n\nRuntime deps: `zod`, `zod-to-json-schema`, `@growth-labs/mcp-auth`.\n\n## Quick start\n\n```ts\nimport { mcpAuthMiddleware, tokenMapResolver } from '@growth-labs/mcp-auth'\nimport { createMcpServer, defineMcpTool } from '@growth-labs/mcp-server'\nimport { z } from 'zod'\n\nconst listCards = defineMcpTool({\n  name: 'kanban_list_cards',\n  description: 'Lists projected kanban cards.',\n  input_schema: z.object({ project_id: z.string().optional() }),\n  output_schema: z.object({\n    cards: z.array(z.object({ id: z.string(), title: z.string() })),\n  }),\n  examples: [{ description: 'list', input: {}, output: { cards: [] } }],\n  stability: 'stable',\n  required_roles: ['operator'],\n  handler: async (ctx, input) => ({ cards: [] }),\n})\n\nconst server = createMcpServer({\n  service: 'foundry',\n  version: '0.1.0',\n  auth: mcpAuthMiddleware({\n    resolvers: [tokenMapResolver({ envVarName: 'FOUNDRY_MCP_TOKENS_JSON' })],\n    required: true,\n  }),\n  audit: { async write(event) { /* persist */ } },\n  metrics: { emit(event) { /* WAE */ } },\n  tools: [listCards],\n  protectedResourceMetadata: {\n    resource: 'https://mcp.example.com/mcp',\n    authorizationServers: ['https://auth.example.com'],\n    scopesSupported: ['openid', 'email', 'profile', 'mcp:example'],\n  },\n})\n\nexport default { fetch: server.fetch }\n```\n\n## Tool primitive\n\n`defineMcpTool` is the only sanctioned way to build a tool. Required fields:\n\n| Field | Purpose |\n|---|---|\n| `name` | Lowercase snake_case, 1\u201364 chars matching `^[a-z][a-z0-9_]{0,63}$` (e.g. `kanban_list_cards`). Stable forever once shipped. Periods are forbidden \u2014 Anthropic's tool-name validator (`^[a-zA-Z0-9_-]{1,64}$`) rejects them, and Claude clients refuse to register the entire tool list when any one tool's name fails to match. |\n| `description` | One paragraph for LLM clients. |\n| `agent_guidance` | When to use this vs. similar tools. Optional but recommended. |\n| `input_schema` | Zod schema. Converted to JSON Schema in `tools/list`. |\n| `output_schema` | Zod schema. Validated strict in dev, warn-mode in production. |\n| `examples` | At least one realistic input/output pair, surfaced in `tools/list`. |\n| `stability` | `stable` \\| `beta` \\| `experimental` \\| `deprecated`. |\n| `required_roles` | Empty array = any authenticated actor. |\n| `rate_limit` | Optional override; otherwise framework defaults apply. |\n| `handler` | `(ctx, input) => Promise<output>`. |\n\nHandler-thrown `McpError` instances pass their `code` through to the\nclient. Generic `Error`s become `code: 'internal'` with a safe message;\nthe original is logged but never returned.\n\n## Stability levels\n\nPer-tool, surfaced in `tools/list` so LLM clients can reason about it.\n\n- `stable` \u2014 API contract frozen.\n- `beta` \u2014 likely to change but documented and supported.\n- `experimental` \u2014 may change or disappear.\n- `deprecated` \u2014 still works; requires `deprecation_message` pointing at the replacement.\n\n## Error envelope\n\nTool-level errors return HTTP 200 (per MCP convention \u2014 the protocol\nenvelope succeeded; the tool inside it didn't) with:\n\n```json\n{\n  \"content\": [{ \"type\": \"text\", \"text\": \"<envelope JSON>\" }],\n  \"isError\": true\n}\n```\n\nThe envelope JSON:\n\n```json\n{\n  \"error\": {\n    \"code\": \"not_found\" | \"forbidden\" | \"validation_error\" | \"rate_limited\" | \"internal\" | \"unauthenticated\",\n    \"message\": \"Human-readable summary\",\n    \"request_id\": \"req_xxxxxxxx\",\n    \"tool\": \"kanban_list_cards\"\n  }\n}\n```\n\n`McpError.internal` is **never** serialized to the client. It is logged\nto the Worker tail.\n\n## Validation\n\n- **Input**: always strict. Bad input returns `validation_error`.\n- **Output**: configurable via `outputValidationMode` (`strict` | `warn`). Default `warn` (production-friendly: drift logs but doesn't break clients). Set to `strict` in dev/CI to catch schema drift.\n\n## Rate limiting\n\nPer-tool optional `rate_limit: { per_actor, per_service }`. Framework defaults:\n120 req/min per actor, 5000 req/min per service. v1 ships an\n`InMemoryRateLimiter` (per-isolate, approximate \u2014 fine for catching\nrunaway loops). Swap to a DO-backed limiter when cross-isolate\nconsistency matters.\n\n## Transport\n\nThe default `HttpJsonRpcTransport` speaks plain JSON-RPC 2.0 over HTTP:\n\n- `POST /mcp` with `{ jsonrpc, id, method, params }` body.\n- Methods: `initialize`, `notifications/initialized`, `tools/list`, `tools/call`.\n- Protocol version: `2025-06-18`.\n- HTTP 200 for results and tool-level errors; HTTP 202 for notifications; HTTP 401 for auth failures (handled upstream by middleware).\n\nTo swap transports \u2014 e.g. once `@modelcontextprotocol/server` graduates\nfrom alpha \u2014 implement the `Transport` interface and pass it as\n`transport` in `McpServerConfig`. The rest of the framework is\ntransport-independent.\n\n## OAuth protected resource metadata\n\nMCP services that support OAuth should pass `protectedResourceMetadata` to\n`createMcpServer`:\n\n```ts\ncreateMcpServer({\n  service: 'foundry',\n  version: '0.1.0',\n  auth,\n  audit,\n  metrics,\n  tools,\n  protectedResourceMetadata: {\n    resource: 'https://mcp.foundry.fulcrum-labs.com/mcp',\n    authorizationServers: ['https://auth.fulcrum-labs.com'],\n    scopesSupported: ['openid', 'email', 'profile', 'mcp:foundry'],\n    bearerMethodsSupported: ['header'], // default\n    resourceDocumentation: 'https://docs.example.com/foundry-mcp',\n  },\n})\n```\n\nWhen configured, the server:\n\n- serves `GET /.well-known/oauth-protected-resource` with RFC 9728\n  metadata plus `mcp_protocol_version: \"2025-06-18\"`;\n- sets `Cache-Control: public, max-age=3600`;\n- adds `resource_metadata=\"<origin>/.well-known/oauth-protected-resource\"`\n  to Bearer `WWW-Authenticate` 401 challenges.\n\nThe `resource_metadata` URL is derived from the configured `resource`\norigin, not the inbound request URL, so services behind proxies advertise\ntheir canonical public endpoint.\n\n## Audit + metrics\n\nAudit and metrics are interfaces; the consumer provides storage.\n\n```ts\ninterface AuditLogger { write(event: ToolAuditEvent): Promise<void> }\ninterface MetricsEmitter { emit(event: ToolMetricsEvent): void }\n```\n\nEvery `tools/call` produces exactly one audit row and one metrics event,\nregardless of outcome. Audit/metrics writer errors are logged but never\nbreak the request \u2014 best-effort.\n\n## v2 follow-ups\n\n- Evaluate `@modelcontextprotocol/server` when it reaches a stable major\n  release; swap the default transport if the API surface is acceptable.\n- Optional `defineMcpResource` primitive (MCP supports resources distinct\n  from tools; v1 only does tools).\n- DO-backed rate limiter for cross-isolate consistency.\n- Lint rule (or test helper) consumers can adopt to enforce\n  `defineMcpTool` usage in their tools dir.\n- Optional `tags` field on tool definitions for client-side filtering.\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "0.1.0": "2026-05-01T09:44:28.416Z",
+   "0.1.1": "2026-05-04T08:01:30.819Z",
+   "0.2.0": "2026-05-04T08:14:17.193Z",
+   "0.2.1": "2026-05-04T09:12:04.428Z",
+   "0.3.0": "2026-05-04T14:16:46.089Z",
+   "0.4.0": "2026-05-05T10:28:13.397Z",
+   "0.4.1": "2026-05-21T21:27:42.743Z",
+   "0.4.2": "2026-06-09T09:26:58.513Z",
+   "created": "2026-05-01T09:44:28.196Z",
+   "modified": "2026-06-09T09:26:58.628Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_from": "file:growth-labs-mcp-server-0.1.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.1.0",
+    "_integrity": "sha512-4+7kNlXZ9sb51i3lANjbg23Dt7wn6M1ZA5A/M2C/NuPQonPBOiVRVq5Qs6RR6fzau9V9dI/MX2KvKzT8IJu+WQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.0_1777628668281_0.8194720423465605"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/6c656b712493e2b0fdda59c7941b24b1/growth-labs-mcp-server-0.1.0.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.1.0",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-4+7kNlXZ9sb51i3lANjbg23Dt7wn6M1ZA5A/M2C/NuPQonPBOiVRVq5Qs6RR6fzau9V9dI/MX2KvKzT8IJu+WQ==",
+     "shasum": "1afde472a10fa6bece02150e3492480d882c25ee",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEMCIC4vYvvJqytH4yybR9+V7hy94fr8lDyDEJMbBF35MoOxAh8DcW1/0O0kOTEFwjrSdAWPCRKALv3t3yEOIA9j7l+0"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.1.0.tgz",
+     "unpackedSize": 72357
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_from": "file:growth-labs-mcp-server-0.1.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.1.1",
+    "_integrity": "sha512-L+PaINzKvpuSeE0eHNFXDX1aLjRw90hxKSYZbQzbD0C/Y+BcBCh9hwHA7aW3RgZHH5U3LGQyvOCpYt74QWv7Vg==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.1.1_1777881690676_0.5619494686650077"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/9d990ac34cc8988e15a270e54eea0902/growth-labs-mcp-server-0.1.1.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.2",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-L+PaINzKvpuSeE0eHNFXDX1aLjRw90hxKSYZbQzbD0C/Y+BcBCh9hwHA7aW3RgZHH5U3LGQyvOCpYt74QWv7Vg==",
+     "shasum": "16ffb4d1e280702bdea951dca0fe5a40de63994f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCx5zsyYrwntE9kLtG0uHd88+FWZI9dcnS+2QoU1mTyfwIgGv9vCDbwOcpyX2UDyRi/y6pbE8YTfe0OLSPHGbmhAM8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.1.1.tgz",
+     "unpackedSize": 72353
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_from": "file:growth-labs-mcp-server-0.2.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.2.0",
+    "_integrity": "sha512-i0VuRal3JGEvCYEGnnRhXMSPg9iWPArvzZhqimjVfXJknosNSu7mIgpWT4cdCWFeFe6ZNsOpL1feu5ODSVHuxw==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.0_1777882457047_0.42760746339832"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/2b5e4237d205a9f7a73c6da3eb6df86c/growth-labs-mcp-server-0.2.0.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.3",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-i0VuRal3JGEvCYEGnnRhXMSPg9iWPArvzZhqimjVfXJknosNSu7mIgpWT4cdCWFeFe6ZNsOpL1feu5ODSVHuxw==",
+     "shasum": "f8190f805877a352d955bfc9668513570ccfc9a5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIH4NJcFPkvLrQlGpFNMxFpbk4PabjFWOt40dATeYucprAiAq0inhrAABIuFkgwjWiwGAwlefw239p4tUatN3WGCSGw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.2.0.tgz",
+     "unpackedSize": 72353
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_from": "file:growth-labs-mcp-server-0.2.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.2.1",
+    "_integrity": "sha512-Zfwx6hEKJRz9h+YulB2tC7qqGK6RW3j6urC4DSJVLFntG0LwrTXL2eP57ocXfkz8Ia7p9lFqScLfnMlXY7rYqA==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.2.1_1777885924280_0.2387687048953231"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/99cd3abc78bfb052d27a0c1d1a7176d3/growth-labs-mcp-server-0.2.1.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.5",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-Zfwx6hEKJRz9h+YulB2tC7qqGK6RW3j6urC4DSJVLFntG0LwrTXL2eP57ocXfkz8Ia7p9lFqScLfnMlXY7rYqA==",
+     "shasum": "05545ca8ff37d52a9fb91464362561a088916f2e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC13FPgcfoUCpJ2hOM1DUcY+xO4OvI6dK5qKNd63mCbNQIhAOxtLKMzi0shbO9ErpMEfNDTBowmO7f8uWbnfnWl3Vfa"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.2.1.tgz",
+     "unpackedSize": 72353
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.2.1"
+   },
+   "0.3.0": {
+    "_from": "file:growth-labs-mcp-server-0.3.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.3.0",
+    "_integrity": "sha512-dN/6I6aCZob3P7k2pjNeIoZumhfbMro8JjwQJW7q3FnAqFWCJOxnBTeSI4CBhW2YPZHGdTsDN2BBJTZi+qpgug==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.3.0_1777904205941_0.1670997956692295"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/546621bc5405db83790c5a6c10b3c4e1/growth-labs-mcp-server-0.3.0.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.5",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-dN/6I6aCZob3P7k2pjNeIoZumhfbMro8JjwQJW7q3FnAqFWCJOxnBTeSI4CBhW2YPZHGdTsDN2BBJTZi+qpgug==",
+     "shasum": "6bc174037c4a740b6919355a994ce68c4dd95c62",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDBHCqFw1Fas8NhhY/H7DUXtezeg2Mr4yJQNN1TI0jmqwIgeKIo1CqwZjZ5ZXqXSBgGs+f80kvrw2eC+BclyHRE/cQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.3.0.tgz",
+     "unpackedSize": 78585
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.4.0": {
+    "_from": "file:growth-labs-mcp-server-0.4.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.4.0",
+    "_integrity": "sha512-Vg0LSWSfIauWIEfbC2ys1aGgjQVX1RDNGCW+cykCcOYqLr4Kxd1xbSgExKExFGz9MG3JF8oFaVRljSKEqGvfXw==",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.0_1777976893215_0.7082532073273604"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.11.0",
+    "_resolved": "/tmp/1d9491f72bda3e00b13270c373d71e4c/growth-labs-mcp-server-0.4.0.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.5",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 46,
+     "integrity": "sha512-Vg0LSWSfIauWIEfbC2ys1aGgjQVX1RDNGCW+cykCcOYqLr4Kxd1xbSgExKExFGz9MG3JF8oFaVRljSKEqGvfXw==",
+     "shasum": "a2c1dbfab6fe5256d6f27b181e5c430d38d0d605",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCfxteMOBe8D81xMC84neCY6NmAFrNfAoKKdHQ7umUr5QIgZ2mpZ0ir9vAEkbx8/tPJwn26sruA/JcL5H4oxoOlLvQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.4.0.tgz",
+     "unpackedSize": 79038
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.0"
+   },
+   "0.4.1": {
+    "_from": "file:growth-labs-mcp-server-0.4.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.4.1",
+    "_integrity": "sha512-kyqe0WPHoUcDOcBaAG3/pzICgswz/YuIfvixBtyJ80MwVSAJCOnmBxAt2zUi3qxKSTcEjNly5c2h9nL2ga1SAQ==",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.1_1779398862589_0.3805950682035777"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.12.1",
+    "_resolved": "/private/var/folders/nz/4nhr1n154yg88fl_d7k2_pkh0000gn/T/9adc78ca249743c5fdf9ec3ed4a1cc60/growth-labs-mcp-server-0.4.1.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.2.6",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^3.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-kyqe0WPHoUcDOcBaAG3/pzICgswz/YuIfvixBtyJ80MwVSAJCOnmBxAt2zUi3qxKSTcEjNly5c2h9nL2ga1SAQ==",
+     "shasum": "9b29806005595650eb5e3c6ec72725c574ae1afe",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCLUdl+AD3+oJGBIbmhsppq+xs38tC89ADh2ubmm+au2QIhAJ8M5Ltq8ZUKSAHC+vwstIl6TJDpjsl/A29DyqE5HIg7"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.4.1.tgz",
+     "unpackedSize": 112673
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.1"
+   },
+   "0.4.2": {
+    "_from": "file:growth-labs-mcp-server-0.4.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@growth-labs/mcp-server@0.4.2",
+    "_integrity": "sha512-PsWf1+3n6qsczoDrYrWsquwBslzBpK17ECzRG/6oBs3c/tLiGBlzQdqy9C7YRZGyQl7AffNXd+1yvGacSeelSA==",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-server_0.4.2_1780997218373_0.6725487347746781"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:0ca14482f482]",
+     "name": "grizzle"
+    },
+    "_npmVersion": "11.13.0",
+    "_resolved": "/tmp/7937509124ac689a822d75bb26033295/growth-labs-mcp-server-0.4.2.tgz",
+    "dependencies": {
+     "@growth-labs/mcp-auth": "0.3.0",
+     "zod": "^3.24.0",
+     "zod-to-json-schema": "^3.25.0"
+    },
+    "description": "Server framework for Growth Labs MCP services. Provides defineMcpTool primitive, createMcpServer composition, audit/metrics interfaces, error envelopes, role-based authorization, and a hand-rolled JSON-RPC HTTP transport behind a swappable Transport abstr",
+    "devDependencies": {
+     "@cloudflare/workers-types": "^4.0.0",
+     "typescript": "^5.7.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 57,
+     "integrity": "sha512-PsWf1+3n6qsczoDrYrWsquwBslzBpK17ECzRG/6oBs3c/tLiGBlzQdqy9C7YRZGyQl7AffNXd+1yvGacSeelSA==",
+     "shasum": "138a82834b65f018509c32e4da55400edf25416b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIChohUW6GYn0DFDjaZJoDtCaZ6hx+dJHTNct3BlzlBJUAiAKoKA6YQ3qR1uXrBKn+5lKLYAOSByDFjiFh83pcDLxkg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@growth-labs/mcp-server/-/mcp-server-0.4.2.tgz",
+     "unpackedSize": 113717
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "maintainers": [
+     {
+      "email": "[redacted-email:0ca14482f482]",
+      "name": "grizzle"
+     }
+    ],
+    "name": "@growth-labs/mcp-server",
+    "publishConfig": {
+     "access": "public",
+     "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check src/",
+     "check:fix": "biome check --write .",
+     "dev": "tsc --watch",
+     "test": "vitest run",
+     "test:watch": "vitest"
+    },
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.4.2"
+   }
+  }
+ },
+ "name": "@growth-labs/mcp-server",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@growth-labs%2Fmcp-server"
+}

@@ -1,0 +1,395 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ba9823b04b76]",
+    "name": "hoyongjin"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.0.1",
+   "2.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@hoyongjin/gitbook-mcp",
+  "_rev": "3-9fbd64a83550e31813dcbd94c5e9150a",
+  "author": {
+   "name": "JHY"
+  },
+  "bugs": {
+   "url": "https://github.com/HoYongJin/gitbook-mcp/issues"
+  },
+  "description": "Model Context Protocol server for GitBook \u2014 read content and drive a change-request write workflow over stdio or streamable HTTP.",
+  "dist-tags": {
+   "latest": "2.0.0"
+  },
+  "homepage": "https://github.com/HoYongJin/gitbook-mcp#readme",
+  "keywords": [
+   "gitbook",
+   "mcp",
+   "model-context-protocol",
+   "modelcontextprotocol",
+   "claude",
+   "documentation"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:ba9823b04b76]",
+    "name": "hoyongjin"
+   }
+  ],
+  "name": "@hoyongjin/gitbook-mcp",
+  "readme": "# gitbook-mcp\n\nA **[Model Context Protocol](https://modelcontextprotocol.io) server for GitBook.**\nIt lets an MCP host (Claude Code, Claude Desktop, Cursor, \u2026) **read** your GitBook\ncontent and drive a **change-request write workflow**, over **stdio** or\n**streamable HTTP**.\n\nBuilt on the official [`@gitbook/api`](https://www.npmjs.com/package/@gitbook/api)\nclient and [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) 1.x.\n\n- **Full API coverage** \u2014 ~345 tools across 11 config-gated **toolsets** (default: `core` + `change-requests`; write/destructive tools gated by read-only mode + an opt-in).\n- **Resources** \u2014 pages addressable as `gitbook://{spaceId}/{pageId}`.\n- **Two transports** \u2014 stdio (local) and streamable HTTP (multi-session, bearer-gated).\n- **Resilient** \u2014 request timeouts, bounded retries with full-jitter backoff, rate-limit aware.\n- **Safe** \u2014 read-only mode, env-only token, secret redaction, localhost-bound HTTP.\n\n> **Status:** full GitBook API coverage (~345 tools across 11 toolsets), with the\n> original 11 tools enabled by default. Tested with unit, MCP-protocol, and\n> manifest-contract tests. The **stdio** transport is ready for local\n> IDE/CLI use; the **HTTP** transport is hardened for hosted use \u2014 bearer auth,\n> DNS-rebinding protection, a session cap + idle reaper, per-IP rate limiting,\n> health/readiness probes, and Prometheus metrics. To publish: push to\n> `github.com/HoYongJin/gitbook-mcp`, ensure your npm account owns the `@hoyongjin`\n> scope, then create a GitHub release (CI publishes to npm with provenance).\n\n---\n\n## \u26a0\ufe0f What GitBook's API can and cannot write\n\nGitBook's public API has **no direct \"edit this page body\" endpoint**\n(`createPage`/`updatePage` exist only as the GitBook Assistant's _internal_ tool\nnames, not as REST methods). Content authoring goes through:\n\n1. **Change requests** \u2014 open a draft (`gitbook_create_change_request`), review, then `gitbook_merge_change_request` to publish.\n2. **Content import** \u2014 `gitbook_import_content` imports a **web page URL** into a space/change-request/page, AI-enhanced by default. This is the supported \"write content\" primitive. Imports are asynchronous, and GitBook exposes no status-poll endpoint.\n3. **Git Sync** \u2014 for fine-grained, paragraph-level authoring, connect the space to a Git repo and edit markdown there. _(Out of scope for this server; it is the right path if you need precise prose edits.)_\n\nSo this server is **read-rich** with a **coarse, review-gated write** path. It\ncannot rewrite a specific paragraph via the API.\n\n---\n\n## Install\n\n```bash\n# From source (local use):\ncd gitbook-mcp && npm install && npm run build\n# \u2192 run with:  node dist/index.js   (or `npm start`)\n\n# Or, once published:\nnpx @hoyongjin/gitbook-mcp\n```\n\n> The package is **scoped** to `@hoyongjin/gitbook-mcp` (the unscoped `gitbook-mcp`\n> on npm belongs to a different project). Make sure your npm account owns the\n> `@hoyongjin` scope before publishing.\n\nCreate a token at **GitBook \u2192 Settings \u2192 Developer \u2192 Personal access tokens**.\n\n## Configure in your MCP client\n\n### Claude Code\n\n```bash\n# Local build:\nclaude mcp add gitbook \\\n  --env GITBOOK_TOKEN=gb_api_xxx \\\n  -- node /absolute/path/to/gitbook-mcp/dist/index.js\n```\n\n### `.mcp.json` / Claude Desktop config\n\n```json\n{\n  \"mcpServers\": {\n    \"gitbook\": {\n      \"command\": \"node\",\n      \"args\": [\"/absolute/path/to/gitbook-mcp/dist/index.js\"],\n      \"env\": { \"GITBOOK_TOKEN\": \"gb_api_xxx\" }\n    }\n  }\n}\n```\n\n(After publishing, replace `command`/`args` with\n`\"command\": \"npx\", \"args\": [\"@hoyongjin/gitbook-mcp\"]`.)\n\nRun read-only (recommended unless you need writes) by adding `\"--read-only\"` to\n`args`, or `\"GITBOOK_READONLY\": \"true\"` to `env`.\n\n## Configuration\n\nAll configuration is via environment variables (see [`.env.example`](./.env.example)).\nThe token is **never** taken from a CLI argument.\n\n| Variable                               | Default                   | Description                                                                                                                            |\n| -------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |\n| `GITBOOK_TOKEN`                        | \u2014                         | **Required.** Personal access token (account-wide privileges).                                                                         |\n| `GITBOOK_ENDPOINT`                     | `https://api.gitbook.com` | API base URL.                                                                                                                          |\n| `GITBOOK_READONLY`                     | `false`                   | Hide all write/destructive tools when true.                                                                                            |\n| `GITBOOK_TOOLSETS`                     | `core,change-requests`    | Comma-separated toolsets to enable, or `all`. Unset/empty \u2192 the default two. Unknown key fails closed. See [Toolsets](#tools).         |\n| `GITBOOK_ALLOW_DESTRUCTIVE`            | `false`                   | Opt-in to register NEW destructive ops (deletes, unpublish, admin removals). The legacy `merge` tool is exempt.                        |\n| `GITBOOK_TRANSPORT`                    | `stdio`                   | `stdio` or `http`.                                                                                                                     |\n| `GITBOOK_HTTP_HOST`                    | `127.0.0.1`               | HTTP bind host.                                                                                                                        |\n| `GITBOOK_HTTP_PORT`                    | `3000`                    | HTTP port.                                                                                                                             |\n| `GITBOOK_HTTP_AUTH_TOKEN`              | \u2014                         | Bearer token required on the HTTP transport.                                                                                           |\n| `GITBOOK_HTTP_MAX_SESSIONS`            | `256`                     | Concurrent-session cap; new initializes past it get 503 (1\u2013100000).                                                                    |\n| `GITBOOK_HTTP_SESSION_TTL_MS`          | `300000`                  | Idle-session reaper TTL (1 000\u201386 400 000).                                                                                            |\n| `GITBOOK_HTTP_SESSION_MAX_LIFETIME_MS` | `3600000`                 | Absolute session lifetime; reaped regardless of activity.                                                                              |\n| `GITBOOK_HTTP_TRUST_PROXY`             | `false`                   | Trust `X-Forwarded-*` (enable only behind a trusted reverse proxy).                                                                    |\n| `GITBOOK_HTTP_ALLOWED_HOSTS`           | \u2014                         | Comma-separated hosts appended to the DNS-rebinding allow-list. **Required for proxied/non-loopback access** (e.g. `mcp.example.com`). |\n| `GITBOOK_HTTP_ALLOWED_ORIGINS`         | \u2014                         | Comma-separated origins appended to the allow-list (e.g. `https://mcp.example.com`).                                                   |\n| `GITBOOK_HTTP_RATE_LIMIT_WINDOW_MS`    | `60000`                   | Rate-limit window per client IP.                                                                                                       |\n| `GITBOOK_HTTP_RATE_LIMIT_MAX`          | `120`                     | Max `/mcp` requests per window per IP; `0` disables.                                                                                   |\n| `GITBOOK_LOG_LEVEL`                    | `info`                    | `debug`/`info`/`warn`/`error` (logs \u2192 stderr).                                                                                         |\n| `GITBOOK_TIMEOUT_MS`                   | `30000`                   | Per-request timeout (1 000\u2013120 000).                                                                                                   |\n| `GITBOOK_MAX_RETRIES`                  | `5`                       | Max retries on 429/5xx/transport errors (0\u201310).                                                                                        |\n| `GITBOOK_MAX_CONCURRENCY`              | `8`                       | Max concurrent outbound GitBook HTTP requests per instance (1\u2013256).                                                                    |\n\nCLI flags: `--stdio` / `--http` (transport), `--read-only`, `--toolsets <csv|all>`,\n`--allow-destructive`, `--port <n>`.\n\n## Tools\n\nThe server covers the **full GitBook API** \u2014 ~345 tools \u2014 organized into **toolsets**\nyou enable with `GITBOOK_TOOLSETS`. By default only **`core` + `change-requests`** are\non (~89 tools), which keeps `tools/list` small and the model's tool selection sharp.\nSet `GITBOOK_TOOLSETS=all` for everything, or list the ones you need\n(e.g. `GITBOOK_TOOLSETS=core,change-requests,sites`).\n\nEvery tool is one API endpoint with its own input schema; read tools are always\navailable, write tools need `!readOnly`, and NEW destructive tools (deletes, unpublish,\nadmin removals) additionally need `GITBOOK_ALLOW_DESTRUCTIVE=true`.\n\n| Toolset           | Default | Scope                                                                     |\n| ----------------- | :-----: | ------------------------------------------------------------------------- |\n| `core`            |   \u2705    | Identity, orgs/spaces/pages reads, search, content + `import_content`.    |\n| `change-requests` |   \u2705    | Full CR loop: create, list/diff, reviews, reviewers, comments, **merge**. |\n| `collections`     |         | Collections + collection permissions.                                     |\n| `sites`           |         | Sites, structure, customization, redirects, share links, permissions.     |\n| `site-ai`         |         | Ask AI, agent settings, questions, glossary-adjacent AI.                  |\n| `site-insights`   |         | Analytics/insights, context connections, channels, site MCP servers.      |\n| `integrations`    |         | Integration install/configure/token + space integrations.                 |\n| `data`            |         | OpenAPI specs, translations, glossary, custom fonts, storage.             |\n| `git`             |         | Git Sync: import/export, provider installations, repo/branch listing.     |\n| `public`          |         | URL\u2192content resolution, subdomains, custom hostnames.                     |\n| `org-admin`       |         | **Org members, teams, invites, SSO, permissions** (highest privilege).    |\n\nThe **11 original tools keep their exact names** and live in `core` / `change-requests`,\nso existing setups are unchanged. Per-tool parameters are delivered live via each tool's\nMCP description + input schema.\n\n**Excluded carve-outs:** 5 streaming (SSE) AI endpoints, 2 ephemeral PDF-URL generators,\nand a few trivial auth/heartbeat ops are not exposed as tools (the non-streaming AI\nequivalents are).\n\nList tools (`*_list_*`, `search`) accept a `body` with `limit`/`page` and return\n`nextCursor` when more results exist. Typical write flow:\n`create_change_request` \u2192 `import_content` (target that CR) \u2192 review/diff \u2192 `merge_change_request`.\n\n## Resources\n\nPages are exposed as resources at `gitbook://{spaceId}/{pageId}` (rendered as\nmarkdown). Enumeration is intentionally not provided \u2014 discover page ids via\n`gitbook_list_pages` / `gitbook_search`, then read by URI.\n\n## Transports\n\n- **stdio** (default): one server per process; the token stays in-process. Best\n  for local IDE/CLI integrations.\n- **streamable HTTP** (`--http`): one MCP session per `mcp-session-id`. Binds to\n  `127.0.0.1`, enables DNS-rebinding protection (Host/Origin allow-lists), and \u2014\n  when `GITBOOK_HTTP_AUTH_TOKEN` is set \u2014 requires a constant-time-compared bearer\n  token on every request. Binding to a non-loopback host **without** an auth token\n  is refused (fail-closed). Sessions are capped and idle-reaped; the `/mcp`\n  endpoint is per-IP rate-limited. Operational endpoints: `GET /healthz` `/livez`\n  `/readyz` (unauthenticated probes) and `GET /metrics` (Prometheus; bearer-gated\n  when an auth token is set). Behind a TLS-terminating reverse proxy, set\n  `GITBOOK_HTTP_TRUST_PROXY=true` **and** `GITBOOK_HTTP_ALLOWED_HOSTS=<your-public-host>`\n  \u2014 DNS-rebinding protection matches the exact `Host` header, so a proxied or\n  non-loopback deployment (including the Docker image, which binds `0.0.0.0`) must\n  add its public host(s) or every request is rejected with 403 `Invalid Host`. A\n  [`Dockerfile`](./Dockerfile) is provided. See [`SECURITY.md`](./SECURITY.md).\n\n```bash\nGITBOOK_TOKEN=\u2026 GITBOOK_HTTP_AUTH_TOKEN=\u2026 gitbook-mcp --http --port 3000\n# \u2192 POST/GET/DELETE http://127.0.0.1:3000/mcp   \u00b7   GET /healthz   \u00b7   GET /metrics\n```\n\n## Development\n\n```bash\nnpm install\nnpm run typecheck   # tsc on src + test\nnpm run lint        # eslint\nnpm run format      # prettier --write   (format:check verifies)\nnpm test            # vitest \u2014 unit + protocol + manifest-contract tests\nnpm run generate:manifest  # regenerate src/tools/manifest.ts from @gitbook/api (CI checks drift)\nnpm run test:coverage  # + v8 coverage with an 80% gate\nnpm run build       # tsc \u2192 dist/ (+ chmod the bin)\n```\n\nCI (`.github/workflows/ci.yml`) runs `npm audit` \u2192 typecheck \u2192 lint \u2192 format:check\n\u2192 build \u2192 coverage on Node 20 & 22, then asserts a clean `git diff`. CodeQL and\nDependabot run separately.\n\n## Architecture\n\n```\nsrc/\n  index.ts            launcher: load config \u2192 pick transport \u2192 graceful shutdown\n  config.ts           zod-validated env + CLI overrides (frozen Config)\n  logger.ts           structured stderr logging + secret redaction + correlation\n  request-context.ts  AsyncLocalStorage requestId/tool (log correlation)\n  metrics.ts          in-process Prometheus registry (served at /metrics)\n  limiter.ts          async concurrency semaphore (outbound rate control)\n  server.ts           createServer(): McpServer factory (tools + resources)\n  resources.ts        gitbook://{spaceId}/{pageId}\n  version.ts          stable SERVER_NAME + runtime SERVER_VERSION (from package.json)\n  gitbook/\n    client.ts         typed wrapper over @gitbook/api (cursor pagination \u2192 {items,nextCursor})\n    resilient-fetch.ts timeouts + retry/backoff + concurrency cap; injected as the client's fetch\n    import-url.ts     URL guard for server-side-fetch ops (http(s) only, no credentials)\n    errors.ts         HTTP/transport error classification \u2192 safe messages\n  tools/\n    manifest.ts       GENERATED tool surface (one row per API op; source of truth)\n    toolsets.ts       toolset keys + defaults\n    index.ts          manifest-driven registration under toolset/read-only/destructive gates\n    factory.ts        generic handler factory (every non-bespoke op)\n    bespoke.ts        the 11 grandfathered tools (hand-written handlers)\n    shared.ts         ToolContext + result/guard helpers + annotation presets\n  transports/\n    stdio.ts http.ts  the two transports (http: sessions, rate limit, health, metrics)\n```\n\nFor agent-facing contributor conventions and the dependency gotchas below, see\n[`CLAUDE.md`](./CLAUDE.md).\n\n### Notes / gotchas (pinned to @gitbook/api 0.183.0)\n\n- **tsconfig uses `moduleResolution: \"Bundler\"`**, not `NodeNext`. `@gitbook/api`\n  0.183 ships a `.d.ts` that re-exports with extensionless relative specifiers\n  (`export * from './client'`); under NodeNext those don't resolve and the entire\n  client surface (and the `GitBookAPI` namespace members) silently disappears.\n  Bundler resolution accepts them, giving full typing with no facade. Internal\n  imports use explicit `.js` extensions so the emitted ESM runs on Node.\n- **Import runs live under the singular `client.org` namespace**, not the plural\n  `client.orgs` (which holds list/search). They are different runtime objects.\n- **`gitbook_get_page` markdown vs document**: `format=markdown` returns rendered\n  markdown; `format=document` returns GitBook's structured Document JSON.\n- Node \u2265 20 (global `fetch`, `AbortSignal.any`).\n\n## License\n\n[MIT](./LICENSE)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/HoYongJin/gitbook-mcp.git"
+  },
+  "time": {
+   "1.0.0": "2026-06-23T07:38:26.768Z",
+   "1.0.1": "2026-06-23T08:55:18.022Z",
+   "2.0.0": "2026-06-23T13:31:51.548Z",
+   "created": "2026-06-23T07:38:26.390Z",
+   "modified": "2026-06-23T13:31:51.856Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@hoyongjin/gitbook-mcp@1.0.0",
+    "_nodeVersion": "25.9.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/gitbook-mcp_1.0.0_1782200306626_0.49369637742564976"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:ba9823b04b76]",
+     "name": "hoyongjin"
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "name": "JHY"
+    },
+    "bin": {
+     "gitbook-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/HoYongJin/gitbook-mcp/issues"
+    },
+    "dependencies": {
+     "@gitbook/api": "^0.183.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for GitBook \u2014 read content and drive a change-request write workflow over stdio or streamable HTTP.",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.3",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.4.1",
+     "eslint-config-prettier": "^10.1.8",
+     "prettier": "^3.8.4",
+     "shx": "^0.4.0",
+     "typescript": "5.7.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 42,
+     "integrity": "sha512-umn7vrPvxN47r98FXawXGLmFb/WYZT5boilWL9WxZi6tuLcNmSB/ckLoX6KFcdjjbMzwJm38MTCnzhnKdgb6HQ==",
+     "shasum": "5aea17565d42bb58c065b811be630358e60b9de0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDS5SbgjLAC8qnUInA7wroShAe2lgEefQyRXBtDaklOqwIhAOBV4jCWXQACXeqH3H/0LUy54TejF+mp67UEp9h9fLGN"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hoyongjin/gitbook-mcp/-/gitbook-mcp-1.0.0.tgz",
+     "unpackedSize": 111073
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "706f687ad10653905a07772dbbd5c7a1b0427b8e",
+    "homepage": "https://github.com/HoYongJin/gitbook-mcp#readme",
+    "keywords": [
+     "gitbook",
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "claude",
+     "documentation"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ba9823b04b76]",
+      "name": "hoyongjin"
+     }
+    ],
+    "name": "@hoyongjin/gitbook-mcp",
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/HoYongJin/gitbook-mcp.git"
+    },
+    "scripts": {
+     "build": "shx rm -rf dist && tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "npm run build && node dist/index.js",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@hoyongjin/gitbook-mcp@1.0.1",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/gitbook-mcp_1.0.1_1782204917869_0.17708797669154408"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4f3bb06f-3293-4a9b-8010-dcd1e3109e26"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "JHY"
+    },
+    "bin": {
+     "gitbook-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/HoYongJin/gitbook-mcp/issues"
+    },
+    "dependencies": {
+     "@gitbook/api": "^0.183.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for GitBook \u2014 read content and drive a change-request write workflow over stdio or streamable HTTP.",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.3",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.4.1",
+     "eslint-config-prettier": "^10.1.8",
+     "prettier": "^3.8.4",
+     "shx": "^0.4.0",
+     "typescript": "5.7.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hoyongjin%2fgitbook-mcp@1.0.1"
+     },
+     "fileCount": 42,
+     "integrity": "sha512-gr939MA6qYbcnIncm9mBRZEX2AWjlimvV+mP8a0GAnM7m19MhdZjiIqLGp8Dw0aturc+mIimfNhoP7hUhWC5Uw==",
+     "shasum": "2054ec9fefdb5ff91965a585ec5320a15b6b18c9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDAyL669m2wYFAtNI0YPwe9rT+nfSGtGs9KqbIyZ+Hm3wIhAPBkK7qRGAyf14oXLxQdUCJbji7yPBCEOfMTR4yERqXb"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hoyongjin/gitbook-mcp/-/gitbook-mcp-1.0.1.tgz",
+     "unpackedSize": 111435
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "50c31ed4bf5c181ad06e5c4bc938030d9f450204",
+    "homepage": "https://github.com/HoYongJin/gitbook-mcp#readme",
+    "keywords": [
+     "gitbook",
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "claude",
+     "documentation"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ba9823b04b76]",
+      "name": "hoyongjin"
+     }
+    ],
+    "name": "@hoyongjin/gitbook-mcp",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/HoYongJin/gitbook-mcp.git"
+    },
+    "scripts": {
+     "build": "shx rm -rf dist && tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "npm run build && node dist/index.js",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "lint": "eslint .",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "version": "1.0.1"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@hoyongjin/gitbook-mcp@2.0.0",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/gitbook-mcp_2.0.0_1782221511404_0.31652777834270385"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:4f3bb06f-3293-4a9b-8010-dcd1e3109e26"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "JHY"
+    },
+    "bin": {
+     "gitbook-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/HoYongJin/gitbook-mcp/issues"
+    },
+    "dependencies": {
+     "@gitbook/api": "0.183.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "express": "^5.2.1",
+     "zod": "^4.4.3"
+    },
+    "description": "Model Context Protocol server for GitBook \u2014 read content and drive a change-request write workflow over stdio or streamable HTTP.",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/express": "^5.0.6",
+     "@types/node": "^25.9.3",
+     "@vitest/coverage-v8": "^4.1.8",
+     "eslint": "^10.4.1",
+     "eslint-config-prettier": "^10.1.8",
+     "prettier": "^3.8.4",
+     "shx": "^0.4.0",
+     "typescript": "5.7.3",
+     "typescript-eslint": "^8.61.0",
+     "vitest": "^4.1.8"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@hoyongjin%2fgitbook-mcp@2.0.0"
+     },
+     "fileCount": 46,
+     "integrity": "sha512-VPKxGAUeWnfeyp8VoYkYlRJ2zH47iZATGOtMSzgeWzfZcpuvDUvaPBoeEw1pZ53crlBxxj8lk/kW2m87fm3kzQ==",
+     "shasum": "0719bec8ead58fefa467232a48b106d4f8b4594b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDW70+A078VCRAC/ZIRhlh2x4A2GZVe+H8wziMslrJxLQIhAIe8N5+taoluoWHFSDkkCcqXk+nVCA8HFpi3kbv9O9gV"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@hoyongjin/gitbook-mcp/-/gitbook-mcp-2.0.0.tgz",
+     "unpackedSize": 260547
+    },
+    "engines": {
+     "node": ">=20"
+    },
+    "gitHead": "f7ae3002b96af1c76fd65b682be185d3355e1c38",
+    "homepage": "https://github.com/HoYongJin/gitbook-mcp#readme",
+    "keywords": [
+     "gitbook",
+     "mcp",
+     "model-context-protocol",
+     "modelcontextprotocol",
+     "claude",
+     "documentation"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:ba9823b04b76]",
+      "name": "hoyongjin"
+     }
+    ],
+    "name": "@hoyongjin/gitbook-mcp",
+    "publishConfig": {
+     "access": "public",
+     "provenance": true
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/HoYongJin/gitbook-mcp.git"
+    },
+    "scripts": {
+     "build": "shx rm -rf dist && tsc -p tsconfig.json && shx chmod +x dist/index.js",
+     "dev": "npm run build && node dist/index.js",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+     "generate:manifest": "node scripts/generate-manifest.mjs",
+     "lint": "eslint .",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run typecheck && npm run lint && npm test",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+    },
+    "type": "module",
+    "version": "2.0.0"
+   }
+  }
+ },
+ "name": "@hoyongjin/gitbook-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@hoyongjin%2Fgitbook-mcp"
+}

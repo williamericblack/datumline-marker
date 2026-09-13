@@ -1,0 +1,1318 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.3.3",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3ef6f59acad1]",
+    "name": "beyondnetperu"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.0",
+   "1.1.0",
+   "1.2.0",
+   "1.2.1",
+   "1.2.2",
+   "1.3.0",
+   "1.3.1",
+   "1.3.2",
+   "1.3.3"
+  ]
+ },
+ "manifest": {
+  "_id": "@beyondnet/evolith-mcp",
+  "_rev": "10-bbaf7a5f746c6ece04feb6dc6d51b659",
+  "bugs": {
+   "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+  },
+  "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+  "dist-tags": {
+   "latest": "1.3.3"
+  },
+  "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+  "keywords": [
+   "evolith",
+   "mcp",
+   "model-context-protocol",
+   "nestjs",
+   "ai-agents",
+   "gateway",
+   "governance"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:3ef6f59acad1]",
+    "name": "beyondnetperu"
+   }
+  ],
+  "name": "@beyondnet/evolith-mcp",
+  "readme": "# @beyondnet/evolith-mcp\n\n## Evolith MCP Gateway \u2014 First-Class Model Context Protocol Server\n\n> **Bilingual navigation:** [Versi\u00f3n en Espa\u00f1ol](./README.es.md)\n\nDecouples the MCP server from the CLI. It is a first-class product that exposes the MCP tools as a **Gateway** talking to `@beyondnet/evolith-core` (the reusable business-logic layer), instead of shelling out to CLI subprocesses.\n\n---\n\n## Table of contents\n\n1. [Architecture diagram](#architecture-diagram)\n2. [Transports](#transports)\n3. [Installation and configuration](#installation-and-configuration)\n4. [Authentication](#authentication)\n5. [Available tools (47)](#available-tools-47)\n6. [Available resources (9 + dynamic)](#available-resources-9--dynamic)\n7. [Available prompts (8)](#available-prompts-8)\n8. [Mutative operations](#mutative-operations)\n9. [Internal architecture](#internal-architecture)\n10. [Agent use cases](#agent-use-cases)\n11. [Client configuration](#client-configuration)\n12. [SmartCLI integration](#smartcli-integration)\n13. [Extension guide](#extension-guide)\n14. [Observability](#observability)\n15. [Good practices](#good-practices)\n16. [Troubleshooting](#troubleshooting)\n\n---\n\n## Architecture diagram\n\n```mermaid\nsequenceDiagram\n    participant Agent as \"AI Agent<br/>(Cursor, Claude Desktop, Custom)\"\n    participant Gateway as \"MCP Gateway<br/>@beyondnet/evolith-mcp\"\n    participant Core as \"Business Logic<br/>@beyondnet/evolith-core\"\n    participant FS as \"File System\"\n    participant Git as \"Git\"\n\n    Note over Agent,Gateway: Transport: stdio (local) or Streamable HTTP (remote)\n\n    Agent->>+Gateway: tools/call { name: \"evolith-validate\", args: { path: \"/repo\" } }\n\n    Gateway->>Gateway: 1. Generate correlationId (evl-xxx)\n    Gateway->>Gateway: 2. Lookup tool in ToolRegistry\n    Gateway->>Gateway: 3. ABAC authorization check\n    Gateway->>Gateway: 4. Start timing + structured log (Pino)\n\n    Gateway->>+Core: ValidateSatelliteUseCase.execute({ satellitePath })\n    Core->>+FS: Read evolith.yaml, rulesets/\n    FS-->>-Core: Configuration + rule definitions\n\n    Core->>+Git: Check ADR history, phase state\n    Git-->>-Core: Phase & commit data\n\n    Core->>Core: Evaluate rules (Native + OPA)\n    Core-->>-Gateway: ValidationResult { status, issues }\n\n    Gateway->>Gateway: 5. Wrap in SuccessEnvelope { success, data, meta }\n    Gateway->>Gateway: 6. Audit log + completion duration\n\n    Gateway-->>-Agent: { content: [{ type: \"text\", text: \"{...}\" }] }\n\n    Note over Agent,Gateway: All errors wrapped in ErrorEnvelope with EvolithErrorCode\n```\n\n---\n\n## Transports\n\n| Transport | Use | Command |\n|---|---|---|\n| **stdio** (JSON-RPC 2.0) | Local agents, Cursor, Claude Desktop | `evolith-mcp serve` |\n| **Streamable HTTP** (official MCP SDK) | Remote agents, scalability | `evolith-mcp serve --transport http --port 49100` |\n\n> The **default port is `3000`** (`main.ts`: env `PORT` or `--port`, falling back to `3000`). The `49100` used in the examples is an arbitrary value, not the default.\n>\n> Logs are always written to **stderr** (Pino), because stdout is reserved for the JSON-RPC stream of the stdio transport.\n\n---\n\n## Installation and configuration\n\n### Installation\n\n```bash\n# From the monorepo\nnpm install @beyondnet/evolith-mcp\n\n# Or globally\nnpm install -g @beyondnet/evolith-mcp\n```\n\n### Usage\n\n```bash\n# stdio (default) \u2014 for Cursor, Claude Desktop, etc.\nevolith-mcp serve\n\n# HTTP \u2014 for remote integration\nevolith-mcp serve --transport http --port 49100\n```\n\n### Environment variables\n\n| Variable | Default | Description |\n|---|---|---|\n| `TRANSPORT` | `stdio` | Active transport: `stdio` or `http` |\n| `PORT` | `3000` | Port for the HTTP transport |\n| `MCP_HTTP_HOST` | `0.0.0.0` | Bind host of the HTTP server. Use `127.0.0.1` for local-only |\n| `EVOLITH_API_KEY` | \u2014 | API key for authentication on the HTTP transport |\n| `EVOLITH_MCP_ALLOW_NO_AUTH` | `false` | **HTTP only.** Allows HTTP to start without an API key (non-production only). Ignored in `production` and on `stdio` (which warns at startup) |\n| `JWT_SECRET` | \u2014 | Optional secret used to validate a Bearer JWT (HS256) in addition to the API key |\n| `NODE_ENV` | `development` | In `production`, HTTP auth is mandatory |\n| `LOG_LEVEL` | `info` | Pino log level: `trace`, `debug`, `info`, `warn`, `error` |\n| `REDIS_URL` | \u2014 | Redis URL for the resource cache (e.g. `redis://localhost:6379`). The cache is optional. |\n| `OTEL_EXPORTER_OTLP_ENDPOINT` | \u2014 | OpenTelemetry endpoint for tracing |\n| `OTEL_SERVICE_NAME` | `evolith-mcp` | Service name used in the traces |\n| `EVOLITH_MCP_REQUEST_STATE_SECRET` | \u2014 | Key that seals the MRTR `requestState` (2026-07-28 path). Falls back to `EVOLITH_API_KEY`, then `JWT_SECRET`, then a per-process key. **Set it explicitly whenever more than one replica is served**, or an approval retry landing on another replica is rejected |\n| `EVOLITH_MCP_RESOURCE_AUTH_SERVERS` | \u2014 | Comma-separated authorization server issuers published in the Protected Resource Metadata document. Defaults to `EVOLITH_MCP_OAUTH_ISSUER` |\n| `EVOLITH_MCP_RESOURCE_URI` | request host | Canonical URI of this server (RFC 8707 resource identifier) published as `resource` |\n| `EVOLITH_MCP_RESOURCE_SCOPES` | `read write` | Scopes published as `scopes_supported` and challenged in `WWW-Authenticate` |\n\n> The binary also accepts the flags `--transport`/`-t`, `--port`/`-p`, `--api-key` and `--allow-no-auth` (**HTTP only**), as well as the `evolith-mcp version` subcommand.\n\n---\n\n## Authentication\n\n### stdio transport\n\nNo request authentication is required: the process is local, single-user, and the agent runs it directly. The transport establishes an **explicit local session principal** (`id=local-stdio-session`, `role=local-session`, `roles=[local-session, operator]`, `scopes=[read, write]`) that is recorded in the audit trail of every call (GT-572).\n\nThis is **not** an authorization bypass: ABAC (native + OPA) is still evaluated on every `tools/call` with that identity, the `deploy` tools are still denied in `production` (they require `architect`), and every mutative tool still demands the HITL gate `{ apply, approvalToken }`. `--allow-no-auth` / `EVOLITH_MCP_ALLOW_NO_AUTH` **do not apply to stdio** (there is no request authentication to skip); if they are passed together with `--transport stdio`, the server warns about it on stderr at startup.\n\n### HTTP transport\n\nIn production (`NODE_ENV=production`), authentication is **mandatory**: `validateAuth()` ignores `EVOLITH_MCP_ALLOW_NO_AUTH` and rejects every request without a valid credential (401). The value of `EVOLITH_API_KEY` is an arbitrary secret (any string; **no** prefix required) compared by equality. It is accepted in either of these two headers:\n\n```\nAuthorization: Bearer <EVOLITH_API_KEY>\nx-api-key: <EVOLITH_API_KEY>\n```\n\n`/health` is public (a liveness probe) and requires no credential.\n\nWhen an OAuth issuer is configured, `/.well-known/oauth-protected-resource` (and the path-inserted `/.well-known/oauth-protected-resource/<path>`) is also public: it is the RFC 9728 document an **unauthenticated** client reads to discover which authorization server to go to, so gating it behind the credential it is trying to obtain would make discovery impossible. It carries no MCP data \u2014 only the issuer, the resource identifier and the scope names. A 401 from a protected resource additionally carries a `WWW-Authenticate: Bearer resource_metadata=\"\u2026\", scope=\"\u2026\"` challenge, which is the discovery mechanism MCP clients must prefer. Without an issuer the endpoint returns 404 rather than publishing a document with an empty `authorization_servers`.\n\nClient registration never flows through this server: it is a resource server, and the 2026-07-28 revision has clients obtain a `client_id` from a Client ID Metadata Document (or pre-registration) at the authorization server. Dynamic Client Registration is deprecated and is not implemented here; `protected-resource-metadata.spec.ts` fails the build if a registration endpoint is ever introduced.\n\n### Protocol revisions\n\nThe server answers two protocol revisions on the same HTTP endpoint:\n\n| Revision | How a request selects it | Shape |\n|---|---|---|\n| `2026-07-28` (current) | `_meta[\"io.modelcontextprotocol/protocolVersion\"]` on every request, or a `server/discover` call | Stateless. No `initialize`, no `notifications/initialized`, no `Mcp-Session-Id`. Every result carries `resultType`; the approval gate is expressed as an `InputRequiredResult` with a sealed `requestState` (MRTR) |\n| `2025-11-25` | an `initialize` request | The handshake-based path served by `@modelcontextprotocol/sdk`, which mints and requires `Mcp-Session-Id` |\n\nBoth revisions run through **one** dispatch, so ABAC (native + OPA), the scope gate, the approval gate and the audit trail are the same code on either path. The `2025-11-25` path is retained because the published SDK still declares it as its latest revision; it is not an alternative design.\n\nOn the `2026-07-28` path a state-changing tool answers `resultType: \"input_required\"` with an `elicitation/create` request and an opaque `requestState`. The client gathers the human's approval and **retries the original call** \u2014 new JSON-RPC id, same parameters, plus `requestState` and `inputResponses`. The `requestState` is sealed with AES-256-GCM and bound to the principal, the tenant, the originating call and a short TTL, so it cannot be replayed across users, calls or time. A caller that already holds an approval may still pass `{ apply: true, approvalToken }` inline and skip the round trip, exactly as on the `2025-11-25` path.\n\n> The `ApiKeyProvisioningService` (below) is an **advanced and optional** mechanism for issuing keys with an `evk_` prefix, a SHA-256 hash and a TTL. It is independent of the startup `EVOLITH_API_KEY` described here.\n\n### API key provisioning\n\nThe `ApiKeyProvisioningService` manages the lifecycle of the keys:\n\n| Operation | Description |\n|---|---|\n| `generateKey(label, options)` | Generates a key with an `evk_` prefix, a SHA-256 hash and a configurable TTL (90 days by default) |\n| `validateKey(rawKey)` | Validates the key against the stored hash and checks expiry |\n| `rotateKey(keyId)` | Revokes the current key and generates a new one for the same client |\n| `revokeKey(keyId)` | Revokes a key immediately |\n\nKeys carry scopes: `read`, `write`, `admin`. They are bound to a `tenant`.\n\n### ABAC model\n\nThe `AbacEvaluator` controls which tools each user may invoke, based on their roles:\n\n| Tool type | Allowed roles | Environment |\n|---|---|---|\n| Read (list, get, status) | Every authenticated role | Any |\n| Write (fix, install, set) | `operator`, `sre`, `architect`, `admin` | Any |\n| Write | `developer`, `qa` | Non-production only |\n| Deploy (deploy, publish, merge) | `architect`, `admin`, `operator`, `sre` | Any |\n| Deploy | Anyone except `architect` | **Blocked in production** |\n\n**ABAC codes:**\n\n| Code | Cause |\n|---|---|\n| `ABAC-01` | Tool denied for the user's role/environment |\n| `ABAC-02` | User with no roles \u2014 every tool is denied |\n| `ABAC-03` | Tool not classified into any known group |\n\n**Tool classification (substring heuristic).** The internal role sets are `DEVELOPER = {developer, qa}`, `OPERATOR = {operator, sre}` and `ARCHITECT = {architect, admin}`. The read/write/deploy classification of each tool is a heuristic over its name (`abac-evaluator.ts`): it counts as **read** if the name contains `read`/`list`/`get` (or does not begin with `evolith-`); as **write** if it contains `write`/`replace`/`run`/`fix`/`advance`; as **deploy** if it contains `deploy`/`publish`/`merge`. Because of that heuristic, `evolith-phase-advance` is classified as **write** (the `advance` substring), even though it only proposes the transition. A tool that fits no group is rejected with `ABAC-03`.\n\n**Authentication precedence (HTTP).** The guard (`mcp-server-auth.ts`) evaluates the **API key** first: if the `Authorization: Bearer <token>` or the `x-api-key` header matches `EVOLITH_API_KEY`, it grants an `admin` context (role `admin`, every tool allowed). Only if the key does not match and `JWT_SECRET` is defined does it try to validate the Bearer as a **JWT HS256**; in that case the `roles` in the JWT payload are what feed ABAC. `/health` is public. In production, auth is mandatory (it ignores `EVOLITH_MCP_ALLOW_NO_AUTH`).\n\n---\n\n## Available tools (47)\n\nThe tools are obtained at runtime via `tools/list`. All of them return raw data, which the Gateway wraps in a `SuccessEnvelope` or an `ErrorEnvelope`.\n\n### Validation\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-validate` | Validates a repository against the Evolith governance rules (GOV, INH, ACL, OCB) | No |\n| `evolith-composable-validate` | Combinable multi-mode validation: SDLC, Architecture, Ruleset, ADR, Ad-hoc | No |\n\n**`evolith-composable-validate` schema:**\n\n```json\n{\n  \"path\": \"string (required) \u2014 path to the satellite repository\",\n  \"corePath\": \"string \u2014 path to the Evolith Core\",\n  \"engine\": \"'native' | 'opa' \u2014 evaluation engine (default: native)\",\n  \"topology\": \"'modular-monolith' | 'microservices' | 'serverless' | ... \u2014 enables Architecture mode\",\n  \"phase\": \"'discovery' | 'design' | 'construction' | 'qa' | 'release' \u2014 enables SDLC mode (the schema also accepts the legacy aliases 'f1'..'f5', deprecated)\",\n  \"ruleset\": \"string \u2014 enables Ruleset mode\",\n  \"adr\": \"'adr-0002' | 'adr-0005' | 'adr-0010' | ... \u2014 enables ADR mode\",\n  \"file\": \"string \u2014 enables Ad-hoc mode over a single file\"\n}\n```\n\nModes are enabled by combining fields. Several of them can be used in a single call.\n\n---\n\n### Architecture\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-architecture-validate` | Validates a satellite project against the architecture rules | No |\n| `evolith-drift-detect` | Detects drift between the declared architecture and the real one | No |\n\n---\n\n### Topologies\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-topology-list` | Lists every architecture topology available in Evolith Core | No |\n| `evolith-topology-get` | Gets the full manifest of a topology by ID | No |\n\n**`evolith-topology-list` schema:**\n\n```json\n{\n  \"corePath\": \"string \u2014 path to the Core (optional, default: ../evolith)\"\n}\n```\n\n**`evolith-topology-get` schema:**\n\n```json\n{\n  \"id\": \"string (required) \u2014 topology ID (e.g. modular-monolith)\",\n  \"corePath\": \"string \u2014 path to the Core (optional)\"\n}\n```\n\n**Available topologies:** `modular-monolith`, `distributed-modules`, `microservices`, `serverless`, `edge-computing`, `event-driven`, `data-mesh`, `agentic-ai`\n\n---\n\n### SDLC gates\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-gate-evaluate` | Evaluates a specific SDLC phase gate | No |\n| `evolith-phase-advance` | Proposes a phase transition | No\u00b9 |\n\n> \u00b9 `evolith-phase-advance` only proposes the transition \u2014 it does not execute it. Executing it is the responsibility of the operator or of the Tracker.\n\n---\n\n### SDLC\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-sdlc-status` | Gets the current SDLC phase state of the repository | No |\n| `evolith-sdlc-handoff` | Runs the phase handoff, generating the evidence manifest | **Yes** |\n| `evolith-dora-metrics` | Approximates DORA metrics from the Git history: deployment frequency, lead time (approx.), total and merge commits within the window (`days`, default 90) | No |\n\n---\n\n### MoSCoW\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-moscow-create` | Creates a MoSCoW matrix for a phase of the project | No\u00b2 |\n| `evolith-moscow-load` | Loads an existing MoSCoW matrix | No |\n| `evolith-moscow-update` | Updates items in the MoSCoW matrix | No\u00b2 |\n| `evolith-moscow-remove` | Removes items from the matrix | No\u00b2 |\n| `evolith-moscow-list` | Lists the MoSCoW matrices of the project | No |\n| `evolith-moscow-validate` | Validates that the matrix is well formed | No |\n| `evolith-moscow-report` | Generates a MoSCoW prioritization report | No |\n\n> \u00b2 The MoSCoW tools write to `.evolith/moscow/{phase}.json` but do **not** declare `mutative: true` in the code (`moscow.tools.ts`), so the dispatcher does **not** demand `apply`/`approvalToken`. Treat them as write operations that are not protected by the mutative guard.\n\n---\n\n### Agents\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-agent-install` | Installs an Evolith agent in the repository | **Yes** |\n| `evolith-agent-list` | Lists the installed agents | No |\n| `evolith-agent-validate` | Validates the configuration of an agent | No |\n| `evolith-agent-upgrade` | Upgrades an agent to the latest version of the template | **Yes** |\n| `evolith-agent-remove` | Removes an agent from the repository | **Yes** |\n\n---\n\n### Remediation\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-auto-fix` | Applies automatic fixes to the detected violations | **Yes** |\n\n---\n\n### Configuration\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-config-get` | Gets configuration values from `evolith.yaml` | No |\n| `evolith-config-set` | Updates values in `evolith.yaml` | **Yes** |\n\n---\n\n### Observability\n\n| Tool | Description | Mutative |\n|---|---|---|\n| `evolith-metrics` | Returns internal MCP Gateway metrics (calls, latency, errors) | No |\n\n---\n\n## Available resources (9 + dynamic)\n\nResources are obtained via `resources/list` and read via `resources/read`.\n\n### Static resources (`resources/list`)\n\n| URI | Name | Description |\n|---|---|---|\n| `evolith://rulesets` | Rulesets | Lists every ruleset of Evolith Core |\n| `evolith://phase-gates` | Phase Gates | Definitions and requirements of the phase gates |\n| `evolith://agents` | Agents | List of installed Evolith agents |\n| `evolith://core/info` | Core Info | General Core information (version, total rulesets, capabilities) |\n| `evolith://governance/version` | Governance Version | Version of the governance schema |\n| `evolith://core/version` | Core Version | Version of the Core schema |\n| `evolith://repository/config` | Repository Config | Contents of the current repository's `evolith.yaml` |\n| `evolith://moscow/phase-0` | MoSCoW Phase 0 | MoSCoW matrix for the discovery phase |\n| `evolith://architecture/topologies` | Architecture Topologies | List of every available topology |\n\n### Dynamic URIs (reachable via `resources/read`)\n\n| URI Pattern | Description |\n|---|---|\n| `evolith://ruleset/{name}` | Contents of a ruleset by name (e.g. `evolith://ruleset/governance/base`) |\n| `evolith://agent/{name}` | Definition of an installed agent (e.g. `evolith://agent/winston`) |\n| `evolith://architecture/topology/{id}` | Manifest of a topology (e.g. `evolith://architecture/topology/modular-monolith`) |\n| `evolith://open-core/artifacts` | Open-Core boundary (OCB) rules |\n| `evolith://acl/rules` | Anti-Corruption Layer rules |\n| `evolith://moscow/{phase}` | MoSCoW analysis of any phase (e.g. `evolith://moscow/phase-1`) |\n\n---\n\n## Available prompts (8)\n\nPrompts are obtained via `prompts/list` and invoked via `prompts/get`.\n\n| Prompt | Description | Arguments |\n|---|---|---|\n| `evolith/validate-repository` | Validate a repository against the governance rules | `path` (req), `ruleset` (opt) |\n| `evolith/agent-onboarding` | Install and configure a new agent | `name` (req), `template` (opt: standard/minimal/enterprise) |\n| `evolith/architecture-review` | F1/F2/F3 architecture review | `path` (req), `level` (opt: F1/F2/F3) |\n| `evolith/prepare-discovery` | Prepare the artifacts of the discovery phase | `path` (req) |\n| `evolith/phase-gate-check` | Check phase gate readiness | `path` (req) |\n| `evolith/sdlc-handoff` | Run the SDLC phase handoff | `path` (req), `fromPhase` (req), `toPhase` (req) |\n| `evolith/ruleset-analysis` | Analyse compliance with a ruleset | `ruleset` (req), `path` (opt) |\n| `evolith/moscow-prioritization` | Create a MoSCoW matrix for the SDLC | `path` (req), `phase` (opt, default: phase-0) |\n\n---\n\n## Mutative operations\n\nTools marked as mutative (`mutative: true`) require **explicit approval** in order to prevent accidental changes. The dispatcher ([`mcp-tool-dispatch.ts:137`](./src/mcp/mcp-tool-dispatch.ts)) rejects the call with `FORBIDDEN` unless the request carries **both** fields:\n\n```json\n{\n  \"name\": \"winston\",\n  \"dir\": \"/path/to/repo\",\n  \"apply\": true,\n  \"approvalToken\": \"<non-empty-token>\"\n}\n```\n\n- `apply` must be exactly `true`.\n- `approvalToken` must be a non-empty string. The server never logs it in the clear: it reduces it to a `sha256:\u2026` fingerprint before auditing it.\n\n> The `approvalToken` is the approval contract at the protocol level. Some tool schemas still declare a `confirm` field, and the helper `isMutationAllowed()` exists (it reads `mcp.allowMutations` from `evolith.yaml`), but **the guard that actually blocks execution in `handleCallTool` is `apply` + `approvalToken`** \u2014 neither `confirm` nor `mcp.allowMutations` replaces it.\n\n### Mutative tools\n\n| Tool | Operation |\n|---|---|\n| `evolith-agent-install` | Writes the agent files into the repository |\n| `evolith-agent-upgrade` | Overwrites the agent configuration |\n| `evolith-agent-remove` | Deletes the agent directory |\n| `evolith-config-set` | Modifies `evolith.yaml` |\n| `evolith-sdlc-handoff` | Generates the handoff manifest and writes state |\n| `evolith-auto-fix` | Applies automatic fixes to the code |\n\n> Exactly **6** tools declare `mutative: true` in the code (`config-set`, `sdlc-handoff`, `agent-install`, `agent-upgrade`, `agent-remove`, `auto-fix`). The MoSCoW tools do write to disk but are **not** marked as mutative, so the `apply`/`approvalToken` guard does **not** apply to them.\n\n---\n\n## Internal architecture\n\nThe Gateway is a **NestJS** application (modules + dependency injection).\n\n```\n@beyondnet/evolith-mcp/\n\u251c\u2500\u2500 src/\n\u2502   \u251c\u2500\u2500 main.ts                         \u2190 Bootstrap, parseArgs, stdio/HTTP startup\n\u2502   \u251c\u2500\u2500 app.module.ts                   \u2190 Root module\n\u2502   \u251c\u2500\u2500 common/\n\u2502   \u2502   \u251c\u2500\u2500 errors.ts                   \u2190 ErrorCodes + DomainException\n\u2502   \u2502   \u251c\u2500\u2500 envelopes.ts                \u2190 SuccessEnvelope / ErrorEnvelope + correlationId\n\u2502   \u2502   \u2514\u2500\u2500 stderr-logger.ts            \u2190 LoggerService over Pino \u2192 stderr\n\u2502   \u251c\u2500\u2500 mcp/\n\u2502   \u2502   \u251c\u2500\u2500 mcp.module.ts\n\u2502   \u2502   \u251c\u2500\u2500 tool.interface.ts           \u2190 McpTool interface + MCP_TOOLS token\n\u2502   \u2502   \u251c\u2500\u2500 tool-registry.service.ts    \u2190 dynamic tool registry\n\u2502   \u2502   \u251c\u2500\u2500 mcp-server.service.ts       \u2190 MCP SDK Server + dispatch + transports\n\u2502   \u2502   \u251c\u2500\u2500 mcp-tool-dispatch.ts        \u2190 dispatch with ABAC + audit + mutative guard\n\u2502   \u2502   \u251c\u2500\u2500 mcp-server-auth.ts          \u2190 HTTP authentication (EVOLITH_API_KEY)\n\u2502   \u2502   \u251c\u2500\u2500 abac-evaluator.ts           \u2190 native ABAC evaluator + OPA\n\u2502   \u2502   \u251c\u2500\u2500 api-key-provisioning.service.ts  \u2190 API key lifecycle\n\u2502   \u2502   \u251c\u2500\u2500 audit-logger.ts             \u2190 structured log of every tool call\n\u2502   \u2502   \u251c\u2500\u2500 mcp-cache.service.ts        \u2190 resource cache in Redis\n\u2502   \u2502   \u251c\u2500\u2500 metrics.service.ts          \u2190 internal Gateway metrics\n\u2502   \u2502   \u251c\u2500\u2500 prompts.service.ts          \u2190 serves prompts/list and prompts/get\n\u2502   \u2502   \u2514\u2500\u2500 resources.service.ts        \u2190 serves resources/list and resources/read\n\u2502   \u251c\u2500\u2500 tools/\n\u2502   \u2502   \u251c\u2500\u2500 tools.module.ts             \u2190 registers every tool\n\u2502   \u2502   \u251c\u2500\u2500 validate.tool.ts            \u2190 evolith-validate\n\u2502   \u2502   \u251c\u2500\u2500 composable-validate.tool.ts \u2190 evolith-composable-validate (GT-312)\n\u2502   \u2502   \u251c\u2500\u2500 architecture.tools.ts       \u2190 evolith-architecture-validate, drift-detect\n\u2502   \u2502   \u251c\u2500\u2500 topology.tools.ts           \u2190 evolith-topology-list, topology-get\n\u2502   \u2502   \u251c\u2500\u2500 gate.tools.ts               \u2190 evolith-gate-evaluate\n\u2502   \u2502   \u251c\u2500\u2500 phase-advance.tools.ts      \u2190 evolith-phase-advance\n\u2502   \u2502   \u251c\u2500\u2500 sdlc.tools.ts               \u2190 sdlc-status, sdlc-handoff, dora-metrics\n\u2502   \u2502   \u251c\u2500\u2500 moscow.tools.ts             \u2190 moscow-create/load/update/remove/list/validate/report\n\u2502   \u2502   \u251c\u2500\u2500 agent.tools.ts              \u2190 agent-install/list/validate/upgrade/remove\n\u2502   \u2502   \u251c\u2500\u2500 auto-fix.tools.ts           \u2190 evolith-auto-fix\n\u2502   \u2502   \u251c\u2500\u2500 config.tools.ts             \u2190 config-get, config-set\n\u2502   \u2502   \u2514\u2500\u2500 metrics.tool.ts             \u2190 evolith-metrics\n\u2502   \u251c\u2500\u2500 resources/\n\u2502   \u2502   \u2514\u2500\u2500 corpus-resource.handler.ts  \u2190 handler for documentary corpus resources\n\u2502   \u251c\u2500\u2500 watcher/\n\u2502   \u2502   \u2514\u2500\u2500 watcher.service.ts          \u2190 watches workspace files for changes\n\u2502   \u2514\u2500\u2500 domain/\n\u2502       \u2514\u2500\u2500 domain.module.ts            \u2190 wires @beyondnet/evolith-core to @beyondnet/evolith-infra-providers\n\n@beyondnet/evolith-core               \u2190 business logic (use-cases, validators, types)\n@beyondnet/evolith-infra-providers    \u2190 adapters (NodeFileSystem, YamlConfigParser, DiskRulesetRepository)\n```\n\n### WatcherService\n\n`WatcherService` watches workspace files (e.g. `evolith.yaml`) in order to invalidate caches or trigger re-validations when the user edits the configuration while the Gateway is running. It is enabled automatically on the long-lived stdio transport.\n\n### CorpusResourceHandler\n\nHandles access to documentary corpus resources (ADRs, playbooks, specs) so that agents can read structured architectural context without invoking mutative tools.\n\n---\n\n## Agent use cases\n\n### 1. Repository validation from Claude Desktop\n\n```json\n// prompts/get\n{\n  \"name\": \"evolith/validate-repository\",\n  \"arguments\": { \"path\": \"/Users/me/my-service\" }\n}\n```\n\nThe prompt guides the agent to use `evolith-validate` and to report the blocking violations.\n\n### 2. Agent onboarding from Cursor\n\n```json\n// prompts/get\n{\n  \"name\": \"evolith/agent-onboarding\",\n  \"arguments\": { \"name\": \"guardian\", \"template\": \"enterprise\" }\n}\n```\n\nThe agent will invoke `evolith-agent-install` and `evolith-agent-validate` in sequence.\n\n### 3. Automated architecture review\n\n```json\n// tools/call\n{\n  \"name\": \"evolith-composable-validate\",\n  \"arguments\": {\n    \"path\": \"/repo\",\n    \"topology\": \"modular-monolith\",\n    \"phase\": \"design\",\n    \"engine\": \"native\"\n  }\n}\n```\n\nCombines SDLC and Architecture validation in a single call.\n\n### 4. A full SDLC cycle with MoSCoW + gate check\n\n```\n1. tools/call evolith-sdlc-status     \u2192 current state of the phase\n2. tools/call evolith-moscow-create   \u2192 create the prioritization matrix\n3. tools/call evolith-gate-evaluate   \u2192 evaluate the gate of the current phase\n4. tools/call evolith-sdlc-handoff    \u2192 generate the handoff manifest\n5. tools/call evolith-phase-advance   \u2192 propose moving on to the next phase\n```\n\n### 5. Querying the topologies before validating\n\n```json\n// tools/call\n{ \"name\": \"evolith-topology-list\" }\n// \u2192 list of available topologies\n\n{ \"name\": \"evolith-topology-get\", \"arguments\": { \"id\": \"agentic-ai\" } }\n// \u2192 full manifest with rules and requirements\n```\n\n---\n\n## Client configuration\n\n### Cursor (`~/.cursor/config.json`)\n\n```json\n{\n  \"mcpServers\": {\n    \"evolith\": {\n      \"command\": \"evolith-mcp\",\n      \"args\": [\"serve\"],\n      \"env\": {\n        \"LOG_LEVEL\": \"info\"\n      }\n    }\n  }\n}\n```\n\n### Claude Desktop (`claude_desktop_config.json`)\n\n```json\n{\n  \"mcpServers\": {\n    \"evolith\": {\n      \"command\": \"evolith-mcp\",\n      \"args\": [\"serve\"]\n    }\n  }\n}\n```\n\n### Custom agent (HTTP transport)\n\n```bash\n# Start the HTTP server\nEVOLITH_API_KEY=evk_abc123 evolith-mcp serve --transport http --port 49100\n\n# Call it from the agent\ncurl -X POST http://localhost:49100/mcp \\\n  -H \"Authorization: Bearer evk_abc123\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"evolith-validate\",\"arguments\":{\"path\":\"/repo\"}},\"id\":1}'\n```\n\n---\n\n## SmartCLI integration\n\n### Migration plan away from `evolith-cli mcp`\n\n**Phase 1 \u2014 Coexistence (current):** `evolith-cli mcp` keeps working. `evolith-mcp serve` is the new entry point.\n\n**Phase 2 \u2014 Deprecation:** `evolith-cli mcp` will emit a `console.warn`. Migrate the Cursor / Claude Desktop configurations to `evolith-mcp`.\n\n**Phase 3 \u2014 Removal:** Drop the MCP code from `@beyondnet/evolith-cli` in a major version bump. The CLI keeps its validation commands.\n\n### Behavioural differences\n\n| Aspect | `evolith-cli mcp` (legacy) | `evolith-mcp` (new) |\n|---|---|---|\n| Transport | stdio only | stdio + Streamable HTTP |\n| Auth | No auth | ABAC + API keys over HTTP |\n| Cache | No cache | Optional Redis |\n| Observability | Basic logs | Pino + OTEL + audit logger |\n| Tools | A subset | The full 47 tools |\n\n---\n\n## Extension guide\n\nTo add a new tool:\n\n1. Create `src/tools/my-tool.tool.ts` implementing `McpTool` (`schema`, `execute`; add `readonly mutative = true` if it changes state).\n2. Inject whichever domain service it needs (from `@beyondnet/evolith-core`).\n3. Return raw data \u2014 `McpServerService` wraps it automatically in a `SuccessEnvelope` and captures errors into an `ErrorEnvelope`.\n4. Register the tool in `tools.module.ts`: add the provider and include it in the `MCP_TOOLS` factory.\n\n```typescript\nimport { Injectable } from \"@nestjs/common\";\nimport { McpTool, McpToolSchema } from \"../mcp/tool.interface\";\n\n@Injectable()\nexport class MyTool implements McpTool {\n  readonly schema: McpToolSchema = {\n    name: \"evolith-my-tool\",\n    description: \"Description of what it does\",\n    inputSchema: {\n      type: \"object\",\n      properties: { param1: { type: \"string\", description: \"...\" } },\n      required: [\"param1\"],\n    },\n  };\n\n  async execute(args: Record<string, unknown>): Promise<unknown> {\n    if (!args.param1) throw new Error(\"param1 is required\");\n    return { ok: true };\n  }\n}\n```\n\nFor mutative tools, add `readonly mutative = true`. The dispatcher will then demand `{ \"apply\": true, \"approvalToken\": \"...\" }` in the request before it runs the tool.\n\n---\n\n## Observability\n\n### Pino logs \u2192 stderr\n\nEvery log goes to `stderr` (never `stdout`). Structured JSON format with `correlationId`, `tool`, `duration` and `success`.\n\n```bash\n# Follow the logs live (stdio)\nevolith-mcp serve 2>&1 | grep '\"level\"'\n```\n\n### `evolith-metrics` tool\n\nReturns the internal metrics of the Gateway:\n\n```json\n{\n  \"uptimeMs\": 1820345,\n  \"totalCalls\": 142,\n  \"totalFailures\": 4,\n  \"tools\": {\n    \"evolith-validate\": { \"calls\": 80, \"failures\": 1, \"totalLatencyMs\": 1440, \"avgLatencyMs\": 18 },\n    \"evolith-gate-evaluate\": { \"calls\": 32, \"failures\": 0, \"totalLatencyMs\": 992, \"avgLatencyMs\": 31 }\n  },\n  \"recentErrors\": [\"RULESET_NOT_FOUND: ...\"]\n}\n```\n\n### OpenTelemetry\n\n```bash\nOTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \\\nOTEL_SERVICE_NAME=evolith-mcp \\\nevolith-mcp serve\n```\n\n### Audit Logger\n\nEvery tool call is recorded with: `toolName`, `userId`, `tenant`, `environment`, `allowed` (ABAC), `durationMs` and `correlationId`. The records go to `stderr` in JSON format.\n\n---\n\n## Good practices\n\n- **Use prompts as the entry point** for agent workflows \u2014 they spare the agent from having to reason out the sequence of tools.\n- **Do not confirm mutative calls in bulk** without first validating with the equivalent read-only tools.\n- **Run `evolith-validate` before `evolith-auto-fix`** so you know the real scope of the changes.\n- **On production HTTP**, rotate the API keys every 90 days and restrict scopes to the minimum needed.\n- **Redis is optional but recommended** on long-lived installations, to avoid repeated filesystem reads in `resources/read`.\n- **Use `evolith-composable-validate`** instead of separate calls when several modes are needed \u2014 it cuts latency and correlates the results.\n\n---\n\n## Troubleshooting\n\n### stdio: logs appear interleaved with the MCP response\n\nLogs go to `stderr`. If the client merges stdout and stderr, separate the streams:\n\n```bash\nevolith-mcp serve 2>/tmp/mcp.log\n```\n\n### stdio: `Refusing to start the MCP stdio transport` (GT-572)\n\nUnder `NODE_ENV=production`, the stdio transport does **not** receive the `local-session` principal implicitly: it demands the same configured credential as any other production surface. Without it the server does **not** start \u2014 it fails loudly at startup on `stderr` and exits with code `78` (`EX_CONFIG`), instead of advertising all of its tools and then denying every `tools/call` with `FORBIDDEN`.\n\nFixes (any one of them):\n\n```bash\nexport EVOLITH_API_KEY=<key>                                  # container: -e EVOLITH_API_KEY=<key>\nevolith-mcp serve --transport stdio --api-key <key>\nNODE_ENV=development evolith-mcp serve --transport stdio      # local development session\n```\n\n`--allow-no-auth` / `EVOLITH_MCP_ALLOW_NO_AUTH` is an **HTTP-only** development switch and deliberately does not stand in for the production credential.\n\n### HTTP: `401 Unauthorized`\n\nCheck that `EVOLITH_API_KEY` is configured on the server and that the request sends the same value in `Authorization: Bearer <key>` or `x-api-key: <key>`. The value is compared for exact equality (no `evk_` prefix required). Under `NODE_ENV=production`, auth is mandatory even with `EVOLITH_MCP_ALLOW_NO_AUTH=true`.\n\n### Tool not found (`Tool not found in registry`)\n\nThe tool may not be registered in `tools.module.ts`. Check that the provider has been added and that the name in `schema.name` matches exactly the one being invoked.\n\n### `ABAC-02: No roles present`\n\nThe user context (`mcp-user-context`) carries no roles. On the HTTP transport, check that the JWT or the user context carries the role claims correctly.\n\n### Redis unavailable\n\nThe cache degrades gracefully. Resources are served straight from the filesystem with no cache, and a warning is emitted in the logs.\n\n### OPA: `policy.wasm not found`\n\nThe OPA evaluator requires `sdk/cli/rulesets/opa/policy.wasm` under `CORE_PATH`. The behaviour when a policy is missing is **fail-closed** (GT-348/349), not fail-open: if the file does not exist and `NODE_ENV === \"production\"`, the evaluator returns `allowed: false` with the `ABAC_POLICY_MISSING` violation (a hard denial). Only in **non-production** environments does the OPA evaluator abstain, returning `allowed: true` so that the native policy decides. An error inside the OPA engine always denies. To force native evaluation, do not specify `engine: \"opa\"`.\n\n---\n\n## License\n\nISC \u2014 Beyondnet\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "src/packages/mcp-server",
+   "type": "git",
+   "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+  },
+  "time": {
+   "1.0.0": "2026-07-05T03:46:13.597Z",
+   "1.1.0": "2026-07-18T03:40:39.506Z",
+   "1.2.0": "2026-07-27T14:06:39.156Z",
+   "1.2.1": "2026-07-28T11:55:35.218Z",
+   "1.2.2": "2026-07-30T13:43:06.564Z",
+   "1.3.0": "2026-08-16T21:56:34.909Z",
+   "1.3.1": "2026-08-16T23:09:06.937Z",
+   "1.3.2": "2026-08-17T01:56:14.870Z",
+   "1.3.3": "2026-08-17T03:01:40.554Z",
+   "created": "2026-07-05T03:46:13.312Z",
+   "modified": "2026-08-17T03:01:41.466Z"
+  },
+  "versions": {
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.0.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.0.0_1783223173460_0.8957013510310152"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.0.0",
+     "@beyondnet/evolith-core": "^1.0.0",
+     "@beyondnet/evolith-core-domain": "^1.0.0",
+     "@beyondnet/evolith-infra-providers": "^1.0.0",
+     "@beyondnet/evolith-sdk": "^1.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.27",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.77.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.219.0",
+     "cache-manager": "7.2.8",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "1.10.3"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.27",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "*",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.11",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 144,
+     "integrity": "sha512-DyvZKj06cJBSNryKthE9hGEyokySXi9CoqBc9NH1KqWnkYM4YON13U3xNwyrrmsjVUwHBGriG5e0VV1AEtQZvw==",
+     "shasum": "3f352f301ff035c67b9adf6ae1188e30f190144e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDdcfS5c63sSXzZDGkDHwQwebvzfKi80lJ3SpwE99t7eAiEAp2DISI1RDH8x/ngXm29XebYS3fEMekfNID9ikYwrT78="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.0.0.tgz",
+     "unpackedSize": 432942
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "0edaa22b7f18a6d99f78200bce4299c75cc6fe26",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.0.0"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.1.0",
+    "_nodeVersion": "24.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.1.0_1784346039345_0.18580690815828915"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "11.9.0",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.1.0",
+     "@beyondnet/evolith-core-domain": "^1.1.0",
+     "@beyondnet/evolith-infra-providers": "^1.1.0",
+     "@beyondnet/evolith-sdk": "^1.1.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.27",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.77.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.219.0",
+     "cache-manager": "7.2.8",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "1.10.3"
+    },
+    "deprecated": "Security fixes landed in 1.2.0 (2026-07-27) \u2014 this build predates the 2026-07-23 security wave. Upgrade: npm i @beyondnet/evolith-mcp@latest. See CHANGELOG.",
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.27",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "*",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.11",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 168,
+     "integrity": "sha512-UV/u3PngJWKXCqDX2aR3WjUxz2c/uTDvpuRU5jG7usPZHla+VRQOE0ty6XBhkL+eaFhCbMCr3k+T+5kwVpRO0w==",
+     "shasum": "3f58aca5d8c6681b95265d878be94f481f496ded",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDsJjTOdExqQibbmTonqczdle3KiPUsu58RcDXvQSCJmgIhAO+7KK/CPXfegU2KNYoJUfh4/IVgGux3YVKwaq5gRnST"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.1.0.tgz",
+     "unpackedSize": 562203
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "df55e35483ba20a8fbc8600749c3bc71c71303d4",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.1.0"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.2.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.2.0_1785161198994_0.6761889163055568"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.1.0",
+     "@beyondnet/evolith-core-domain": "^1.1.0",
+     "@beyondnet/evolith-infra-providers": "^1.1.0",
+     "@beyondnet/evolith-sdk": "^1.1.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.2.0"
+     },
+     "fileCount": 187,
+     "integrity": "sha512-fJF/29iEfSZgL0qLmMGYySf7Utko7W8oganVu09ayYuQBpr6V4byGP+U6azfBgfOAv6BJJstfEPecEOEdUKP2A==",
+     "shasum": "881972aa2bef73e48c90ba48dadb439fded565ba",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDmdeqYYz/lR2iA7mPX5eYJOhrDWkCC5NHN5cQ6p5mfzgIhAPgh8Hs390gnAn7hGmB7X5ste/kvfqy6yt9Ga66kKson"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.2.0.tgz",
+     "unpackedSize": 613072
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "9a82d9f27ec79d3845ab826ebf8af684304804d2",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.2.0"
+   },
+   "1.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.2.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.2.1_1785239735072_0.8759589676321942"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.2.0",
+     "@beyondnet/evolith-infra-providers": "^1.2.0",
+     "@beyondnet/evolith-sdk": "^1.1.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.2.1"
+     },
+     "fileCount": 190,
+     "integrity": "sha512-qIK2uQ2ZdKQPTVU+O5mU/ZEbCTjO4UIKo3zEno5m27BYsYNyfbvNQwLHpb4467mIXBszw2a+fIUaSGn9EV1vZw==",
+     "shasum": "169afc37c0384637906be3421783417c4adf62e3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEOs47TYrR1PnBL9/BXmTmrGqhhJY44K9YePtjOkPVQRAiA3IHq9MpnE0teRg9uRTbR4Tnhk347TTaOYR6t4SN0NVA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.2.1.tgz",
+     "unpackedSize": 623532
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "01b8112bde560a93a8a7aeac7c3f3145cea0a41d",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.2.1"
+   },
+   "1.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.2.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.2.2_1785418986410_0.357175299627043"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.2.0",
+     "@beyondnet/evolith-infra-providers": "^1.2.0",
+     "@beyondnet/evolith-sdk": "^2.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.2.2"
+     },
+     "fileCount": 190,
+     "integrity": "sha512-70Ftc14FkNeBfsNki0E+JIciUdQpivx1rA4vsJLoZr67n+t4wa/g7F8inThZqj+K9UVw5z2bdmY8bVhNNbD1Cg==",
+     "shasum": "2f6476aa2fa36d58b093452982fb3d7f5762eefb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCbj1438Ik3yMZTOnQE+JihxuocErjWV1gAIv+sSXWSQgIhANNQO0R7tB6/X4oovSuudVoT79hxOWNWAMgSw1Ul7GWD"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.2.2.tgz",
+     "unpackedSize": 627853
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "09580c070608b870a6307d143d598b9a9b8e0d77",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.2.2"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.3.0",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.3.0_1786917394754_0.3392983529205731"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.2.0",
+     "@beyondnet/evolith-infra-providers": "^1.2.0",
+     "@beyondnet/evolith-sdk": "^2.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.3.0"
+     },
+     "fileCount": 217,
+     "integrity": "sha512-bGc+6SGNKULJkTSKV/PJ0hgtIvwj0940O7ynWSJ3RosJ6GfiwK99N5oO70De/67vmSId7SwMqYN2IUTROQ7aLA==",
+     "shasum": "ac046899d8a06dee6a7994217e2272789b3e9055",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD1VDB8bNM0hZ3nwLdnR9eMdLtF32NEHn2oP5ssswCEeQIhAOekMRCiwFANk3/2wJkI4WpnFi4MCBTOBhgxsqTa2Cb3"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.3.0.tgz",
+     "unpackedSize": 754005
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "a0d4cf51d605b4264c378c63097f1725daabf5f3",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.3.0"
+   },
+   "1.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.3.1",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.3.1_1786921746727_0.6977454646811054"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.2.0",
+     "@beyondnet/evolith-infra-providers": "^1.2.0",
+     "@beyondnet/evolith-sdk": "^2.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.3.1"
+     },
+     "fileCount": 217,
+     "integrity": "sha512-7bBD47vewcWcx4u81fLzhupKL2UVPTP7fPElhcL+DVOdsNAM63Z4Vam96DTzWX6wLIQ1Nn26QTG0ywDyHiIKbg==",
+     "shasum": "3b1881daa217200739249299a595c8e86ceaabd8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQClPb7mJiaedyLe9xXssat31hIFMPUzKr7wLptsNiAwlQIhAKadmYukbSTNvHN5zEl6Pz1ax8gSqCOAuUhmkUzOVNzP"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.3.1.tgz",
+     "unpackedSize": 754053
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "fd1f57076e0c04e93fdb8ce3a05f3ce39786423f",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "mcpName": "io.github.beyondnetcode/evolith",
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.3.1"
+   },
+   "1.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.3.2",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.3.2_1786931774685_0.9238910937128411"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.2.0",
+     "@beyondnet/evolith-infra-providers": "^1.2.0",
+     "@beyondnet/evolith-sdk": "^2.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.3.2"
+     },
+     "fileCount": 799,
+     "integrity": "sha512-wj5OXKh8keU9ysiMlEDLUk1/JuYM0sawmD55HxM/Opx8GsK6ZhDv2zPfvC9uxK9h4fGsyk1qqKoMTdejOOPs2w==",
+     "shasum": "843fcb6bfb7802a8548f562faf388bef6f50b245",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEEGEIRN4nEShWHVB5BcyyfnZq954LhbwstwwXxzlOGPAiA4O1a+i7AdfZ4KXHSioIs+Sr+w98zszfVnZnZJ7/THUw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.3.2.tgz",
+     "unpackedSize": 4417499
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "c2f3c5c9fa07ff92c2d06ba2873d1cbf2ccd80bd",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "mcpName": "io.github.beyondnetcode/evolith",
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "copy-corpus": "node scripts/copy-corpus.js",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "prebuild": "npm run copy-corpus",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.3.2"
+   },
+   "1.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@beyondnet/evolith-mcp@1.3.3",
+    "_nodeVersion": "20.20.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/evolith-mcp_1.3.3_1786935700273_0.5799873026407805"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:3ef6f59acad1]",
+     "name": "beyondnetperu"
+    },
+    "_npmVersion": "10.8.2",
+    "bin": {
+     "evolith-mcp": "dist/main.js"
+    },
+    "bugs": {
+     "url": "https://github.com/beyondnetcode/evolith_arch32/issues"
+    },
+    "dependencies": {
+     "@beyondnet/evolith-agent-runtime": "^1.1.0",
+     "@beyondnet/evolith-core": "^1.2.0",
+     "@beyondnet/evolith-core-domain": "^1.3.1",
+     "@beyondnet/evolith-infra-providers": "^1.2.1",
+     "@beyondnet/evolith-sdk": "^2.0.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@nestjs/cache-manager": "3.1.3",
+     "@nestjs/common": "11.1.27",
+     "@nestjs/core": "11.1.27",
+     "@nestjs/platform-express": "11.1.28",
+     "@open-policy-agent/opa-wasm": "1.10.0",
+     "@opentelemetry/api": "1.9.1",
+     "@opentelemetry/auto-instrumentations-node": "0.78.0",
+     "@opentelemetry/exporter-trace-otlp-http": "0.219.0",
+     "@opentelemetry/sdk-node": "0.221.0",
+     "cache-manager": "7.2.9",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
+     "fs-extra": "10.1.0",
+     "nestjs-pino": "4.6.1",
+     "pino": "10.3.1",
+     "pino-pretty": "13.1.3",
+     "prom-client": "15.1.3",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2",
+     "uuid": "11.1.1",
+     "yaml": "2.9.0"
+    },
+    "description": "Evolith MCP Gateway \u2014 NestJS-based Model Context Protocol server for AI agents. Supports stdio and SSE transports.",
+    "devDependencies": {
+     "@nestjs/cli": "11.0.23",
+     "@nestjs/schematics": "11.1.0",
+     "@nestjs/testing": "11.1.28",
+     "@types/express": "5.0.6",
+     "@types/fs-extra": "11.0.4",
+     "@types/jest": "30.0.0",
+     "@types/node": "26.0.0",
+     "@types/uuid": "10.0.0",
+     "@typescript-eslint/parser": "^8.64.0",
+     "eslint": "*",
+     "eslint-plugin-boundaries": "*",
+     "jest": "30.4.2",
+     "supertest": "7.2.2",
+     "ts-jest": "29.4.12",
+     "ts-loader": "9.6.2",
+     "ts-node": "10.9.2",
+     "typescript": "6.0.3"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@beyondnet%2fevolith-mcp@1.3.3"
+     },
+     "fileCount": 799,
+     "integrity": "sha512-ejGyT9D+tHohR493on9qov6+Bfq6muqUutp+x8CiUpJsOko1eGY7J2+D0cwB/WaZPZI5RqHTs5nrEhZWmoZPvw==",
+     "shasum": "dba0502633fdb3a25ea08d797fd784ebb6044091",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCd00ERsD7cZnNHazoXF4PiCLh7EoFGlBcKGaPAUt2k7AIgXavBIRJQNggMzO2bAUa3C8b6bOQV/Y9pIk77ANx9EkA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@beyondnet/evolith-mcp/-/evolith-mcp-1.3.3.tgz",
+     "unpackedSize": 4418915
+    },
+    "engines": {
+     "node": ">=20.0.0"
+    },
+    "gitHead": "6ac72c058fcb7a0c1ffda8347e35f038acda43aa",
+    "homepage": "https://github.com/beyondnetcode/evolith_arch32#readme",
+    "keywords": [
+     "evolith",
+     "mcp",
+     "model-context-protocol",
+     "nestjs",
+     "ai-agents",
+     "gateway",
+     "governance"
+    ],
+    "license": "MIT",
+    "main": "dist/main.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:3ef6f59acad1]",
+      "name": "beyondnetperu"
+     }
+    ],
+    "mcpName": "io.github.beyondnetcode/evolith",
+    "name": "@beyondnet/evolith-mcp",
+    "overrides": {
+     "js-yaml": "^4.2.0",
+     "multer": "^2.2.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "directory": "src/packages/mcp-server",
+     "type": "git",
+     "url": "git+https://github.com/beyondnetcode/evolith_arch32.git"
+    },
+    "scripts": {
+     "build": "nest build",
+     "build:dev": "nest build --watch",
+     "copy-corpus": "node scripts/copy-corpus.js",
+     "lint:boundaries": "eslint \"src/**/*.ts\"",
+     "prebuild": "npm run copy-corpus",
+     "start": "node dist/main",
+     "start:dev": "nest start --watch",
+     "start:sse": "TRANSPORT=sse PORT=3000 node dist/main",
+     "start:stdio": "TRANSPORT=stdio node dist/main",
+     "test": "jest --passWithNoTests",
+     "test:cov": "jest --coverage --passWithNoTests",
+     "test:e2e": "jest --config ./test/jest-e2e.json --passWithNoTests"
+    },
+    "types": "dist/main.d.ts",
+    "version": "1.3.3"
+   }
+  }
+ },
+ "name": "@beyondnet/evolith-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@beyondnet%2Fevolith-mcp"
+}

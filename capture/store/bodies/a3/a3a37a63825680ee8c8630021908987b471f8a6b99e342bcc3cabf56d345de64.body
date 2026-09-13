@@ -1,0 +1,3916 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "4.1.4",
+  "maintainers": [
+   {
+    "email": "[redacted-email:17f6102075fb]",
+    "name": "lyonk71"
+   },
+   {
+    "email": "[redacted-email:9affffaa041c]",
+    "name": "kjamz9000"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.2.2",
+   "0.2.3",
+   "0.3.0",
+   "0.3.1",
+   "0.3.10",
+   "0.3.2",
+   "0.3.3",
+   "0.3.4",
+   "0.3.5",
+   "0.3.6",
+   "0.3.7",
+   "0.3.8",
+   "0.3.9",
+   "1.0.0",
+   "2.0.0",
+   "2.0.1",
+   "2.1.0",
+   "2.2.0",
+   "2.3.0",
+   "3.0.0",
+   "3.0.1",
+   "3.0.2",
+   "4.0.3",
+   "4.0.4",
+   "4.1.0",
+   "4.1.1",
+   "4.1.2",
+   "4.1.3",
+   "4.1.4"
+  ]
+ },
+ "manifest": {
+  "_id": "@belsar-ai/joplin-mcp",
+  "_rev": "30-df579e624fa1d50a01de7cf9305dfbb2",
+  "author": {
+   "name": "Kyle Lyon"
+  },
+  "bugs": {
+   "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+  },
+  "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+  "dist-tags": {
+   "latest": "4.1.4"
+  },
+  "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+  "keywords": [
+   "mcp",
+   "joplin",
+   "notes",
+   "model-context-protocol",
+   "ai",
+   "llm"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:17f6102075fb]",
+    "name": "lyonk71"
+   },
+   {
+    "email": "[redacted-email:9affffaa041c]",
+    "name": "kjamz9000"
+   }
+  ],
+  "name": "@belsar-ai/joplin-mcp",
+  "readme": "# joplin-mcp\n\nModel Context Protocol (MCP) server for the [Joplin](https://joplinapp.org/) note-taking app.\n\nDesigned by belsar.ai to be easy to install & enjoyable to use.\n\n## Video\n\nhttps://www.youtube.com/watch?v=B3qJa7ycqNM&t=6s\n\n## Platform Support\n\nAvailable on macOS and Linux. Windows users should use WSL2.\n\n## Architecture\n\nBy default, this MCP server exposes two tools:\n\n- `execute_joplin_readonly_script`: For running scripts in read-only mode (inspecting/reading notes and notebooks).\n- `execute_joplin_script`: For running scripts that can also perform modifications, creations, or deletions.\n\nThis script-based execution pattern follows [Anthropic's recommended pattern for MCP servers](https://www.anthropic.com/engineering/code-execution-with-mcp) and is the most performant, token-efficient way to build an MCP server today.\n\nScripts execute in a separate runner process isolated at the OS level by [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime). `node:vm` limits the globals available inside that process; the Sandbox Runtime is the security boundary that blocks network access and filesystem writes.\n\n```\njoplin api \u2190http\u2192 broker (allowlisted proxy) \u2190stdio\u2192 runner (sandboxed)\n```\n\nThe runner calls `joplin.*` methods as if talking to Joplin directly, but all requests pass through the broker, which only permits a specific set of API methods. The broker is the only piece that can interact with your notes \u2014 and nothing else.\n\n## Quick Start\n\n1. Open Joplin & navigate to tools > web clipper > enable web clipper service\n2. The Joplin app needs to remain running (minimized is fine)\n3. Add the server to your MCP client:\n\nClaude Code:\n\n```bash\nclaude mcp add --scope user --transport stdio joplin -- npx -y @belsar-ai/joplin-mcp\n```\n\nCodex:\n\n```bash\ncodex mcp add joplin -- npx -y @belsar-ai/joplin-mcp\n```\n\nAgy: add this entry to `~/.gemini/config/mcp_config.json` (or configure the same stdio server through `/mcp`):\n\n```json\n{\n  \"mcpServers\": {\n    \"joplin\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@belsar-ai/joplin-mcp\"]\n    }\n  }\n}\n```\n\n4. That's it. Send a test request like \"Find my notes about installing Fedora linux\".\n\n### Linux Requirements\n\nInstall the following system packages before first use:\n\n```bash\n# Fedora\nsudo dnf install bubblewrap socat ripgrep\n\n# Ubuntu/Debian\nsudo apt install bubblewrap socat ripgrep\n```\n\nThe server will fail with an error message if these are missing.\n\n### Uninstall\n\n```bash\nclaude mcp remove joplin\n```\n\n```bash\ncodex mcp remove joplin\n```\n\n```bash\nagy mcp remove joplin\n```\n\n## Configuration (Optional)\n\n### Notebook Scope Config\n\nCreate `.mcp-config/joplin-mcp.toml` in your project root to scope which notebooks are visible:\n\n```toml\n[defaults]\nnotebook = \"Notes\"\n\n[scope]\nnotebooks = [\"Notes\", \"Software\"]\n```\n\n- `defaults.notebook`: Where new notes go if you don't specify a notebook\n- `scope.notebooks`: Only these notebooks are visible to the AI\n\nThe config file is discovered by walking up from the current directory (like `.git`).\n\n### Read-Only Lock Mode\n\nYou can lock the MCP server down to a strict read-only mode so that no notes or notebooks can be modified, created, or deleted. In this mode, only the `execute_joplin_readonly_script` tool is exposed to the AI, and any attempts to execute write operations are blocked at the process level.\n\nConfigure read-only mode in one of two ways:\n\n1. **CLI Flag**: Append `--readonly` to your start command:\n   ```bash\n   npx -y @belsar-ai/joplin-mcp --readonly\n   ```\n2. **Environment Variable**: Set `JOPLIN_READONLY=true` (any value other than `false`, `0`, `no`, `off`, or empty string will enable lock mode).\n\n## Example Usage\n\nThe AI can now handle complex requests in a single shot:\n\n```\nFind my notes about installing Arch Linux.\n```\n\n```\nLook for all notes whose last update time was before 2025 and move them to my Archive notebook.\n```\n\n```\nShow me all notes in my Work Projects notebook.\n```\n\n```\nMake a new note with a Mermaid diagram showing how a bill is passed on Capitol Hill.\n```\n\n### Working with Large Notes\n\nThe AI can navigate, search, and edit large notes without pulling the entire body into context:\n\n```\nShow me the table of contents for my platform docs note.\n```\n\n```\nShow me section 10.1 of my platform docs note.\n```\n\n```\nSearch my project plan for \"deadline\".\n```\n\n```\nReplace \"Q3 2025\" with \"Q4 2025\" in my roadmap note.\n```\n\n## Available API (Script Context)\n\nThe AI has access to a global `joplin` object with the following methods:\n\n### Notes (`joplin.notes`)\n\n- `readNote(id)`: Pretty-printed note with metadata header and body. Preferred for display.\n- `getNote(id)`: Raw note object. Prefer `readNote()` for display.\n- `searchNotes(query: string)`: Smart search with \"any:1\" logic.\n- `listAllNotes(fields?, ...)`: Get all notes.\n- `createNote(title, body, notebookId, ...)`: Create a new note.\n- `updateNote(id, updates)`: Update properties or body.\n- `appendToNote(id, text)`: Add text to the end.\n- `prependToNote(id, text)`: Add text to the beginning.\n- `editNote(id, oldString, newString, replaceAll?)`: Server-side string replacement. Fails if not found or ambiguous without `replaceAll`.\n- `getNoteLineRange(id, startLine, endLine)`: Read a slice of a note by line number (1-indexed).\n- `searchInNote(id, pattern)`: Case-insensitive search within a note. Returns matches with line numbers and context.\n- `getNoteSections(id)`: Parse markdown headings into a table of contents with line numbers.\n- `deleteNote(id)`: Move to trash.\n- `moveNoteToNotebook(id, notebookId)`: Move a note to a different notebook.\n\n### Notebooks (`joplin.notebooks`) \u2014 read-only\n\n- `listNotebooks()`: Get folder structure.\n- `getNotebook(id)`: Get a single notebook.\n- `getNotebookNotes(notebookId, fields?, ...)`: Get notes in a notebook.\n- `getNotebookTree(notebookId, depth?)`: Get formatted tree of a notebook with notes.\n- `getAllNotebooksTree({ exclude? })`: Get formatted tree of all notebooks.\n- `getScopedTree({ exclude?, depth? })`: Get formatted tree of scoped notebooks with notes.\n\n## Troubleshooting\n\n- Verify Joplin desktop app is running\n- Confirm Web Clipper is enabled in Joplin settings\n- Ensure Joplin is listening on port 41184 (default)\n- Go outside for a nice walk\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+  },
+  "time": {
+   "0.2.2": "2025-11-03T20:56:17.609Z",
+   "0.2.3": "2025-11-03T20:59:13.292Z",
+   "0.3.0": "2025-11-08T08:12:32.270Z",
+   "0.3.1": "2025-11-08T08:20:14.050Z",
+   "0.3.10": "2025-11-12T01:37:02.984Z",
+   "0.3.2": "2025-11-08T08:45:12.702Z",
+   "0.3.3": "2025-11-08T09:12:05.313Z",
+   "0.3.4": "2025-11-08T09:17:58.169Z",
+   "0.3.5": "2025-11-08T09:21:46.969Z",
+   "0.3.6": "2025-11-08T18:08:27.443Z",
+   "0.3.7": "2025-11-09T08:09:17.441Z",
+   "0.3.8": "2025-11-09T18:07:58.052Z",
+   "0.3.9": "2025-11-10T05:40:20.961Z",
+   "1.0.0": "2025-12-13T08:32:30.951Z",
+   "2.0.0": "2025-12-15T17:13:40.675Z",
+   "2.0.1": "2025-12-15T18:19:01.297Z",
+   "2.1.0": "2025-12-18T03:18:54.157Z",
+   "2.2.0": "2025-12-19T03:26:11.024Z",
+   "2.3.0": "2026-01-30T19:41:29.345Z",
+   "3.0.0": "2026-03-05T19:36:33.250Z",
+   "3.0.1": "2026-03-05T21:40:56.747Z",
+   "3.0.2": "2026-03-30T18:34:05.451Z",
+   "4.0.3": "2026-04-11T08:39:42.231Z",
+   "4.0.4": "2026-05-20T16:18:49.122Z",
+   "4.1.0": "2026-05-21T17:56:32.614Z",
+   "4.1.1": "2026-05-23T23:06:55.094Z",
+   "4.1.2": "2026-09-05T05:54:31.475Z",
+   "4.1.3": "2026-09-05T06:46:39.378Z",
+   "4.1.4": "2026-09-05T15:20:15.166Z",
+   "created": "2025-11-03T20:56:17.290Z",
+   "modified": "2026-09-05T15:20:15.592Z"
+  },
+  "versions": {
+   "0.2.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.2.2",
+    "_nodeVersion": "22.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.2.2_1762203377420_0.09725245409662797"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:17f6102075fb]",
+     "name": "lyonk71"
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 35,
+     "integrity": "sha512-EiDb0eGPT2Hv3I+XTQxJJbjS3AxX0HYlSot93qqzXd17yWqvkBSPuf880Uhr8sR5/Ve56wJLjgr2+Pbt2CMKDQ==",
+     "shasum": "68b44180c1b281bf5205f361ee77cf0bb1c8b7e1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGe5rdHXWmP/zHvXfAYTsEbFfkJ/+r2pMRpRdtu+TxCiAiEAlOetUr2PUMmSln+0p/P580ZeDSSS1xi3OuyGywkruIg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.2.2.tgz",
+     "unpackedSize": 187906
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3aa4bba7f2e622aea75947b2ad4a64d2367a7442",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "postinstall": "./scripts/setup-husky.sh",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.2"
+   },
+   "0.2.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.2.3",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.2.3_1762203553091_0.6959286423655315"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "zod": "^3.25.76"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.2.3"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-jrNJkx8v6VJ2aayFjrn2ysmZ2PNF7i3MfCQAHzMTbGSqPx1EKpZlYd4MVf5uCi+Wf/O/9+lxxZbUaQteoDU+Xg==",
+     "shasum": "0f0663be454487dc93fbbab85c9231c4d0e44337",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDNCBGMmHs/ZLLhBybLYTksS36qBsffQKPwvH+93ZhL6AiBk9BiUQEzoV+mk/Eq35k4fyQiiINPefO2Q6Pi/bba7YQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.2.3.tgz",
+     "unpackedSize": 184500
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "170e7ddd857fe64c4e2b982330c43f237d21558e",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "postinstall": "./scripts/setup-husky.sh",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.2.3"
+   },
+   "0.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.0",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.0_1762589552075_0.9911517520042334"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.0"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-gKYkMK9US4C5l+RZFvuJbnR290lcRDT/qNZTttME5vzXxAKSOptae+HJE8uDsXbUX3/7kA9736202Hb7cVrPnA==",
+     "shasum": "53fe8183d0f4c1c0b1bf80fb18c5531739472ba6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDb26SyIQeGA0Kn6Ybjw+cjQ6WGYTPLS1BhspPL7FrW2AiEA8EwaPDQkuG1ZERMKwRVpjL7WhpNvit4As+fYJicqKkY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.0.tgz",
+     "unpackedSize": 171572
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "03548f9297800fdd84dd4fa2efd46880921a623b",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "postinstall": "./scripts/setup-husky.sh",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.0"
+   },
+   "0.3.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.1",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.1_1762590013811_0.02386175447009986"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.1"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-PYhVSLpWZ++ujhfVfOeOduA3OFRlJ2MAjMsFQZEdUSLP85dNZUjKFm+U0WxHCzYPznOTPF1QH7TBhUbNhM9vYQ==",
+     "shasum": "c90a3308d3a3216b074d046380568615eea450ae",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIB712WCR8Q/14DkjitQMpBK7xNwA66WkU9Lf+CHeunieAiEAqWsKV6iKNVjzNlAHQ0QEvZVvrouy/7d19FKHoxPNPxQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.1.tgz",
+     "unpackedSize": 171754
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "b491777072ec2fdda1d381f8eb45ea3caf43d023",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "postinstall": "./scripts/setup-husky.sh",
+     "prepare": "npm run build",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.1"
+   },
+   "0.3.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.10",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.10_1762911422760_0.36800308418077576"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.10"
+     },
+     "fileCount": 31,
+     "integrity": "sha512-mLt9TXha5MvzP+K41mFQT9P6HMgQpy1daoilqazcON8+E5kW0/xAa/fRKz8gUyNspNsYZ536LZsKKRScQbPVbg==",
+     "shasum": "62e8ffc51273fe3e0c0ef481abe8456bca054b21",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAaIzsNKtxqeQAPT/mCb6QH4RRIcufzmP36QQYs9h19RAiEA0AxSPIAUR5QmkXlK1A1+JvfNjlwEe5Znu1IpI9acVac="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.10.tgz",
+     "unpackedSize": 170475
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "7c51cbc8636a367e6f8aa696deee96a73b173ecc",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.10"
+   },
+   "0.3.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.2",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.2_1762591512492_0.7145566708310116"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.2"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-DNdE4H0ExL7yQmMdnpE9QjiXBaC0utLAKvQIVn87DjSShT97+/Nw/t8YG1yLorseVJ+IoXA84//YvG2U/KyMyw==",
+     "shasum": "2686195465f039e0c42e95ede5efa10248101c4a",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAP98IC4JWbFDSmbM7pjLpPsxY4s2S/2Ij/LE1pzk4XGAiEAhXxDNnrMbfdvWnb8+mlFaH6EJzxnQ63n5Fxlex8kYAI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.2.tgz",
+     "unpackedSize": 171761
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "f1824ee285eae51855cea3b1a42695321eaa33cd",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.2"
+   },
+   "0.3.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.3",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.3_1762593125090_0.5630459650518858"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.3"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-EMpdFAoMVmsVjaBK6Kk/lxvZBSg5ROToFjAmRafg1aTbsAOnA+OcdUEcLJoyQrRZkrN8NcUZFyMrWQTkidw/PA==",
+     "shasum": "b7bda955b3514478b50c23c1755980d1f56a9035",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDBafvgB7hkOis6RebUin7UwWgjpAqY5EX/vNKshVS/5wIgX/Oe+GFnOMsocXQByxeMA/c23rLzR30ZjY9nAgJ0ink="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.3.tgz",
+     "unpackedSize": 171797
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "1e13f6676d9b8b3a84a3dd3e3f4279739ada93fe",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "postinstall": "npm run build",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.3"
+   },
+   "0.3.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.4",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.4_1762593477968_0.06410683223588731"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.4"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-TJEfaPf21e04kwZTb7OFw/OMOG7tCYQZqrJEVX+ljyXpcOdd06HEbGAVEiox1I1umFdsoHTGkSQEKd0xw2nHyA==",
+     "shasum": "030f585364b84d2b3bfbdeb3b649f1489fa93301",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCdZiKQxIgjqNldNQOnJT+p1C22mvQGp0aBAidM7kHNFQIhAJFZYjSyXVKYJvyzpMF2eaXU+jO7GhE5PJwqLli8f1Fv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.4.tgz",
+     "unpackedSize": 171761
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "574b215085749375f76f2760ff0ae413b85d4eeb",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.4"
+   },
+   "0.3.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.5",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.5_1762593706783_0.6496379594708814"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.5"
+     },
+     "fileCount": 29,
+     "integrity": "sha512-bQw3MII70tsSDYVYBnF1A1BhezrmCXJjbHcT2T7zIt9wBZeLbdLca813Y5QpINVzXXJtUIaBSTrA79dCq5VUBw==",
+     "shasum": "dd1da183992d52c2b00a8a5786a04848efe652da",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCyJuv34TznlhGM0+TaldtY0+JRODXQ2HeG+0EkrIA0MAIhAMAoC1e0JkIaopnIQC9EwK+7ElidBF1yPNB/7JJ4B04S"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.5.tgz",
+     "unpackedSize": 171761
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "061963d3dca330c963f9cda297e9e0722bcf474c",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.5"
+   },
+   "0.3.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.6",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.6_1762625307221_0.57415466736742"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.6"
+     },
+     "fileCount": 31,
+     "integrity": "sha512-SxG64lZIjvI7bQ6oAmQFNK2X2DIbW28WnCc+F279D7Uf4aXCQNUfRxmWd6shd5SHgugIXQh70/8R+UKDGzIQGA==",
+     "shasum": "aec42974ddd3c147b63a446a37927ae7e3adb192",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD6/4x2Y3WOnhQeVOih057GZxN9Xrm86vWcSQ9tiGUJpAIhALu8WBSKN6yY2qvjMR8NumQvumNyx+i05UD8IRjsO4ML"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.6.tgz",
+     "unpackedSize": 172017
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "35bb815263992adbb525786d432ad6dd66ad4b5c",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.6"
+   },
+   "0.3.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.7",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.7_1762675757260_0.41949435470994856"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.7"
+     },
+     "fileCount": 31,
+     "integrity": "sha512-YuLmN+6R+Prr+kwwLBncTDB7+2Iu0JDo5IhanOEGlTCY6+/ue7PlE2V90VheEI9vvDNkmyjAq3sCj2OyBdkXDg==",
+     "shasum": "d3a7f789651c5c4875438ed60fa27234031f7138",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEWLkd76719jFvO7t4OHRlbiDQ0UxrUwL2+g7OHZ9pGPAiAjhQLTD3wVUQAH7kCc7w++EifYZlgvdMuKpR4UHrgO4Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.7.tgz",
+     "unpackedSize": 169554
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "e2967265efc287e6ec34dbfb73d2262732833019",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.7"
+   },
+   "0.3.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.8",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.8_1762711677841_0.43976230772711533"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.8"
+     },
+     "fileCount": 31,
+     "integrity": "sha512-8VlgnPUFEAmQxddD+jhVtx/FTUUk8LM7Kz8mbb+cm2SwZbx9KdWqb2d7vY4MDnEMhmi2ps3MvQ8PH9C2bFFqEA==",
+     "shasum": "94e4eaa63d1fcaa364f5ea02ae708a93b6585748",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDnMb9abh8SIRiTEow93yDF4++g4Fbpx4pNyH5rpMysVAIgEDWGKKH8Qi4agj7eJGtSIUuL5Ah+mcNKCRsE/039AH0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.8.tgz",
+     "unpackedSize": 170025
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "07b17db48a2ff6cacfbeb3f593e978992204b198",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.8"
+   },
+   "0.3.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@0.3.9",
+    "_nodeVersion": "20.19.5",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_0.3.9_1762753220768_0.1853617429363703"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.6.2",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@0.3.9"
+     },
+     "fileCount": 31,
+     "integrity": "sha512-TfqKC86m0W/tqWyQIsqMKWZM8//SjV45Z+rTyMlK+/chpw2eaj0AT5vM8GyNf/RQOgOxCgWZNNf+yMrJQrkmMA==",
+     "shasum": "7abb30cd7b65621cfac6458c4118546b0eb78e36",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIG8stMCoHVVLQKPqRgVk+R7FLGQS3Zj9kC/yTUCEBBPuAiBw2CsBtkGror07jin6Jzuh1s359fASGW0LrVQf7b8ViQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-0.3.9.tgz",
+     "unpackedSize": 170013
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "13f1106b1f772d7717724fa0035a72c7efb7ef5c",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/index.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "0.3.9"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@1.0.0",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_1.0.0_1765614750763_0.8445802757383771"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@1.0.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-B76V6QtKuZwA1jm2B7R5S3lNRDWMeYOx/up5CIPbK5GkudtPw91mPcCqB+9dBG5S1c7jfMnN3jnxhtE604gITw==",
+     "shasum": "7657fd12094a565065c31308a5e4e535a054fe18",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCMIIgcAqLLdDMCBxO1s+t/XIuls5FEJQl+6fsYiom+2wIhAMMfhS/17lEvXj7+xtiKwE+G09iLtf4gil6HLhttiU/W"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-1.0.0.tgz",
+     "unpackedSize": 105386
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "fc73df041364521b3c9890bb595acfdf2974c397",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "1.0.0"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@2.0.0",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_2.0.0_1765818820543_0.986223782572188"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@2.0.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-l4Jov1+ejhildp35flE5F5KWGFywYTp5ydaigKXL3PNT24fvSMHTG5ZdApVGrQRm7Lg1xJ4IID5+O5Ly6KNczA==",
+     "shasum": "9441511cb19911bddda5d8bb4c3cf705a2b14af9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICdl/EH23IuobWS8RUNf2Qb4485xvBn5AzMCnYJka01YAiBGcxC6zRihVNhU+COsQR8s1ASHM5RPfRD2yDiS6gJQwA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-2.0.0.tgz",
+     "unpackedSize": 105428
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "186eb56c9606f4da9760a44947a3ae1b8b7a5602",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.0"
+   },
+   "2.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@2.0.1",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_2.0.1_1765822741155_0.47442061767001853"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@2.0.1"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-RC3F2pxLgyHwPYS5YNPk9FSIBCdOpUHy4uLY8rcT3hD3ZgFkjbmCpMtrhJ6OYpcALZZuNrYSU7Kry0ZSgStKEA==",
+     "shasum": "2ae96c8d6eafe41d0fd602ac7b7dbd3cc7d02e2c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCBRJE6ik63/plDr1h/qxrMYIPSaumXV5wwV+qw4XsJjwIhAO115N2BsIZaJ6dZ1n43unRFjxgc6VAcO5jM81eAa6ch"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-2.0.1.tgz",
+     "unpackedSize": 105572
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "8b2554427c51ba0b7d141e467136137a14ca5dd9",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.0.1"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@2.1.0",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_2.1.0_1766027933991_0.5282879771967963"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@2.1.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-cN6IqRROYieW3DzgtVcumQSvVxKe7rAZI3iS+2+LpsLKyT5fIUd5cn+r6wJ+qkOo2lQWG2RyZEuqv5bTYOPZVA==",
+     "shasum": "4ab9554a401d7c3c25cf618fb7eb6e3d80864b08",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIFZd/ZTeE/xWz5/JFP2thHjA93uef27RqTMkqtGm4rhNAiBCSb/EoWSQgfW6MAdzpyxsn4IJO7+r53tUCCXBQ0O7Lw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-2.1.0.tgz",
+     "unpackedSize": 105548
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "b9742c13a89000f7dccc4dc49e5ac945cc17c710",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.1.0"
+   },
+   "2.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@2.2.0",
+    "_nodeVersion": "20.19.6",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_2.2.0_1766114770871_0.7117154316925998"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.7.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@2.2.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-BMlj1Z9zk6X0mLW/oSG2ZZPA/Z8cBXO23Ixn6gehO9DdDTNLck0dmdwvadyJ7vCRhze15by+tNDabXaDc92PRg==",
+     "shasum": "e0cc6e855ba27c4db3267d1cfb5f426e0c5ac0dc",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDEQuv/CmnPjQSM5eFlKFF5SK4RWQUO2URRCT5ysEJ/EAiBBCzhI/Ma8JysxlhrZnDQdEo8UAfgHFYqpFSGRCVeKWg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-2.2.0.tgz",
+     "unpackedSize": 113637
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "6df8eb92b9c679a4c38ed99482a61368e64b34f0",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.2.0"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@2.3.0",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_2.3.0_1769802089133_0.6559715914189539"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.8.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@2.3.0"
+     },
+     "fileCount": 33,
+     "integrity": "sha512-hcDWjyyjinwCGSvNGwAB+cx/X3k6Dy9FOTOB6ZDv8yNye9XjSIUf/ilEC4akWiUqvQIlGITbPmYpPE1w8uLoXA==",
+     "shasum": "f7086187da8ce42709683b2fd21d0e27504919e2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEKDEa1Wu6UHKVCw6F6IwaIMEaGx3wNO/YiDxfVc2cHrAiByjxU3/JFq97/Rb8kM3Vz1Ws/OQ7asoyxgNdSBoszFAg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-2.3.0.tgz",
+     "unpackedSize": 138294
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "6a9d1aa36cfb4025249bedcba62a5c14e3989c80",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "2.3.0"
+   },
+   "3.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@3.0.0",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_3.0.0_1772739393068_0.18799751491572247"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.39",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@3.0.0"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-aCNQsNH5EgrRn8+ESGaODROF5CuYvHmwKzQF2TVrbDy0OrQ0hxFKSa49L29LjnbnpBblQMFkwqeKko+WF9cwtA==",
+     "shasum": "e4a27700104d17a0570513c6d42e96762fc42a0c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCljpQhbThX8HChRpDbwFr2jW/XfsPOHqzIHVjJfkXNGgIgZd/4gy8XKaST6XAMgvt2SPPexUWl1NEfgpmSqmaHFkM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-3.0.0.tgz",
+     "unpackedSize": 176165
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3b8dd74c920be32f8cb72bc715919a6b7c4d424f",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "3.0.0"
+   },
+   "3.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@3.0.1",
+    "_nodeVersion": "20.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_3.0.1_1772746856589_0.8805671274762223"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.39",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@3.0.1"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-y2yng5XICbrFys7f9O/B/z7em+jGEspeBP0XbKaA7mZ9XRD2pAzeHg1zyaDfgC4CsOSHBhwLzRT3sw6gqiZP1w==",
+     "shasum": "58fcd86edf2bae14f035635c85ae736032ab27ab",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCSTuiYQkfeAn6KPqNdVsKnZAxJw4DlLMiLKj4TbE/LnQIhAMuE3DyM5l3vGhRwjJUPvqfiGW3j57kbF9l6QtJAUElX"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-3.0.1.tgz",
+     "unpackedSize": 176165
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "e55a0369b98754fff9ef69ed3b8cd073640f55ca",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "3.0.1"
+   },
+   "3.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@3.0.2",
+    "_nodeVersion": "20.20.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_3.0.2_1774895645316_0.2727786743771581"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.39",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/form-data": "^2.2.1",
+     "@types/node": "^22.0.0",
+     "@vitest/ui": "^3.2.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^16.0.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^3.2.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@3.0.2"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-FSv8GVxnrOL0sSMx8do+43byggUEN7HZnJfBCe+3LpLyFqpS81oL5BuQ/N5DRx0kW9h8EwDBwBrC3rnUeu/SZw==",
+     "shasum": "ea915bfa74a206374a37d749bfd91d7cf7c3a20d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDHoJRdXsdPy/3ZJsJGBYWREOCyoXaZOjPP9of6UBLsVAiEAuIr6HgXFdZNVbKVfuptX3t6nwDz3goxC3JaMGpkcp2c="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-3.0.2.tgz",
+     "unpackedSize": 171856
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "3c9d6ba9429d526190fd780b4962583bd03b8955",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "3.0.2"
+   },
+   "4.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.0.3",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.0.3_1775896782094_0.6433440202590257"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.11.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.49",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.4",
+     "@vitest/ui": "^4.1.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^17.4.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.0.3"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-tpfhRsd6bUVbTRcytHHr8rdYp5+UP6nwkt/F+3rqqxTU8SKQ9N0gIekaDgQRwHWP7V3jRxIhko+q0QdFYBRQ2Q==",
+     "shasum": "b44cc79db4bdee07f02622b43965d502772cd3a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbNFFmnY4itaAP0glJ3yU/prnfiZA3fNVyaN8RAwA1hQIgLV3zF/tMAO/QUrrKcXwyrSDL7tzmQtIV5QsGChvfoWU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.0.3.tgz",
+     "unpackedSize": 177096
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "af9f5c18397c3006b82a95bc234c611f24518a5e",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.0.3"
+   },
+   "4.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.0.4",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.0.4_1779293928957_0.3185968420094232"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.52",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.4",
+     "@vitest/ui": "^4.1.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^17.4.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.0.4"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-R7iEa9lfcCYCem7l/GERGZxpPbAAizOBPxD6fOQ+GxewsTewekUrBtlGti/IEABwZLSo9XsnkYx6Ljx3bd+H1Q==",
+     "shasum": "9ada1884a96f75741219aaa0bd72f0f9c3fb1c67",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCcJEp2c0Le+SPVeQm/FjqSLWq9ltPYSxgj7AqWYa2aKAIgRMBA4w0HlSK3iKGjhV39NCEK/yth7NMhi/GpNFW9NUM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.0.4.tgz",
+     "unpackedSize": 177096
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "5d5f0b865b9c46e12d755e4ddb13bf25ce05d1bb",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.0.4"
+   },
+   "4.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.1.0",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.1.0_1779386192450_0.5549079955898191"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.52",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.4",
+     "@vitest/ui": "^4.1.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^17.4.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.1.0"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-nP2wa/t4N1K5j/mkpJPo7ttqXpx5Q+f+5s829167V+8nOzl5pcLqBIzOvn8TqkX+3FAThdX+FK9gSSxBTrb/yQ==",
+     "shasum": "eb86a35dfe66b21daa2e02099e345a41e89c9058",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDlzbFkHzWN2LJrQsiVfDMasg3hXMaAorIHA+38kcujMwIgaz0kpbXY3GPm47M3y4c40CnvDbT5FpifVwNF/vH5CeQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.1.0.tgz",
+     "unpackedSize": 187654
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "e44987bfb48c7d22fcd30783e6eedcf99ae72f24",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.1.0"
+   },
+   "4.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.1.1",
+    "_nodeVersion": "24.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.1.1_1779577614944_0.053191970464782745"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.12.1",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.52",
+     "@modelcontextprotocol/sdk": "^1.0.0",
+     "form-data": "^4.0.4",
+     "smol-toml": "^1.5.2",
+     "zod": "^3.24"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@types/node": "^22.0.0",
+     "@vitest/coverage-v8": "^4.1.4",
+     "@vitest/ui": "^4.1.4",
+     "eslint": "^9.24.0",
+     "eslint-config-prettier": "^10.1.2",
+     "eslint-plugin-import": "^2.31.0",
+     "globals": "^17.4.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^16.1.6",
+     "prettier": "^3.5.3",
+     "typescript": "^5.0.0",
+     "typescript-eslint": "^8.30.1",
+     "vitest": "^4.1.4"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.1.1"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-7ll2hrcbEy3zL0zbHZJXik1sFXhesuUqSHx9srDA8rrJHWcpo2rVxHz06T5ZjuMbEwnys+sQ3kI7QASCrzm+aw==",
+     "shasum": "fd4db6c5fe0b0267f25255dfcd77fc76ddd14427",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIF9hq6My4iR4ioSKrBak/aXFl+9i9lB8yQ3OHt/XJ1YaAiB8YytrrdwF59YwRC7jrbiHZ9ce9NptE+4jhZthn/yrGQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.1.1.tgz",
+     "unpackedSize": 187684
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "2266decebcf7f51b78288d50c32614c966db3f91",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm run build && npm test",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.1.1"
+   },
+   "4.1.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.1.2",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.1.2_1788587671328_0.8051645209873242"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "11.19.0",
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.75",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "smol-toml": "^1.8.0",
+     "zod": "^4.5.4"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/node": "^22.20.1",
+     "@vitest/coverage-v8": "^5.0.0",
+     "@vitest/ui": "^5.0.0",
+     "eslint": "^10.10.0",
+     "eslint-config-prettier": "^10.1.8",
+     "globals": "^17.12.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^17.4.1",
+     "prettier": "^3.9.6",
+     "rimraf": "^6.1.3",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.69.0",
+     "vitest": "^5.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.1.2"
+     },
+     "fileCount": 37,
+     "integrity": "sha512-/hZU+Peg4EX+yswGaODtYXC9/qhCXY1Pn0D/ogp8PCWKjs+F5jJ2frdA8XUfR9Oe0pM/wT+jtfD/ztjG9h2Jlg==",
+     "shasum": "6f8bf4bff3d93788632095908f7ac71f63a81a34",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZ6xvM90RpM3VjY0oW9XbFAaKDHG3o3nPetgE6AcQ//QIhAOhIWv1PYIwwDYSOYpwIBeDLd90jq36/jqcEd68+y0Za"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.1.2.tgz",
+     "unpackedSize": 108273
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "782e5e5bd09fe53c0102031386e1594fcc3c62aa",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm test",
+     "pretest": "npm run build",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.1.2"
+   },
+   "4.1.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.1.3",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.1.3_1788590799248_0.6523253069993291"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "allowScripts": {
+     "fsevents@2.3.3": true
+    },
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.74",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "smol-toml": "^1.8.0",
+     "zod": "^4.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/node": "^22.20.1",
+     "@vitest/coverage-v8": "^4.1.11",
+     "@vitest/ui": "^4.1.11",
+     "eslint": "^10.9.1",
+     "eslint-config-prettier": "^10.1.8",
+     "globals": "^17.11.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^17.4.1",
+     "prettier": "^3.9.6",
+     "rimraf": "^6.1.3",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "devEngines": {
+     "packageManager": {
+      "name": "npm",
+      "onFail": "error",
+      "version": "12.0.2"
+     }
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.1.3"
+     },
+     "fileCount": 37,
+     "integrity": "sha512-uWC24No3UZkW8LQY1yNPeb9e6WKQlBuxuYFxaEh4AXyNew27QuaobkulkrDhO/u2WL4N1Jynv5pj+oE0sQdQaQ==",
+     "shasum": "0392ca3e56eacfa0d7f0d3724cdc2cfd27d47907",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDZJXjlfA3ahcXtF/VLc7jMbKoYo27kBiTF+dvzLnd0iAIhAMu12ENyQ8lUQrjSsl9jHaHolVVMmrj7XEpCux53mnPd"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.1.3.tgz",
+     "unpackedSize": 108486
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "dac15c0888cc911379b2c1e0c0b53bd4fe3ca1cf",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "packageManager": "npm@12.0.2",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm test",
+     "pretest": "npm run build",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.1.3"
+   },
+   "4.1.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@belsar-ai/joplin-mcp@4.1.4",
+    "_nodeVersion": "24.20.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/joplin-mcp_4.1.4_1788621615019_0.3309117911309398"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:5e629112-8a7b-4f94-9430-c49bf2fd593b"
+     }
+    },
+    "_npmVersion": "12.0.2",
+    "allowScripts": {
+     "fsevents@2.3.3": true
+    },
+    "author": {
+     "name": "Kyle Lyon"
+    },
+    "bin": {
+     "joplin-mcp": "dist/cli.js"
+    },
+    "bugs": {
+     "url": "https://github.com/belsar-ai/joplin-mcp/issues"
+    },
+    "dependencies": {
+     "@anthropic-ai/sandbox-runtime": "0.0.74",
+     "@modelcontextprotocol/sdk": "^1.30.0",
+     "smol-toml": "^1.8.0",
+     "zod": "^4.5.2"
+    },
+    "description": "Model Context Protocol (MCP) server for Joplin note-taking app",
+    "devDependencies": {
+     "@eslint/js": "^10.0.1",
+     "@types/node": "^22.20.1",
+     "@vitest/coverage-v8": "^4.1.11",
+     "@vitest/ui": "^4.1.11",
+     "eslint": "^10.9.1",
+     "eslint-config-prettier": "^10.1.8",
+     "globals": "^17.11.0",
+     "husky": "^9.1.7",
+     "lint-staged": "^17.4.1",
+     "prettier": "^3.9.6",
+     "rimraf": "^6.1.3",
+     "typescript": "^6.0.3",
+     "typescript-eslint": "^8.68.0",
+     "vitest": "^4.1.11"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@belsar-ai%2fjoplin-mcp@4.1.4"
+     },
+     "fileCount": 37,
+     "integrity": "sha512-3N5E4S/USUG6WxuLlXmq5zVZZ1vd8cwFsPDL0MCRJodtsVtOoqnyJ+vYr/FXRbW+ja1HcHYxGna6u5fMRDcR+g==",
+     "shasum": "a2ec032897758e4031ad360dc40972e8cd4ccda6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDNXnQu0R6oNXoy9q9EdnZrXZ22pFmMr26yuTkR7hg2yAiEAt8wARodL5SIkehS556Cnlefeozii0qTOLSlvCJIWjAM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@belsar-ai/joplin-mcp/-/joplin-mcp-4.1.4.tgz",
+     "unpackedSize": 108361
+    },
+    "engines": {
+     "node": ">=22.0.0"
+    },
+    "gitHead": "4205e66c222fe63588b3bd8673c4527b517063e8",
+    "homepage": "https://github.com/belsar-ai/joplin-mcp#readme",
+    "keywords": [
+     "mcp",
+     "joplin",
+     "notes",
+     "model-context-protocol",
+     "ai",
+     "llm"
+    ],
+    "license": "Apache-2.0",
+    "lint-staged": {
+     "*.{json,md}": [
+      "prettier --write"
+     ],
+     "src/**/*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings 0"
+     ]
+    },
+    "main": "dist/index.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:17f6102075fb]",
+      "name": "lyonk71"
+     },
+     {
+      "email": "[redacted-email:9affffaa041c]",
+      "name": "kjamz9000"
+     }
+    ],
+    "name": "@belsar-ai/joplin-mcp",
+    "packageManager": "npm@12.0.2",
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/belsar-ai/joplin-mcp.git"
+    },
+    "scripts": {
+     "build": "npm run clean && tsc -p tsconfig.build.json",
+     "clean": "rimraf dist",
+     "dev": "tsc --watch",
+     "format": "prettier --write .",
+     "lint": "eslint . --fix",
+     "lint:ci": "eslint . --max-warnings 0",
+     "lint:fix": "eslint . --fix",
+     "prepare": "npm run build && (test -d .git && ./scripts/setup-husky.sh || true)",
+     "prepublishOnly": "npm test",
+     "pretest": "npm run build",
+     "release:beta": "npm version prerelease --preid=beta -m 'Release %s'",
+     "release:major": "npm version major -m 'Release %s'",
+     "release:minor": "npm version minor -m 'Release %s'",
+     "release:patch": "npm version patch -m 'Release %s'",
+     "start": "node dist/cli.js",
+     "test": "vitest run",
+     "test:coverage": "vitest run --coverage",
+     "test:ui": "vitest --ui",
+     "test:watch": "vitest",
+     "typecheck": "tsc --noEmit"
+    },
+    "type": "module",
+    "types": "dist/index.d.ts",
+    "version": "4.1.4"
+   }
+  }
+ },
+ "name": "@belsar-ai/joplin-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@belsar-ai%2Fjoplin-mcp"
+}

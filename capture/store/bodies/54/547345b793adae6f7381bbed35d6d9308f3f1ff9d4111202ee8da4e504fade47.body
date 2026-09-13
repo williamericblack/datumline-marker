@@ -1,0 +1,2528 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.10.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:219a3952b444]",
+    "name": "vantreeseba"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.1.0",
+   "0.1.1",
+   "0.2.0",
+   "0.2.1",
+   "1.0.0",
+   "1.0.1",
+   "1.0.2",
+   "2.0.0",
+   "2.0.1",
+   "2.0.2",
+   "2.1.0",
+   "2.10.0",
+   "2.2.0",
+   "2.2.1",
+   "2.3.0",
+   "2.4.0",
+   "2.5.0",
+   "2.5.1",
+   "2.6.0",
+   "2.7.0",
+   "2.8.0",
+   "2.9.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@cubicecho/graphql-mcp",
+  "_rev": "22-89190451bef30a8e488d5b90147c30ec",
+  "author": {
+   "name": "Benjamin Van Treese"
+  },
+  "bugs": {
+   "url": "https://github.com/cubicecho/graphql-mcp/issues"
+  },
+  "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+  "dist-tags": {
+   "latest": "2.10.0"
+  },
+  "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:219a3952b444]",
+    "name": "vantreeseba"
+   }
+  ],
+  "name": "@cubicecho/graphql-mcp",
+  "readme": "# @cubicecho/graphql-mcp\n\nTurn a GraphQL schema into a [Model Context Protocol](https://modelcontextprotocol.io/)\nserver. Point it at a `GraphQLSchema` and every `Query`/`Mutation` root field\nbecomes an MCP **tool**, described from your SDL \u2014 field and argument\ndescriptions, types \u2014 so an AI can discover and call your API.\n\nIt's a thin wrapper meant to run **side-by-side** with your GraphQL server:\nmount the returned HTTP handler on a route in the same app, or run it as its own\nprocess and forward to a remote GraphQL endpoint.\n\n## Install\n\n```bash\nnpm install @cubicecho/graphql-mcp\n# peer deps\nnpm install @modelcontextprotocol/sdk graphql zod\n```\n\nNeeds Node \u2265 22, `@modelcontextprotocol/sdk` \u2265 1.12, `graphql` \u2265 16, and `zod`\n3.25+ or 4.x. [`createFetchHandler`](#non-node-runtimes) alone needs SDK \u2265 1.25.\n\n`zod` is a peer dependency rather than a bundled one: the MCP SDK validates tool\narguments against *your* copy, and a second copy inside this package would make\nthose checks fail across the boundary. Bring whichever major you already use \u2014\nboth are tested.\n\n## Quick start\n\nRun the MCP endpoint beside your GraphQL endpoint in the same Express app:\n\n```ts\nimport express from 'express';\nimport { createHttpHandler } from '@cubicecho/graphql-mcp';\nimport { schema } from './schema.js'; // your executable GraphQLSchema\n\nconst app = express();\napp.use(express.json());\n\napp.post('/graphql', /* your existing GraphQL handler */);\napp.post('/mcp', createHttpHandler({ schema })); // \u2190 the MCP server\n\napp.listen(4000);\n```\n\nGiven the schema from the brief:\n\n```graphql\n\"A user in the system\"\ntype User {\n  \"The unique id for the user, a UUID\"\n  id: String!\n  \"The list of todos this user has created.\"\n  todos: [Todo!]!\n}\n\n\"A todo entity, able to be marked as completed\"\ntype Todo {\n  \"The unique id for the todo, a UUID\"\n  id: String!\n  \"If the todo is complete or not.\"\n  completed: Boolean!\n  \"A textual description of what the todo is.\"\n  description: String!\n  \"The user who created this todo.\"\n  createdBy: User!\n}\n\ntype Query {\n  todo(id: String!): Todo\n  todos: [Todo!]!\n}\n\ntype Mutation {\n  \"Create a new todo for a user.\"\n  createTodo(input: CreateTodoInput!): Todo!\n  setCompleted(id: String!, completed: Boolean!): Todo\n}\n```\n\n\u2026you get four tools \u2014 `todo`, `todos`, `create_todo`, `set_completed` \u2014 each\nwith an input schema derived from the field's arguments and a description built\nfrom the SDL docstrings. (Tool names are `snake_case` by convention; pass\n`nameCase: 'preserve'` to keep your field names verbatim.) Calling `create_todo`\nruns the equivalent of:\n\n```graphql\nmutation createTodo($input: CreateTodoInput!) {\n  createTodo(input: $input) { id completed description __typename }\n}\n```\n\n## Concepts\n\n| Export | What it does |\n|---|---|\n| `createHttpHandler(options)` | Returns an Express/Node `(req, res)` handler serving the tools over the MCP Streamable HTTP transport. A fresh server is created per request. |\n| `createMcpServer(options)` | Returns a single `McpServer` with all tools registered. Use for stdio or one long-lived connection. |\n| `connectServer(server, transport)` | Connects a server to a transport. Use this instead of `server.connect` \u2014 see [Connecting your own transport](#connecting-your-own-transport). |\n| `createServerFactory(options)` | Builds the tool descriptors once and returns a `() => McpServer` factory. |\n| `createLocalExecutor(schema, opts?)` | Executor that runs operations in-process via graphql-js (the default). |\n| `createHttpExecutor(endpoint, opts?)` | Executor that forwards operations to a remote GraphQL HTTP endpoint. |\n| `buildTools(schema, opts?)` | The pure core: schema \u2192 `ToolDescriptor[]` (no SDK, no executor). |\n| `buildOperationTools(schema, docs, opts?)` | The same, from hand-written GraphQL documents \u2014 see [Hand-written operations as tools](#hand-written-operations-as-tools). |\n\nLower-level helpers (`buildOperation`, `buildSelectionSet`, `argsToZodShape`,\n`registerGraphqlTools`, `compileRules`, `extendSchemaForMcp`, `stripRootTypes`,\n`buildMetaTools`) and all types are exported too.\n\n## How fields become tools\n\n- **Both queries and mutations become tools.** MCP has no query/mutation\n  distinction; queries are annotated `readOnlyHint`, mutations `destructiveHint`\n  \u2014 see [Write hints](#write-hints), because that mutation default is\n  deliberately blunt.\n- **Names are `snake_case`.** `createTodo` becomes `create_todo`. The MCP spec\n  doesn't mandate a convention, but every example in it names tools that way and\n  so does most of the ecosystem, so it's what an agent has seen most. The\n  humanized `title` (`Create Todo`) and the description still carry the real\n  field name, and `include`/`exclude` patterns always match the GraphQL field\n  name. Pass `nameCase: 'preserve'` for verbatim field names, or `toolName` for\n  full control \u2014 return `undefined` from it to decline and keep the default for\n  that field, so renaming two fields out of forty stays a two-line callback:\n\n  ```ts\n  // rename one field; every other tool keeps its default name\n  toolName: (field) => (field.name === 'listTodosSingle' ? 'get_todo' : undefined),\n  ```\n\n  `applyNameCase` is exported for the other case \u2014 transforming a name *and*\n  casing it the way the package does (`applyNameCase(base)`). Prefer either to\n  hand-rolling snake_case, which agrees with ours until a field like\n  `parseURLFilter` splits an acronym run.\n- **Arguments \u2192 input schema.** Each field's args are converted to a Zod schema\n  (the MCP input-schema format): non-null args are required, scalars/enums/lists/\n  input-objects map across, custom scalars fall back to an opaque value (see\n  [Custom scalars](#custom-scalars)).\n- **Unknown arguments are rejected.** Input objects \u2014 and the argument object\n  itself \u2014 are strict, matching the `additionalProperties: false` the tool\n  listing already advertises. A misspelled field comes back as an error naming\n  the key, rather than a success with the value silently dropped, which is the\n  failure an agent has no way to notice or retry.\n- **Return type \u2192 selection set.** A selection set is auto-generated: every\n  scalar/enum leaf plus nested objects up to `selectionDepth` (default 2), always\n  including `__typename`. Fields that require arguments and cyclic types are\n  skipped. The depth is per field \u2014 see [Selection depth](#selection-depth).\n- **Descriptions come from the SDL** \u2014 the field docstring, its signature, and a\n  per-argument list carrying each argument's default (as the GraphQL literal\n  you'd write) and any argument-level deprecation. Each description also ends\n  with the exact selection the tool will return, so an agent doesn't plan around\n  fields it won't receive.\n- **Deprecations are stated, not hidden.** A field with `@deprecated` keeps its\n  tool \u2014 it's often still the only way to do something \u2014 but the reason sits\n  directly under the summary, where an agent reads it before choosing:\n\n  ```\n  The `legacyTodos` query.\n\n  DEPRECATED \u2014 Use todos instead.\n  ```\n\n  Pass `includeDeprecated: false` to drop them from the tool surface entirely.\n\n## What a tool returns\n\nEvery tool \u2014 generated or meta \u2014 returns JSON text you can parse directly:\n\n```json\n{\n  \"data\": { \"todos\": [{ \"id\": \"1\", \"__typename\": \"Todo\" }] },\n  \"errors\": [{ \"message\": \"\u2026\", \"path\": [\"todos\", 1, \"owner\"] }],\n  \"note\": \"Partial result: some fields failed and are null in `data`; \u2026\"\n}\n```\n\n- **`isError` means nothing usable came back.** GraphQL happily returns `data`\n  *and* `errors` when some fields resolve and others don't. Flagging that whole\n  call an error makes an agent throw away rows it could have used, so `isError`\n  is set only when no root field resolved \u2014 otherwise the result carries a\n  `note` saying part of it failed.\n- **Errors are condensed** to `message`, `path`, and `extensions` (where app\n  codes like `UNAUTHENTICATED` live). `locations` are dropped: they're line and\n  column offsets into a query string the agent never wrote and can't see.\n- **Results are clamped** to `maxChars` (default `50_000`), so one large\n  collection can't flood the agent's context:\n\n```ts\ncreateMcpServer({ schema, maxChars: 20_000 });\n```\n\n  The clamp is *structural*: whole array elements are dropped, evenly across\n  every collection in the payload, and the body stays parseable JSON. Cutting\n  the serialized text instead would leave the client a `SyntaxError` where its\n  rows used to be \u2014 and would take `errors` and `note` with it, since they\n  serialize last. `errors`, the partial-result `note`, and a `truncated` record\n  are always kept.\n\n- **A clamped result says what went missing, and names the argument to page\n  with** when the field has one. \"This was cut\" on its own leaves an agent with\n  no move but to re-run the identical call:\n\n```json\n{\n  \"data\": { \"todos\": [{ \"id\": \"1\" }] },\n  \"truncated\": {\n    \"droppedItems\": 419,\n    \"totalItems\": 420,\n    \"advice\": \"narrow the query or request fewer fields. This field paginates: pass `first` to cap the page size, then `after` to continue from where this page ended.\"\n  }\n}\n```\n\n  The arguments are read off the schema, matching the conventions in wide use\n  (`first`/`after`, `limit`/`offset`, `take`/`skip`, `page`/`pageSize`). A field\n  with none keeps the plain advice.\n\n  When nothing can be dropped \u2014 one enormous scalar, say \u2014 `data` is left out\n  entirely and `truncated.dataOmitted` says so, rather than handing back a value\n  silently cut in half that an agent might act on.\n\nThat holds when the executor *throws*, too \u2014 a refused connection or a broken\ncustom executor comes back as `{ \"errors\": [{ \"message\": \"\u2026\" }] }` with\n`isError` set, never as a bare string a client can't parse.\n\n- **A malformed call answers in the same envelope**, which matters because it's\n  the failure an agent hits most: a wrong scalar, a misspelled key, a bad enum\n  member. Each Zod issue becomes one error naming the argument it's about, so a\n  call with two mistakes is told about both:\n\n```json\n{\n  \"errors\": [\n    {\n      \"message\": \"Invalid input: expected number, received string at `limit`\",\n      \"extensions\": { \"code\": \"BAD_INPUT\" }\n    },\n    {\n      \"message\": \"Invalid option: expected one of \\\"LOW\\\"|\\\"HIGH\\\" at `filter.priority`\",\n      \"extensions\": { \"code\": \"BAD_INPUT\" }\n    }\n  ]\n}\n```\n\n## Choosing where GraphQL runs\n\nThe single seam is the **executor**. The default runs in-process against the\nschema you pass:\n\n```ts\nimport { createMcpServer, createLocalExecutor } from '@cubicecho/graphql-mcp';\n\nconst server = createMcpServer({\n  schema,\n  executor: createLocalExecutor(schema, { rootValue, contextValue }),\n});\n```\n\nTo run the MCP server as a separate process and forward to a GraphQL HTTP server:\n\n```ts\nimport { createHttpHandler, createHttpExecutor } from '@cubicecho/graphql-mcp';\n\nconst handler = createHttpHandler({\n  schema, // used only to derive the tools\n  executor: createHttpExecutor('http://localhost:4000/graphql', {\n    // forward auth derived from the per-request context\n    headers: (ctx) => ({ authorization: (ctx as { token: string }).token }),\n  }),\n});\n```\n\n## Per-request context (auth)\n\nDerive the GraphQL context from the incoming HTTP request \u2014 e.g. to forward an\nauth token into resolvers or the forwarding executor:\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  contextFromRequest: (req) => ({ token: req.headers.authorization }),\n});\n```\n\nFor non-HTTP setups, pass `context` as a static value or a factory of the MCP\nrequest `extra`.\n\n## Choosing a tool surface\n\nBefore deciding *which* fields become tools, decide what kind of surface you are\nbuilding. There are three, they compose, and each answers a different failure:\n\n| Surface | What an agent sees | Answers |\n|---|---|---|\n| **Generated** (the default) | one tool per root field, described from the SDL | open-ended reads over data nobody anticipated \u2014 every field is reachable without you having thought of the question |\n| **Curated** ([`operations`](#hand-written-operations-as-tools), [`typesOnly`](#a-tool-specific-operation-surface-typesonly)) | the handful of operations you wrote | known workflows and multi-step writes \u2014 the shape is one you chose, so there is less to get wrong |\n| **Exploratory** ([`metaTools`](#schema-exploration-tools-large-schemas)) | four navigation tools instead of a listing | a schema too large to project at all \u2014 the agent reads the parts it needs |\n\nThe trade is one sentence: **a curated surface is a bet that you know the\nquestions.** When the bet is right it wins decisively \u2014 in the measurement\nbehind this package's argument-shape work, a curated arm made zero failed calls\nagainst a generated arm's three, on a listing over an order of magnitude\nsmaller, with more than ten times the share of bytes spent on prose an agent\nactually reads.\n\nWhen the bet is wrong it loses. On a bulk analytical read from the same\ncomparison the *generated* surface won on call count, because raw field access\nis a natural join for a question no hand-written operation anticipated. If your\nagent's job is to answer things you haven't thought of, generate.\n\nThey compose, so it is rarely either/or: an operation overrides a generated tool\nby name, meta tools sit alongside both, and a `tools` entry beats everything.\nThe usual shape is to generate, then hand-write the two or three tools whose\nargument shapes an agent keeps getting wrong.\n\n## Choosing which fields become tools\n\nAllow/deny lists take graphql-shield-style patterns \u2014 a field name with optional\n`*` wildcards and an optional `Query.`/`Mutation.` prefix:\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  include: ['Query.*', 'createTodo'], // only these become tools (omit to keep all)\n  exclude: ['delete*', 'Mutation.resetDb'], // wins over include\n});\n```\n\nPatterns match GraphQL field names (not the `snake_case`d or renamed tool\nnames), and they apply to\n**every** root field of the schema being wrapped \u2014 including fields added by\n`extend` (below), so an `include` list must name those too. Omitting `include`\nkeeps every field; passing an empty array matches nothing and exposes no tools\n(it fails closed, so a computed-empty allow-list can't accidentally publish your\nwhole API).\n\nFor anything the patterns can't express, the `filter` callback still composes\nwith both lists:\n\n```ts\ncreateHttpHandler({ schema, filter: (field, kind) => !field.deprecationReason });\n```\n\n## Custom scalars\n\nBuilt-in scalars map to the obvious Zod types; a custom scalar (`DateTime`,\n`JSON`, `URL`) has no shape we can infer, so it falls back to an opaque value\ncarrying the scalar's own SDL description \u2014 so documenting the format in your\nschema already helps:\n\n```graphql\n\"An ISO-8601 timestamp, e.g. 2026-08-30T12:00:00Z.\"\nscalar DateTime\n```\n```\nCustom scalar DateTime \u2014 An ISO-8601 timestamp, e.g. 2026-08-30T12:00:00Z.\n```\n\nThe value still isn't *validated* on our side. Pass `scalars` for that:\n\n```ts\nimport { z } from 'zod';\n\ncreateHttpHandler({\n  schema,\n  scalars: {\n    DateTime: z.string().datetime().describe('ISO 8601 timestamp'),\n    URL: z.string().url(),\n  },\n});\n```\n\nKeys are **scalar names**, and the mapping is consulted before the built-ins, so\nyou can retype `ID` or `String` too. A function form gets the\n`GraphQLScalarType` itself; return `undefined` to fall through:\n\n```ts\ncreateHttpHandler({\n  schema,\n  scalars: (scalar) => (scalar.name.endsWith('Date') ? z.string().date() : undefined),\n});\n```\n\nNullability, lists, and input-object nesting are applied around whatever you\nreturn \u2014 map the *base* type only.\n\nSince the map is a plain `Record<string, ZodTypeAny>`, a generated one drops\nstraight in. With [`@vantreeseba/graphql-zod`](https://www.npmjs.com/package/@vantreeseba/graphql-zod):\n\n```ts\nimport { defaultScalarMap } from '@vantreeseba/graphql-zod';\n\ncreateHttpHandler({\n  schema,\n  scalars: { ...defaultScalarMap, DateTime: z.string().datetime() },\n});\n```\n\nTool arguments cross the wire as JSON, so keep the mapped types\nJSON-representable \u2014 `z.string().datetime()` rather than `z.date()`.\n\n## Argument defaults\n\nAn argument's SDL default shows up in two places. The tool description states it\nin prose, and the rendered JSON Schema carries the `default` keyword:\n\n```graphql\ntype Query {\n  list(limit: Int = 10, status: Status = OPEN): [T!]!\n}\n```\n\n```json\n{ \"limit\": { \"type\": [\"integer\", \"null\"], \"default\": 10 },\n  \"status\": { \"anyOf\": [{ \"enum\": [\"OPEN\", \"DONE\"] }, { \"type\": \"null\" }], \"default\": \"OPEN\" } }\n```\n\nThe keyword is **advisory**. The value is not injected into the arguments, so an\nomitted argument stays omitted on the wire and *GraphQL* applies its own\ndefault \u2014 the SDL stays the single source of truth. An enum's default is\nrendered as its name, which is what a variable actually carries.\n\nThe description is careful about one thing worth knowing:\n\n```text\n- `limit`: `Int` (omit for the default `10`; an explicit `null` is sent as null)\n```\n\nGraphQL does not read a passed `null` as a request for the default. Omitting the\nargument gets you `10`; sending `null` gets you `null`. (Where\n`nullBranches: 'never'` is in force for that field, the caveat is dropped, since\n`null` can't be sent.)\n\nOn zod 3 the `default` keyword is absent \u2014 there is no metadata channel that\ndoesn't also change parsing \u2014 and the prose carries it alone.\n\n## Argument shape examples\n\nAn argument whose type is an input object carries a compact JSON example in its\ndescription, showing the minimum a caller has to send:\n\n```text\nArguments (`shape:` shows a minimal JSON example \u2014 required fields only):\n- `where`: `TaskFilters` \u2014 Filter the tasks returned.\n  shape: {\"name\":{\"eq\":\"string\"}}\n- `orderBy`: `[TaskOrderBy!]`\n  shape: [{\"startedAt\":{\"direction\":\"ASC\",\"priority\":0}}]\n- `limit`: `Int` (omit for the default `50`; an explicit `null` is sent as null)\n```\n\nThe shape was always in `inputSchema`, and that is exactly why this exists.\nMeasured against a hand-written-operations arm on the same schema, the generated\nsurface's only failed calls were argument shapes guessed from the argument's\n*name* \u2014 `orderBy: { startedAt: \"desc\" }` for a type that is really a nested\nobject keyed by column, with an enum spelled `ASC`. The correct answer was in\nthe JSON Schema. It was inside a listing where a fortieth of the bytes are\nprose, and the prose is what gets read. The examples add roughly one percent.\n\nWhat goes in one, and what doesn't:\n\n- **Every required field, however deep.** An example missing one is\n  valid-looking JSON the server rejects, which relocates the failure instead of\n  removing it. If a required field can't be rendered \u2014 the only case is a type\n  that contains itself \u2014 the whole example is dropped rather than shipped\n  incomplete.\n- **The first field of an all-optional object.** A required-only rule renders\n  `{}` for a filter type and teaches nothing, and rendering every optional field\n  is the size problem again.\n- **An enum's member as the schema spells it**, which is the half of the\n  measured failure that prose alone would not have fixed.\n- **One element of a list**, and a field's own default in place of a\n  placeholder.\n- Nothing at all for a scalar argument, for an argument whose own default is\n  already printed as a GraphQL literal on the line above, or for an example that\n  outgrows its budget \u2014 past a few hundred characters it stops being a hint and\n  becomes the schema again, in a second syntax.\n\n`exampleDepth` bounds how far *optional* expansion goes, and `0` turns examples\noff \u2014 per schema, per field, or from the SDL:\n\n```ts\ncreateMcpServer({ schema, exampleDepth: 0 });\ncreateMcpServer({ schema, exampleDepth: (field, kind) => (kind === 'query' ? 3 : 0) });\nfield.extensions = { mcp: { exampleDepth: 0 } };\n```\n\nUnlike [selection depth](#selection-depth) there is no `descriptor.exampleDepth`\nand no `decorate` rebuild. Depth is on the descriptor because the query, the\noutput schema and the description all have to agree about it; an example affects\nthe description alone, and `decorate` can already replace that outright.\n\n## Trimming null branches\n\nA nullable GraphQL argument is advertised two ways at once: it is absent from\n`required`, *and* it carries an explicit null branch \u2014 `anyOf: [T, {\"type\":\n\"null\"}]` for an input object, `type: [X, \"null\"]` for a scalar. The second is\nwhat costs. On a schema with a filter type per column those branches are around\n40% of the schema nodes and 20% of the whole advertised listing.\n\nThere is also one shape with no legal rendering downstream:\n\n```json\n{ \"anyOf\": [{ \"$ref\": \"#/definitions/StringFilter\" }, { \"type\": \"null\" }] }\n```\n\nDraft-07 has no way to say \"nullable\" next to a `$ref` \u2014 siblings of `$ref` are\nignored and strict validators reject them. A consumer either keeps the\ncombinator, which backends that compile every tool into one grammar refuse, or\ncollapses it into an illegal node.\n\n`nullBranches: 'never'` drops the branch:\n\n```ts\ncreateMcpServer({ schema, nullBranches: 'never' });\n```\n\nThe argument's *shape* is not lost \u2014 `required` already says it may be absent.\nWhat is lost is the ability to send an explicit `null`, which becomes a\nvalidation error. For most GraphQL servers absent and null are the same thing,\nbut not all: a mutation that clears a field with `updateUser(bio: null)` needs\nthe branch. That is why the default is `'always'`, and why this is an option\nrather than a fix \u2014 only your schema knows which kind it is.\n\n**List elements are exempt** under either setting. `[String]` permits a null\nelement, and an element can be null but never absent, so dropping the branch\nthere would change the type rather than compress it.\n\n### Per field\n\nThe trade above is rarely the same across a whole schema, because it usually\nsplits by *kind*. On a generated CRUD surface a filter argument set to an\nexplicit null is a caller mistake, while a mutation uses one to clear a column \u2014\nso the reads can drop their branches and the writes must keep theirs. A callback\nsays exactly that:\n\n```ts\ncreateMcpServer({\n  schema,\n  nullBranches: (field, kind) => (kind === 'query' ? 'never' : 'always'),\n});\n```\n\nThe callback receives the GraphQL field and its kind, and runs once per field.\nThe same decision is available everywhere a per-field decision already lives:\n\n```ts\n// on the schema, where it is defined\nfield.extensions = { mcp: { nullBranches: 'never' } };\n\n// or last, from decorate\ndecorate: (d) => (d.name === 'tasks' ? { nullBranches: 'never' } : undefined);\n```\n\n`decorate` rebuilds the input schema *and* the description at the new setting,\nbecause the per-argument advice about sending an explicit `null` is only true\nunder `'always'` \u2014 advice describing a call the tool now rejects is worse than\nnone. Each descriptor records what it was built at, as `descriptor.nullBranches`.\n\n**One caveat if you post-process the listing.** Splitting by kind means the same\ninput type renders two ways across the surface \u2014 a `TaskFilters` with null\nbranches under a mutation and without under a query. That is fine as MCP serves\nit: each tool's schema is converted on its own, so nothing collides. It stops\nbeing fine if you flatten every tool's `$defs` into one shared namespace\ndownstream, where you get two definitions claiming one name. Split by kind when\nthe read and write input families are disjoint (the generated-CRUD case), and\nkey by `(tool, type)` if you merge.\n\n### Per input type\n\nSplitting by kind is the common case, not the accurate one. What is actually\ntrue of a generated CRUD surface is that the *filter types* never legitimately\ntake an explicit null, wherever they appear \u2014 and \"wherever\" includes arguments\nthe per-field form cannot separate, because a mutation like\n`updateTask(where: TaskFilters, set: TaskUpdate)` takes both a filter and a\npatch on the same field. One mode has to serve both, and neither answer is\nright: `'never'` breaks clearing a column, `'always'` keeps every filter branch.\n\n`{ byType }` keys the mode on the named input type instead:\n\n```ts\ncreateMcpServer({\n  schema,\n  nullBranches: { byType: (type) => (type.name.endsWith('Filter') ? 'never' : 'always') },\n});\n```\n\n`where` loses its branches, `set` keeps its own, in the same tool.\n\nThe type handed to the callback is **the type in the position** \u2014 what is left\nafter stripping `!` and list wrappers \u2014 not the input object containing it. That\nis what makes it reach the top-level `where` argument, which has no containing\ntype at all and is exactly the position rendering\n`anyOf: [{\"$ref\": ...}, {\"type\": \"null\"}]`, the shape with no legal draft-07\nform. Scalars and enums are passed too, so \"objects keep their branch, scalars\ndon't\" is expressible.\n\nBecause the mode is a property of the type, every use of a named type renders\nthe same body \u2014 so unlike the per-field callback, this form is safe to flatten\ninto one downstream `$defs` namespace, and it carries into\n[`operations`](#hand-written-operations-as-tools) whole. The two compose: a\nper-field callback may *return* a `{ byType }`, which picks a policy by kind and\nthen lets the policy pick by type.\n\n```ts\nnullBranches: (_field, kind) => (kind === 'query' ? 'never' : { byType: filtersOnly });\n```\n\nThere is deliberately no per-*argument* setting. A named input type is hoisted\nonce under its GraphQL name, so rendering one type at two modes inside a single\ntool asks for two definitions under one id \u2014 which is an error from the JSON\nSchema conversion, not a size trade. Per-type has none of that: one type, one\nmode, one id, by construction.\n\n## Pruning input fields\n\n`nullBranches` compresses how each field is rendered. Sometimes the problem is\nthat the field is there at all.\n\nGenerated CRUD schemas emit a relation filter per foreign key, and those relation\nfilters point at each other. A `TaskFilters` reaches `TriggerListRelationFilter`\nreaches `TriggerFilters` reaches `TaskListRelationFilter` \u2014 so one `where`\nargument on one tool drags in the filter type of every table it can reach through\na join, transitively. On a schema of any size the closure is most of the\nadvertised bytes, and an agent that only ever filters on a column never calls any\nof it.\n\n`include`/`exclude` cannot reach this: they choose *root fields*, and the cost is\ninside an argument of a field you want to keep. `inputField` chooses fields of\ninput objects:\n\n```ts\ncreateMcpServer({\n  schema,\n  inputField: (field) => !/ListRelationFilter/.test(String(field.type)),\n});\n```\n\nThe callback is handed the input field and the input object that contains it, and\nreturns whether to advertise it. It runs during the walk, not after \u2014 so a type\nreached *only* through a pruned field is never visited, and never lands in\n`definitions` as an orphan nothing references. That is the whole point: pruning\none field on `TaskFilters` deletes the closure behind it.\n\n```ts\n// keep a filter type's cheap operators and drop the rest\ninputField: (field, parent) =>\n  parent.name.endsWith('Filter') ? ['eq', 'in', 'contains'].includes(field.name) : true;\n```\n\n**Pruning a non-null field throws at build time.** The GraphQL server still\nrequires it, so the tool would be advertised as callable and rejected on every\ncall, for a reason an agent cannot see from the tool it was given. A broad\npredicate that catches one required field fails where a human is reading it\nrather than once per call in production. Make the field nullable in the schema,\nor spare it in the predicate.\n\nPruning *every* field of a type is allowed, and leaves an object that accepts\n`{}`. It is degenerate but coherent \u2014 better than a throw for a type a broad\npredicate reached and the caller never meant to name.\n\nThe callback must be a pure function of `(field, parent)`. Input types are\nhoisted once per GraphQL name and memoized, so a predicate that answered\ndifferently depending on which tool was being built would ask for two definitions\nunder one id.\n\n## Write hints\n\nQueries are annotated `readOnlyHint: true, idempotentHint: true`, which is\nsimply true of them. By default every mutation is annotated\n`destructiveHint: true, idempotentHint: false`, which is **conservative rather\nthan derived**: the schema says a field writes, not what it writes, so a create\nis flagged the same as a delete.\n\nThat default under-reports nothing, but the hint's only real consumer is a\nclient deciding whether to interrupt the operator for confirmation. Spent on\nevery mutation, it is spent on none in particular \u2014 an operator who confirms\n`create_task` a dozen times a day is being trained to click through the dialog\nthat also guards `delete_task`.\n\n`mutationHints: 'byName'` opts into reading the conventional prefixes that\ngenerated schemas use:\n\n```ts\ncreateMcpServer({ schema, mutationHints: 'byName' });\n```\n\n| Field name | `destructiveHint` | `idempotentHint` |\n| --- | --- | --- |\n| `create*`, `add*`, `insert*` | `false` | `false` |\n| `delete*`, `remove*`, `destroy*` | `true` | `true` |\n| anything else | `true` | `false` |\n\nA prefix matches only on a word boundary \u2014 `createTask`, `create_task`, and\n`create` match; `creationFor` doesn't \u2014 and it's read from the **GraphQL field\nname**, so `nameCase`, `toolName`, and `extensions.mcp.name` can't change what a\ntool claims about itself. Everything unmatched keeps the conservative default,\nwhich is already right for `update*`/`set*` and is the only safe answer for a\nname the convention says nothing about (`runTask`, `stopTask`).\n\nIt's opt-in because it changes what clients confirm on, and no existing server\nshould have that change under it on a minor upgrade.\n\nEither way this is a naming convention, not knowledge. Where the convention is\nbroken or absent, say so directly \u2014 per field in the schema, or across the board\nwith `decorate`:\n\n```ts\ndecorate: (descriptor) =>\n  descriptor.name === 'run_task' ? { annotations: { destructiveHint: false } } : undefined,\n```\n\nAnnotations merge rather than replace, so overriding one hint keeps the rest.\n\n## Selection depth\n\n`selectionDepth` decides how far a generated selection set descends into nested\nobjects. The default is 2, and one number for the whole schema is usually wrong\nin both directions: the field returning a flat row wants 1, and the one whose\nanswer is only useful two objects down wants 3.\n\nPass a callback to decide per field:\n\n```ts\ncreateMcpServer({\n  schema,\n  selectionDepth: (field, kind) => (kind === 'mutation' ? 1 : field.name === 'tasks' ? 3 : 2),\n});\n```\n\nA number still works and applies to every field. Per field, `extensions.mcp.selectionDepth`\nbeats the option, and a `decorate` patch beats both:\n\n```ts\ndecorate: (descriptor) => (descriptor.name === 'tasks' ? { selectionDepth: 3 } : undefined),\n```\n\nA patched depth rebuilds the operation, the description, and the `outputSchema`\naround the new selection, so a descriptor never describes a selection it won't\nreturn. Setting `query` in the same patch still wins over the rebuilt one.\n\nDepth is not free in both directions: each level multiplies the fields the\nserver resolves and the tokens the agent reads, while a level too few means the\nagent gets an object it can't see into and has no second tool to ask with.\n`descriptor.selectionDepth` reports what each tool was built at.\n\n## Decorating tools for agents\n\nDescriptions come from your SDL, but agents often need more: workflow hints,\nwarnings, when-to-use guidance. Two ways to layer that on without touching the\npublic GraphQL surface:\n\n**In schema code**, via `extensions.mcp` on a field (read at tool-build time):\n\n```ts\n// graphql-js / @graphql-tools/schema field definition\nfields: {\n  todos: {\n    type: TodoList,\n    extensions: {\n      mcp: {\n        appendDescription: 'Prefer this over `todo` when listing; filter by status.',\n        title: 'List Todos',\n        // also: hidden, name, description, annotations,\n        // selectionDepth, nullBranches, exampleDepth\n      },\n    },\n  },\n}\n```\n\n**Programmatically**, via the `decorate` callback \u2014 the last word on every\ngenerated descriptor:\n\n```ts\ncreateHttpHandler({\n  schema,\n  decorate: (descriptor, field, kind) =>\n    kind === 'mutation'\n      ? { description: `${descriptor.description}\\n\\nConfirm with the user first.` }\n      : undefined, // keep as-is\n});\n```\n\nPrecedence: SDL-derived defaults < `extensions.mcp` < `decorate`.\n\n### Rewriting a tool's argument shape\n\nA generated argument surface is the schema's shape, not the shape an agent finds\neasy. `mapArgs` lets a tool advertise the second while still sending the first,\nso flattening one awkward argument no longer means hand-writing the operation\nbehind it:\n\n```ts\ndecorate: (descriptor) =>\n  descriptor.name === 'tasks'\n    ? {\n        inputSchema: { id: z.string() },\n        description: 'Fetch one task by id.',\n        mapArgs: (args) => ({ where: { id: { eq: args.id } } }),\n      }\n    : undefined;\n```\n\n`args` has already been validated against the schema you advertised \u2014 the\nadvertised schema and the pre-call validator are the same object, so replacing\nit is coherent end to end and unknown keys are still rejected. The mapper may be\nasync, and it receives the SDK's per-call `extra` as its second argument, so it\ncan inject something request-scoped. Every key it returns has to be a variable\nthe operation declares.\n\nTwo failures come back in the [usual JSON envelope](#what-a-tool-returns)\nrather than as exceptions:\n\n- **The mapper threw** \u2014 `BAD_INPUT`, carrying its message. A mapper is where\n  server-side argument rules naturally go, and that is the code an agent already\n  reads as \"fix your arguments and retry\".\n- **The mapper returned a key the operation doesn't declare** \u2014\n  `BAD_TOOL_CONFIG`, naming the tool. graphql-js discards an undeclared variable\n  *silently*, so without this the call succeeds with the mapped intent thrown\n  away, which is the expensive failure when the caller is a model. The message\n  says retrying will not help, so an agent stops rather than looping on its own\n  arguments.\n\nSetting `mapArgs` **and** `inputSchema` without also setting `description` is\nrefused at startup, naming the tool. The generated description still lists the\nfield's own arguments \u2014 down to the `shape:` example, which would confidently\nshow a literal for an argument the tool now rejects. A mapper that keeps the\nadvertised shape (injecting a tenant id, reordering) sets no `inputSchema` and\nis unaffected.\n\nThe meta tools are not out of step when they still print\n`tasks(where: TaskFilters)`: they describe the *schema*, and `graphql_execute`\nruns schema documents where that is exactly right. `mapArgs` reshapes one tool's\nfront door, not the graph behind it.\n\n## Designing a surface agents get right\n\nOnce a surface exists, most of what goes wrong with it is one thing.\n\n**Argument shapes are the largest single source of failed calls.** Every failure\nin the comparison above was the same mistake: a shape guessed from an argument's\nname. A generator that emits `orderBy: { <column>: { direction, priority } }`,\n`where: { <column>: { eq } }`, or `set:` where the sibling mutation says\n`values:` is asking a model to guess, and it will guess the shape it has seen\nmost often elsewhere. The correct shape was in the JSON Schema the whole time \u2014\ninside a listing far too large to read. A model reads the *description*.\n\nThis package now writes a literal example into the prose for you\n([Argument shape examples](#argument-shape-examples)), which is on by default\nfor exactly that reason. Two levers for what it can't reach: `exampleDepth: 0`\nturns it off for a field whose example is noise, and\n[`decorate`](#decorating-tools-for-agents) replaces the description outright \u2014\nor, with [`mapArgs`](#rewriting-a-tools-argument-shape), replaces the argument\nshape itself so there is nothing awkward left to explain.\n\n**Prose-to-bytes is a diagnostic worth running once.** Ask a live server for its\nlisting and compare the description text against the whole payload:\n\n```ts\nconst { tools } = await client.listTools();\nconst all = JSON.stringify(tools).length;\nconst prose = tools.reduce((n, t) => n + (t.description?.length ?? 0), 0);\nconsole.log(`${((prose / all) * 100).toFixed(1)}% prose across ${tools.length} tools`);\n```\n\nA surface that is a couple of percent prose is nearly all machine-readable\nschema an agent will skim past, and [`nullBranches`](#trimming-null-branches),\n[`inputField`](#pruning-input-fields), [`selectionDepth`](#selection-depth) and\n`include`/`exclude` all still have leverage on it. A surface that is a third prose is done \u2014 spend the effort\nelsewhere.\n\n**Then read the descriptions the way an agent would.** A green test suite\nanswers whether the tool works, not whether it can be called correctly the first\ntime. Print one tool's description, cover the schema, and ask whether you could\nwrite the call. See also [What a tool returns](#what-a-tool-returns) for the\nresult shape they will be reading back.\n\n## MCP-only schema extensions\n\nExpose fields to agents that don't exist on your public GraphQL API \u2014 usage\nguides, aggregate helpers \u2014 by passing extension SDL (+ resolvers). The schema\nis merged with [`@graphql-tools/schema`](https://the-guild.dev/graphql/tools/docs/schema-merging)\nbefore tool generation:\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  extend: {\n    typeDefs: /* GraphQL */ `\n      extend type Query {\n        \"How an agent should use this API.\"\n        usageGuide: String!\n      }\n    `,\n    resolvers: {\n      Query: { usageGuide: () => 'List todos before creating duplicates\u2026' },\n    },\n  },\n});\n```\n\nThe extended schema feeds both tool generation and the default in-process\nexecutor. If you pass a custom `executor` (e.g. `createHttpExecutor` forwarding\nto a remote endpoint), that endpoint won't know the extended fields \u2014 keep\nMCP-only fields on the local path.\n\n### A tool-specific operation surface (`typesOnly`)\n\n`include`/`exclude` subtract from the root fields you already have. When you'd\nrather design the agent's operations from scratch \u2014 different names, different\narguments, coarser granularity \u2014 set `typesOnly: true`. The base schema's\n`Query`/`Mutation`/`Subscription` types are dropped and everything else (objects,\ninputs, enums, interfaces, unions, **custom scalars with their serializers\nintact**) is kept, so your SDL can still refer to the real types:\n\n```ts\nconst handler = createHttpHandler({\n  schema, // your real, full schema\n  extend: {\n    typesOnly: true,\n    typeDefs: /* GraphQL */ `\n      type Query {\n        \"The one search an agent should use. Returns at most 20 todos.\"\n        findTodos(text: String!, status: TodoStatus): [Todo!]!\n      }\n    `,\n    resolvers: {\n      Query: { findTodos: (_, args, ctx) => searchTodos(args, ctx) },\n    },\n  },\n});\n```\n\n`Todo` and `TodoStatus` came from the real schema \u2014 you write the operations,\nnot the types. Two consequences worth knowing:\n\n- Your `typeDefs` must declare `type Query { \u2026 }` (not `extend type Query`),\n  since there's no base root type left to extend. Omitting it throws.\n- Nothing from the original root types survives, so every field needs a\n  resolver \u2014 the base schema's are gone with it.\n\n`stripRootTypes(schema)` is exported if you want the stripped schema on its own.\n\n`typesOnly` and [`operations`](#hand-written-operations-as-tools) chase the same\ngoal from opposite ends of how much you reimplement: `typesOnly` drops the root\ntypes, so every field you expose needs a resolver you write, while `operations`\nreuses the real schema's resolvers untouched and only changes what is asked of\nthem.\n\n## Hand-written operations as tools\n\nThe generated surface is every root field, described from the SDL. Sometimes you\nwant the opposite: a handful of operations you wrote deliberately, with the\nselection, the name, and the prose all chosen. Pass them as `operations`:\n\n```ts\nimport { globSync, readFileSync } from 'node:fs';\nimport { Source } from 'graphql';\n\nconst handler = createHttpHandler({\n  schema,\n  operations: globSync('mcp/*.graphql').map(\n    (path) => new Source(readFileSync(path, 'utf8'), path),\n  ),\n});\n```\n\n```graphql\n# Every task on the board, newest first.\n# Use this instead of filtering the raw table.\nquery openTasks(\n  # How many to return.\n  $limit: Int! = 20\n) {\n  tasks(where: { status: { eq: OPEN } }, orderBy: [{ startedAt: { direction: DESC } }], limit: $limit) {\n    id\n    title\n    assignee { name }\n  }\n}\n```\n\nThat becomes a tool named `open_tasks`, taking one optional `limit`, described\nby the comments above the operation and above the variable \u2014 the only place\nGraphQL lets you write prose about either. Four mappings are worth knowing:\n\n- **The operation name is the tool name**, through `nameCase` (`openTasks` \u2192\n  `open_tasks`). The document still runs under its own name.\n- **Variables are the arguments.** `$limit: Int! = 20` is advertised as\n  *optional* with a default of 20 \u2014 the non-null says it is never null, not\n  that you must send it. Defaults, deprecation, and the explicit-`null` caveat\n  render exactly as they do on a generated tool.\n- **Write hints come from the operation name** under `mutationHints: 'byName'`,\n  which is a better signal than a generated field name: you chose it.\n- **A `$limit`/`$offset` pair earns the same truncation advice** a paging field\n  gets, for free.\n\n**Fragments may live in their own file.** Every document is merged before\nvalidation, so an operation in one file can spread a fragment defined in\nanother; each tool then carries only the fragments it actually reaches. A shared\nfragment file holding fragments this run doesn't use is fine.\n\n**Everything is checked at boot.** A syntax error, an unknown field, a mistyped\nvariable, a duplicate operation name, an anonymous operation, a subscription, or\na glob that matched nothing all throw when the handler is built \u2014 naming the\nfile and position, which is why the option is worth passing a `Source`:\n\n```\ngraphql-mcp: `operations` failed to validate against the schema:\n  - Cannot query field \"titel\" on type \"Task\". Did you mean \"title\"? (tasks.graphql:7:5)\n```\n\n**The option takes documents, never paths.** A server factory is synchronous, so\nit cannot `await import('node:fs')`, and importing `node:fs` at the top level\nwould make this package unloadable on the fetch runtimes it also serves. Node 22\nships `globSync`, so reading the files is the one line above and stays in your\ncode, where your bundler can see it.\n\n### Composing with the generated surface\n\nAn operation **replaces** a generated tool of the same name, exactly as a\n`tools` entry does. Final precedence is\n`generated < operations < meta < tools`. That is the incremental path: keep the\nsixteen generated tools that work and hand-write only the one whose argument\nshape an agent keeps getting wrong.\n\n```ts\noperations: [readFileSync('mcp/tasks.graphql', 'utf8')], // named `query tasks`\n```\n\nGo the other way with `include: []`, which leaves only what you wrote.\n\n`nameCase`, `scalars`, `nullBranches`, `inputField`, `mutationHints`,\n`exampleDepth`, `maxChars`, `context`, `executor` and `extend` all apply to\noperation tools \u2014 and because documents validate against the *extended* schema,\nan operation may select an MCP-only field. Their callback forms mostly don't: a\n`nullBranches` callback is handed a `GraphQLField`, and an operation has none.\n`inputField` is the exception, and so is a `nullBranches: { byType }` \u2014 both are\nalready pure functions of the input type, so they have nothing to say about the\nroot field an operation lacks, and both carry over whole.\n\n**`include`/`exclude`/`filter` do not apply, and that is deliberate.** They match\nGraphQL *field* names and govern how the schema is projected; making them filter\noperation names would make the `include: []` example above expose nothing at all.\nSo an operation may select a root field `exclude` denies. An operation is your\nown code, at the same trust level as a `tools` handler \u2014 and `exclude` still\ngoverns the generated surface and the agent-written documents `graphql_execute`\nruns, which is where it was ever protecting anything.\n\n`decorate` doesn't apply either. Its signature needs a `GraphQLField`, and you\nown this document: edit it.\n\n## Schema-exploration tools (large schemas)\n\nOne tool per root field stops scaling somewhere past a few dozen fields \u2014 the\ntool list itself starts crowding the agent's context. `metaTools` swaps that for\na handful of tools that let an agent navigate the schema instead:\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  includeQueries: false, // no per-field tools at all\u2026\n  includeMutations: false,\n  metaTools: true, // \u2026just these four\n});\n```\n\n| Tool | What it does |\n|---|---|\n| `graphql_introspect` | Prints a type's SDL \u2014 plus a JSON [shape example](#argument-shape-examples) when it is an input type; with no argument, the callable root fields plus every type name. |\n| `graphql_search` | Finds types and fields by substring, across names and descriptions. |\n| `graphql_validate` | Checks a document against the schema without running it. |\n| `graphql_execute` | Runs a document, with `variables`. |\n\nThe two modes compose \u2014 leave the generated tools on and add meta tools for the\nlong tail. Names collide by design: a `tools` entry overrides a meta tool, which\noverrides an [operation](#hand-written-operations-as-tools), which overrides a\ngenerated one.\n\n**`execute` respects your allow-list.** It runs documents the *agent* wrote, so\nwithout a check it would be a way around `include`/`exclude`. Every root field\nof the incoming document is matched against the same rules (fragment spreads and\ninline fragments expanded, so nothing hides behind one), and a mutation is\nrefused unless `includeMutations` allows it. Override per-tool if the exploration\nsurface should differ from the generated one:\n\n```ts\nmetaTools: {\n  tools: ['introspect', 'search', 'execute'], // skip `validate`\n  prefix: 'todo_api_',                        // default `graphql_`\n  include: ['Query.*'],                       // defaults to the server's rules\n  allowMutations: false,\n  maxChars: 20_000,                           // result budget, default 50k\n}\n```\n\n## Custom tools & overrides\n\nAdd bespoke tools, or override a generated one by reusing its name (the surface\nstays the same; only that tool's behaviour changes):\n\n```ts\nconst server = createMcpServer({\n  schema,\n  tools: [\n    {\n      name: 'create_todo', // overrides the generated tool for the `createTodo` field\n      description: 'Create a todo, with extra validation.',\n      inputSchema: { description: z.string().min(1) },\n      handler: async (args) => ({\n        content: [{ type: 'text', text: `created: ${args.description}` }],\n      }),\n    },\n  ],\n});\n```\n\nA custom tool that runs GraphQL itself should reuse the same result handling the\ngenerated tools use, rather than rolling its own \u2014 `runExecutor` turns a thrown\nexecutor into an `{ errors }` result, and `toCallToolResult` applies the\npartial-result, error-condensing, and clamping rules described in\n[What a tool returns](#what-a-tool-returns):\n\n```ts\nimport { runExecutor, toCallToolResult } from '@cubicecho/graphql-mcp';\n\nconst executor = createLocalExecutor(schema, { rootValue });\n\ntools: [\n  {\n    name: 'urgent_todos',\n    description: 'Todos due today, sorted by priority.',\n    handler: async () => {\n      const result = await runExecutor(executor, {\n        query: '{ todos(status: OPEN) { id description } }',\n      });\n      return toCallToolResult(result);\n    },\n  },\n];\n```\n\nReuse it for the failure path too. A custom tool that returns a plain payload on\nsuccess still returns the `{ errors: [...] }` envelope when its arguments don't\nvalidate, because `guardToolArguments` answers above the handler \u2014 so a tool\nthat invents its own success shape shows an agent two different result shapes\nfor the one tool. `BAD_INPUT`, the `extensions.code` those envelopes carry, is\nexported, so a tool that rejects a call on its own rules can answer with the\nsame code the generated ones do.\n\n## Prompts, resources, and the rest of the SDK\n\nThis package generates tools. Everything else the MCP SDK can serve \u2014 prompts,\nresources, completions \u2014 is reached with `decorateServer`, a hook that runs\nagainst each freshly minted `McpServer` before it is connected:\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  executor,\n  decorateServer: (server) => {\n    server.registerPrompt(\n      'triage',\n      { title: 'Triage', description: 'How to triage a todo.', argsSchema: {} },\n      () => ({ messages: [{ role: 'user', content: { type: 'text', text: 'Triage it.' } }] }),\n    );\n  },\n});\n```\n\n`server` is the SDK's own `McpServer`, so its full API is available and nothing\nhere needs to model it. The option is on `createMcpServer`, `createServerFactory`,\n`createHttpHandler` and `createFetchHandler` alike.\n\n**The hook has to run where it does.** A server can only declare its\ncapabilities while no transport is attached \u2014 register a prompt after `connect`\nand the client is told at `initialize` that there are no prompts, so it never\nasks. That window is between minting the server and connecting it, which is the\nwindow this hook occupies. It is why registering prompts on the server your own\ncode holds works for a single stdio process and silently serves nothing under\n`createHttpHandler`, which mints a server per request.\n\nTwo things to know:\n\n- **The hook is synchronous.** Anything awaited between minting a server and\n  connecting it is registration racing `initialize`. `registerPrompt` and\n  `registerResource` are synchronous, so nothing is lost; a hook that returns a\n  promise is refused with an error rather than left to fail under load. If your\n  registrations need data, load it once outside the hook and close over it. A\n  hook that throws fails every request it runs for \u2014 on Express 4 a rejected\n  promise hangs the request instead of answering it, so wrap your handler in an\n  error-catching adapter.\n- **Vary prompts and resources freely; do not vary tools.** The rendered\n  `tools/list` is shared across every server one factory mints\n  ([Sessions](#sessions) mints one per session), so a hook that registers a\n  different *tool* set depending on external state will serve one caller's\n  listing to another. Prompts and resources are not cached and may differ per\n  server. Tools that vary belong in the `tools` option, which also gets the\n  `BAD_INPUT` envelope \u2014 a tool registered through this hook is not covered by\n  the argument guard, so a malformed call to it gets the SDK's raw JSON-RPC\n  error rather than the JSON result envelope every other tool answers with.\n\n## Connecting your own transport\n\n`createHttpHandler` and `createFetchHandler` connect their servers for you. If\nyou build the transport yourself \u2014 stdio, or one long-lived connection \u2014 use\n`connectServer` rather than `server.connect`:\n\n```ts\nimport { createMcpServer, connectServer } from '@cubicecho/graphql-mcp';\nimport { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';\n\nconst server = createMcpServer({ schema });\nawait connectServer(server, new StdioServerTransport());\n```\n\nIt connects, then makes the server tolerant of a `tools/call` that leaves\n`params.arguments` out. That key is optional in the MCP spec, and a tool whose\narguments are all optional \u2014 or which takes none at all \u2014 gives a client nothing\nto put there. Without this, such a call is rejected by input validation before\nthe tool runs. A `prompts/get` for a prompt registered with an empty argument\nschema is fixed up the same way, for the same reason.\n\n## Other HTTP servers\n\n`createHttpHandler` returns a framework-agnostic handler: it needs a Node\n`IncomingMessage` and a Node `ServerResponse`, and nothing else. A parsed JSON\nbody on `req.body` (as `express.json()` provides) is used when present, but the\ntransport reads the request stream itself when it isn't \u2014 so a bare `node:http`\nserver works with no body parser at all:\n\n```ts\nimport http from 'node:http';\n\nconst handler = createHttpHandler({ schema });\nhttp.createServer((req, res) => handler(req, res)).listen(4000);\n```\n\n## Non-Node runtimes\n\nCloudflare Workers, Deno, Bun, and Hono speak `Request`/`Response` rather than\nNode's `IncomingMessage`/`ServerResponse`. `createFetchHandler` takes the same\noptions and returns a fetch-shaped handler:\n\n```ts\nimport { createFetchHandler } from '@cubicecho/graphql-mcp';\n\nconst handler = createFetchHandler({ schema });\n\nexport default { fetch: handler }; // Cloudflare Workers / Deno / Bun\napp.all('/mcp', (c) => handler(c.req.raw)); // Hono\n```\n\nIt needs `@modelcontextprotocol/sdk` **1.25 or later**, which is where the SDK's\nweb-standard transport was added. The import happens on the first call rather\nthan at module load, so this package still loads on the older SDKs its peer\nrange allows \u2014 only `createFetchHandler` is unavailable there, and it says so.\n\n## Sessions\n\nBoth handlers are **stateless** by default: every request gets its own server and\ntransport, so any instance can serve any call and nothing has to be cleaned up.\nThat is the right shape for a tool server, and it's what you want unless you need\nthe server to *send* something unprompted.\n\nSetting `sessions` flips that. The client initializes once, gets an\n`Mcp-Session-Id` back, and every later request is routed to the same long-lived\nserver \u2014 which is what makes progress notifications and the standalone SSE stream\npossible, since a connection stays open to deliver them on.\n\n```ts\nconst handler = createHttpHandler({\n  schema,\n  sessions: {\n    idleTimeoutMs: 5 * 60 * 1000, // evict a client that walked away (default)\n    maxSessions: 1000, // LRU cap on live sessions (default)\n    enableJsonResponse: false, // SSE; set true behind a buffering proxy\n    replay: true, // buffer events so a dropped stream can resume (default)\n  },\n});\n\n// Close open streams on shutdown; a no-op when stateless.\nprocess.on('SIGTERM', () => handler.close());\n```\n\nAn unknown or expired session id is answered with `404`, which tells a\nspec-compliant client to initialize again. The session table is per-process\nmemory, which is what makes the deployment shape matter \u2014 see\n[Running more than one instance](#running-more-than-one-instance).\n\n### Resuming a dropped stream\n\nThe stream is the reason to be stateful, and streams drop. A client that loses\nits SSE connection reconnects with the SSE `Last-Event-ID` header, saying how far\nit got; the server sends what came after. That only works if something kept the\nevents, so each session gets a bounded in-memory buffer \u2014 without one the\ntransport never even writes an event id, and a long tool call's result is simply\ngone when the connection dies mid-flight.\n\nTune the bounds, or turn it off:\n\n```ts\nsessions: {\n  replay: { maxEventsPerStream: 64, maxStreams: 4 }, // the defaults\n}\n```\n\n`maxEventsPerStream` is the reconnect window: a client that misses more than\nthat while disconnected can't resume and must start a new stream. It is told so\n\u2014 a resume from an event that has aged out is answered `400` rather than with a\nstream that silently skips the gap, because a client that believes it caught up\nhas no way to find out otherwise. The memory ceiling is the product of the three\ncaps: `maxSessions \u00d7 maxStreams \u00d7 maxEventsPerStream` messages.\n\n`replay: false` turns resumability off, which is what the SDK does unaided.\n\nBuffers live in the process that owns the session, so they don't survive a\nrestart or reach another replica. For that, supply your own store \u2014 a factory\ncalled once per session, returning anything with the `EventStore` shape (Redis,\na Durable Object, a table):\n\n```ts\nimport type { EventStore } from '@cubicecho/graphql-mcp';\n\nsessions: { replay: (): EventStore => new RedisEventStore(redis) };\n```\n\n### Running more than one instance\n\nA session owns a live `McpServer`: an open connection, a connected transport, and\nregistered handlers. That is not a value you can write to Redis and read back\nsomewhere else, so a session cannot move between instances. Everything below\nfollows from that.\n\n**Stateless (the default).** Nothing is retained between requests, so any\ninstance serves any call. Scale it however you like. This is the right answer\nunless you need server-initiated messages.\n\n**Stateful, one process.** Zero config \u2014 the local table is the whole truth.\n\n**Stateful, behind a load balancer.** You need sticky routing on\n`Mcp-Session-Id`, because a request that reaches the wrong instance cannot be\nserved there. Two ways to arrange it:\n\n- *Encode the instance in the session id* with `generateSessionId`, and have the\n  proxy route on it. No shared state at all.\n- *Share a session directory* \u2014 a small record of which instance holds which\n  session id, in Redis or a table \u2014 and route on that.\n\n**Stateful, isolate-per-request (Cloudflare Workers).** Sticky routing here means\na Durable Object per session: route by `Mcp-Session-Id` to the object that owns\nit, and inside that object `createFetchHandler` is an ordinary single-process\nhandler. Without that, stay stateless.\n\n#### Session directories\n\nA directory records session *ownership*, never the session. Supplying one does\nnot make a session portable; it makes a misrouted request explain itself. Without\none, a request that lands on the wrong instance gets a bare `404` \u2014 the same\nanswer as an expired session, which is a miserable thing to debug when a load\nbalancer quietly loses its stickiness. With one, the response says which instance\nholds it and repeats it in an `Mcp-Session-Owner` header:\n\n```http\nHTTP/1.1 404 Not Found\nMcp-Session-Owner: web-2\n\n{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32001,\n \"message\":\"Session not found on this instance; it is held by 'web-2'\"},\"id\":null}\n```\n\nIt is still a `404`: the client's correct move is to initialize again, and there\nis no session here to forward the request to. What changed is that your proxy \u2014\nor the person reading the logs \u2014 can now see where it should have gone.\n\nThree methods, over whatever store you already run:\n\n```ts\nimport type { SessionDirectory } from '@cubicecho/graphql-mcp';\n\nconst directory: SessionDirectory = {\n  // Called on registration and on every later use, so it doubles as the TTL\n  // refresh. Make it idempotent.\n  claim: (id, owner) => redis.set(`mcp:${id}`, owner, { EX: 600 }),\n  owner: (id) => redis.get(`mcp:${id}`).then((v) => v ?? undefined),\n  release: (id) => redis.del(`mcp:${id}`),\n};\n\nconst handler = createHttpHandler({\n  schema,\n  sessions: { directory, instanceId: process.env.HOSTNAME },\n});\n```\n\n`instanceId` defaults to a random UUID, which distinguishes instances but tells\nyou nothing \u2014 set it to a pod name or hostname if you mean to route on it, and to\nsomething you're willing to disclose, since a misrouted request is answered with\nit. Give claims a TTL so an instance that dies doesn't leave its sessions\nattributed to it forever; `claim` is re-issued on every request, so a live\nsession is always refreshed well before it lapses.\n\n`MemorySessionDirectory` implements the interface in local memory. It is a test\ndouble and a template \u2014 memory is exactly what several instances don't share.\n\n## Development\n\n```bash\nnpm test                # node --test (built-in runner, type stripping)\nnpm run coverage        # node --test with built-in coverage + thresholds\nnpm run typecheck       # tsc --noEmit\nnpm run typecheck:tests # type-check the test files too\nnpm run build           # compile to dist/\nnpm run check           # biome lint + format check\n```\n\nThe source uses `.ts` import specifiers so it runs unbuilt under Node's type\nstripping; `tsc` rewrites them to `.js` on build. Requires Node \u2265 22 and\nTypeScript \u2265 5.7.\n\nCommits follow [Conventional Commits](https://www.conventionalcommits.org/) and\ndrive automated releases: pushes to `main` run the **Test** workflow, and on\nsuccess the **Release** workflow runs [semantic-release](https://semantic-release.gitbook.io/)\nto version, update the changelog, publish to npm, and tag a GitHub release.\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+  },
+  "time": {
+   "0.1.0": "2026-06-24T01:41:29.019Z",
+   "0.1.1": "2026-06-26T22:45:06.741Z",
+   "0.2.0": "2026-08-31T00:46:38.431Z",
+   "0.2.1": "2026-08-31T00:54:39.364Z",
+   "1.0.0": "2026-09-01T15:09:05.021Z",
+   "1.0.1": "2026-09-01T16:45:18.688Z",
+   "1.0.2": "2026-09-01T17:24:54.014Z",
+   "2.0.0": "2026-09-01T17:36:06.217Z",
+   "2.0.1": "2026-09-01T17:48:47.398Z",
+   "2.0.2": "2026-09-01T18:03:00.783Z",
+   "2.1.0": "2026-09-01T18:28:25.753Z",
+   "2.10.0": "2026-09-03T01:20:37.375Z",
+   "2.2.0": "2026-09-01T18:42:14.562Z",
+   "2.2.1": "2026-09-01T18:58:33.716Z",
+   "2.3.0": "2026-09-01T19:10:58.524Z",
+   "2.4.0": "2026-09-01T21:02:00.859Z",
+   "2.5.0": "2026-09-01T21:11:53.792Z",
+   "2.5.1": "2026-09-02T20:04:46.031Z",
+   "2.6.0": "2026-09-02T21:07:44.471Z",
+   "2.7.0": "2026-09-02T21:30:55.245Z",
+   "2.8.0": "2026-09-03T00:15:25.891Z",
+   "2.9.0": "2026-09-03T01:06:19.299Z",
+   "created": "2026-06-24T01:41:28.733Z",
+   "modified": "2026-09-03T01:20:37.746Z"
+  },
+  "versions": {
+   "0.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@0.1.0",
+    "_nodeVersion": "24.13.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_0.1.0_1782265288878_0.33029958155555694"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:219a3952b444]",
+     "name": "vantreeseba"
+    },
+    "_npmVersion": "11.15.0",
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 2,
+     "integrity": "sha512-6ZwfZw/Yq3E2Bap66tmFy1IdRWVIyJfSsIC+zIj1RJJkazGGFxg9wxmyO8J1ffxiLpMVpHmKLw2iqTkH5S/PcA==",
+     "shasum": "cb8652c6c1a87c59f114accfeb4d54ea325d52a9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEMCIDTZH6lhde8fjqAwUA11mjgfd7Cbu90Gp5SRIarjWKvhAh9vNyvKSocjmpaueFNwDceqVeJBTORYEpQnP1d6Df66"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-0.1.0.tgz",
+     "unpackedSize": 8791
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "2b62e0071dfe6f4cbb073e284a7c31ee5cad0370",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.1.0"
+   },
+   "0.1.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@0.1.1",
+    "_nodeVersion": "26.4.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_0.1.1_1782513906601_0.7864214263946971"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@0.1.1"
+     },
+     "fileCount": 21,
+     "integrity": "sha512-bFTJ9QKGPwO7XePYsCs/bSCsDzVtafEsegsLCDkcRpGQYYejF8jPzdvZ2z6LJNYOQEv2RTQVBKIc2ZrktmZ8hg==",
+     "shasum": "feb61bbd821a8ab6cb1c4e40807f2281b05a6b0f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDbd/JlWLPi6PbLdTbZnVFRFMThnOD7fpqrtXD0XnTTEQIgMy5WwdapHTX+XlNuESVmVc6HZHoA/jCRbzsMrl5QKgo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-0.1.1.tgz",
+     "unpackedSize": 55149
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cac81b2fa91cb7ededaf7e582b092679314b5b68",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.1.1"
+   },
+   "0.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@0.2.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_0.2.0_1788137198336_0.4231311039845129"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@0.2.0"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-dit9W9BILh4DVAexMP+MHIHRD1BLf3niEgjvcBxYDrGkH2QxdW4hiPDGBClh2yWape1vnruMbRC5DbIowlGtuw==",
+     "shasum": "2b77b3a1fe7111ba9c2de635afc67ac3c9bb3c44",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAIzljDdPaSfCAkfQcFWsSETJlaUPWI4775ukwntqqGrAiEAhxOiwelC9wDPlfWqyYj+68/CzDKGjCJKvA6TpB5VQho="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDuhLl/CAJiD9CqI6/SSBJh1s1EHpmVDRTSQp4IwbChgAiEA7fncRCmHSWwTv6wlaT1pdzBYOCBP4tBpZ59SFxrFJcQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-0.2.0.tgz",
+     "unpackedSize": 168996
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3775f8a915b07620bf9e5320c030a08eed4f6111",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.2.0"
+   },
+   "0.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@0.2.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_0.2.1_1788137679267_0.3431830253903414"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@0.2.1"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-eK0WeGnw1cm2Nv54+2db57xSc5uDm5HVJSCD/PNfrVIi/OcH/YUnfnZuokzfH+/o4sOI6aTtvreWv661qTzQig==",
+     "shasum": "16c5b8ff5e979586d2a58d3433d890c1c5dfcbe3",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIA78v+LP7XsB5FTFieauvrL6QnheH5amYLnbxLGbML67AiBcZCvads0iYFuDlypHcShnspKd5hdeLmlqFz6n/sbagw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCICtMMZSvk3xuebUnRGh3QCb/9wb4cisC5WtWzSVcLm7NAiEAkc7FG8UXi3SXPdhsLhAz/Y5pCK6zF2aEx2e/i/0ziZo="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-0.2.1.tgz",
+     "unpackedSize": 168997
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d7455953f065e0b3f9b0891ee358d3ad37ba985c",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "0.2.1"
+   },
+   "1.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@1.0.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_1.0.0_1788275344937_0.3095544732461879"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@1.0.0"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-xVNd9PhMC7YSsLW5fstI65plXVVNlC4FvhzghONeuOVtkKjA4VushH6IVG2YraCrJ6BLpDWxXMlhoSsdU+r/RQ==",
+     "shasum": "fdf04829a226a45785a920dc2f54493bedf38140",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIC3wf9YCiOeGzDc8WRhzKLYbYnPsuA9OtiP5tbfgr0wMAiBmeYFpG16U28I53rlbQ0w3bQAw32JxkVcI0Ni1+CFLMg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHxGiECxm7hprdkZSMTAKUpshGgZU9hcL06UBdL8WmiMAiAMR+q13WkUqmhnp19urxbo7o2yKnIQmeKqBDJVaAt8iw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-1.0.0.tgz",
+     "unpackedSize": 171540
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "9e52ec6fa665ce4ce0070e4610401d4188a4d907",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "1.0.0"
+   },
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@1.0.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_1.0.1_1788281118604_0.6284227396419391"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@1.0.1"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-o+L6qjeJLUK7Hv/XLCyDzCaFRnRejxd4SaDJ1AMZlpc6Z12IsVzDNe8eTBzdoBrU6nD4T94ft2/3ZYRqmbujtw==",
+     "shasum": "e1a2fed6543465d6fed4187258df8be2b9be6228",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICQ0EbMf80ESrctbtbW0yAflWXzEYEyTHdUPegGBp+aXAiBtIDi/hEZTKcSRwduJfiPR98v2WQl7r5ZhCTsJzi72dA=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIE5MIQ3yf+fa1GmeZDKCnTLL7B2Smusqx3Sxo/NuxnWxAiEAnRRsLK4pZgWlg5iW8CIBaT0hCNH5L+XvPsNKdtUX0Pw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-1.0.1.tgz",
+     "unpackedSize": 177475
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "db88523d91cd54e3a7a5a15b46106d15cff29a91",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "1.0.1"
+   },
+   "1.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@1.0.2",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_1.0.2_1788283493922_0.6210871717955164"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0",
+     "zod": "^3.25.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@1.0.2"
+     },
+     "fileCount": 39,
+     "integrity": "sha512-NpR1Px7hGclsZJbHl4TmlrRlmRS4W6yC3blo0GQlJnCXGuNFgtfw6K8zwSmzrSTYTNNUnn64ZEceRfkaIt8inA==",
+     "shasum": "29b2f00d77c4d0a6cbc62b3647b469b3b779ecd5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCICqysOcaEkTQcjqApUeWCR9RzBmD9q5+s6wzI5uofPhbAiAP+EZRnChzzP3/CyTzC1Hyx4pSvbeaGO1iHKG2hQD4VQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCKcGsra88RKcYfcbucmR1R9EaREkcy7upKGWVGTZ1HIwIhAKI8q0tgYalY4a1AuSPVK9lCUIgRcidMcjC/x9h5ZdTT"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-1.0.2.tgz",
+     "unpackedSize": 179058
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b3a616f146c859dd76f7f03e2dbb7df3d14ace48",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "1.0.2"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.0.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.0.0_1788284166113_0.32098365580069865"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.0.0"
+     },
+     "fileCount": 41,
+     "integrity": "sha512-gi9Fa8kiq7MEYd5ZnvOEJY31cvRGHLILmLhAELLjKFSo2xTO1zDr9M46osrazACZ8c6GPIl1DCrRetZaIkzPNQ==",
+     "shasum": "6f54681907500d4798e46b5b065bdc59f821b2fd",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDhxFMCz9RKFZGR3ko8QrtMFQ+bfn0HFZUbQm9Gq/oj8AiAHYHynemSOQUSbR3EdMOn08JJgW1Xw88FxXVnNsJqB4g=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGgvoDw640J6KJjCz0azV3CHUkxio6xruFoW3BsePU2JAiEAlEVNUruYln2ZkbSwZbd1x1UWnogIab/3mpdzlNRLXpY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.0.0.tgz",
+     "unpackedSize": 182074
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "5b499f46b432da38a0206fda13ae154cca3b9626",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.0.0"
+   },
+   "2.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.0.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.0.1_1788284927301_0.22277454785761974"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.0.1"
+     },
+     "fileCount": 41,
+     "integrity": "sha512-CpHXbnQWafe5dTMDGmr/sU7Zr7sb16Fg6uABdUK6sywXjoHZQBDvR5b6yG/g1qahVvyTgCt9BQCFWKcVKoyS3Q==",
+     "shasum": "edd416c2e2b6b1d40bc12556e7fa12da829cd236",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDR+GRxeZEoySwGivCyyVSwtXM/BI9k6/KyFQyrP8o+qQIgPnrFzgQEZd5gb+4Z7xXL3uaB9Di4S/4uViKoxbXqO/s="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDBIn55j9g7y95FDhVflYLGSAi+V9e1PGVHzynzN0q1DgIhAMupUjcNSpFEm6BaXQBt6unNum2Gct8Vg5Fbo+E0M2tw"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.0.1.tgz",
+     "unpackedSize": 184357
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "249050adbc3cd9648c16713a1510dc56b91fce6a",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.0.1"
+   },
+   "2.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.0.2",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.0.2_1788285780698_0.9427671343461235"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.0.2"
+     },
+     "fileCount": 41,
+     "integrity": "sha512-K/yLhZKNoVe+7/jC+nQmv70zn+brpfVggAsZnO8N9IwNefXOemn3eQWE1XzrF74qjgMpJxvass+w2qVTHVMbDA==",
+     "shasum": "9241b3f7aef9e248217721fb70a57c2d3f10c4e5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCID7s/9FnXnMIDOtWaKJa6xChpnmpDoeolt3QN81AER8tAiEA3nqd0WuKpvGao/Inz6AlhC0Fwn0KO4ipvzht5gdvXr4="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIANQJlMdpHPZDerqQVsPsNfB+6wRqkqqn256RjQbNTi+AiEAn6qBuNICW2mXoyUjsoenm0Q7iD150rClEkHxsrSZJj4="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.0.2.tgz",
+     "unpackedSize": 192428
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "3b784fc45b2bd6a16ffe5108ed88ad373a6c695d",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.0.2"
+   },
+   "2.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.1.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.1.0_1788287305618_0.2824502385797807"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.1.0"
+     },
+     "fileCount": 41,
+     "integrity": "sha512-WjGP/gkisdu99lbhN84g7chg8gYyF+141dZHDDF9A2k5li61e4CyZ8WJFPvoAt7y99JzWsFuMraw4i3VatQKUA==",
+     "shasum": "59024c9d7987f77aebcf2fa5987125278e06f541",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFzg3uR2vGvyVi3QfWSGudZU1b65Y8yUdFTUorIlMUyyAiEAwZrnhtiWtwgOUMJS+kZJcODk3/+DNOaecBVdgVIoCjQ="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxv4/nHdSRtcos57hicENwynCLUj08J9B+mqxRvztMBQIhAO8NJIG90V2J3SyzbsYJcQ6pSAxfxCebVJT3pyeStuDG"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.1.0.tgz",
+     "unpackedSize": 198571
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "1fc9912bbe50e91a2ff191eb7f632a28615698b0",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.1.0"
+   },
+   "2.10.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.10.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.10.0_1788398437268_0.41990461060637974"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.10.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-9lsH1Q5NIwYA//qVxXUSri4wXURFxJmk+7Ltt9CXLdhL9VBqOeZ4v+kwKVeRGGXKax35ayPd2UfnmN4GHlrVCQ==",
+     "shasum": "4081dd47b1410d613de31b039d46868840010295",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDAGzoHEqETuqmFi2QPeL6Ple1o0ogir80qUEWA0hfOCAiB9wTFbPaRR5IuY+yD35ypCNEoN1tjsw1J64vWSu1sIJw=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHnLXnGvyC7vPPx9enUV4O7yQoh3yPF11NtVPAVH06ZQAiAPjBWbXj9lNPoHBC0zyPSPvq+YzXzEboiUP+gXz5O5vw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.10.0.tgz",
+     "unpackedSize": 353456
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "4af98cff257e010f43f78ea7b6684ac5efc7c7b1",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.10.0"
+   },
+   "2.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.2.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.2.0_1788288134454_0.4599384864049032"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.2.0"
+     },
+     "fileCount": 41,
+     "integrity": "sha512-ZLKjD/j+XwG0u6Us6rzVx5H5K/y3tGe30bMSnLQi7LJ6PQCadlMgsErfEbR/IZ7WPdmI2rZWhqaqM7UcXZU4Fw==",
+     "shasum": "7c29a00e75ddea618d1edb239cddedc04dd01c84",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEEHvdomAkYe07XbfL1dSCCq1afVaYHHUaGBpOF7WYaCAiAqxaWnC0G+OtFwCLu4mRx0hqFeP8DWdggRX5NPsivBfQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCTlSBaZ1t35FxszP02yw6pNzBACAO8tmb4MfeIgj79VAIgDya5sfTQ2Q4gseYGlvoE0KgogrL2SWl9jO6Ht/NCjXU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.2.0.tgz",
+     "unpackedSize": 203998
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0a1c2c279a363d723b37e56cf6024e1fabc21582",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.2.0"
+   },
+   "2.2.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.2.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.2.1_1788289113640_0.05855452676742323"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.2.1"
+     },
+     "fileCount": 43,
+     "integrity": "sha512-AXtxLRBACUck/xFXjChb8Q6kpoqqKB975WyhY56TDNtWIsCLZhq+yGM6r/WRY2rEpDCQDAJN0BxBsP1QViN59w==",
+     "shasum": "f75cfc40fa01695bd33926affd0199164e6dc605",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIE+1By2N/U7uWzJ+a8zKZgTB9b5AM1I6HJXBinVMu9V4AiA2MkBbRlZxpPJKsyGWqH6ZUCUtFqAaQkc81EkRNheziQ=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDDtAKljnBYKM1VIPBkVGne4t3d7UnueEKa1sf+W8a7+AiEAw+40M+pCUsCZfb05cdfeAIp1Y4DWdn2HP6sXX8my24M="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.2.1.tgz",
+     "unpackedSize": 219053
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "0cfc0ee3540f232546b0dd6944c2c92bda8f0037",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.2.1"
+   },
+   "2.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.3.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.3.0_1788289858407_0.01372681700747802"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.3.0"
+     },
+     "fileCount": 43,
+     "integrity": "sha512-/+k85uu6B11yE0dr9ttJGWMhU38laxSKcwgW4YIf6teRht/v31U34DyZnlDBDsMv72qldOmYEHYNd+d6eeo0uA==",
+     "shasum": "a077d2637c52fe5398c3846d8bd3a1ffa0ad6830",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIByedzOXypVdVt6l57HOVUGcy7Jn6OffZ1BYpjEMHKc5AiB3nepT58qzEgaxo2XTei41j1Nn8xSSvBSNID7gyS+Vow=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDpWSAK8bMTXIbyLPUi3MkW68lAEz0YzSUhmt9r+QeSDQIhANKl+ng+8GxLU4KuyMMdtCI4nJGk5r9QkE6+LhizdaC1"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.3.0.tgz",
+     "unpackedSize": 229280
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "917d4c97bb9d99894e2ddda9d7ba8277335f1628",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.3.0"
+   },
+   "2.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.4.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.4.0_1788296520758_0.9683602761145154"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.4.0"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-PyGjCtkWrsNRnBQtbN3dC+GS7LOZH4sCbYKzkZKUO9moXe4z8oTfmfCJkQArrz7UiVfQ2YEWssylBubZokgu1g==",
+     "shasum": "abeb81864a80c123654ffa15f4caa08bfc5477eb",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCg00KZfao66UF/4lcwY0V2OGVvzRigpFULY+iBK4gaMwIhAJXfqtX+ZuxOefLGiVrV3mHVNEGy87HYW+uVRaUoK27Z"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAmxUl4IFrI01Cmq0w5dwCD4k/r+5idrXFwCPA+WupN6AiEAwaXfXATQ2oVhPuVZWgdBSSe9NX1gdKAqQVuXvtLWZHI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.4.0.tgz",
+     "unpackedSize": 246401
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "d160991986207095427e28ed494c71a0a6e1d8e9",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.4.0"
+   },
+   "2.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.5.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.5.0_1788297113711_0.9743516977117943"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.5.0"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-IzZSU1PKrxMzYvC3XrWe7qwEb+v/J8BJnKXIhKYCjvw43LVMfJgE9XYMYPyStag6/fh2WIO7iAmBG6AbEQy1lw==",
+     "shasum": "eb3f94bf7ae960b145912d9877f21d7d57c421a2",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQC0nQYpMusSXXy0TNjmSev7KFP1LubWWv3FWzW9eaRvCgIhAOSGevb5BWMk+GIlfPVyrFVFzZBjMXsM74X3mW795v1H"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDSQryXTPkdB/9FByv+9yk9C6QOdb2OuksbJddn9xlLGAiA7DJkhhKjk8ELlnmcDZfQk93yNEIg3SUdWUMpOfFgOtQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.5.0.tgz",
+     "unpackedSize": 264846
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "965b25f5d5b2cefbcaa1add867ad1ae266ff8af9",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.5.0"
+   },
+   "2.5.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.5.1",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.5.1_1788379485904_0.08889654900449662"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.5.1"
+     },
+     "fileCount": 45,
+     "integrity": "sha512-vn8K2GS2DoJQiHHQwOgaOhh1zQc1TXjkG2vYC2HLngeuyHqSUUUdPiCaIOUj/EbIUeZYq+L8gN6P8mnmMtVghA==",
+     "shasum": "631499cb4f756dc743f3f5dcac3394bbc57c61e0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIGX0H/kuyt8a5jFTTPOWepUY5ICkfF6TOkt4f4tah5eBAiEA2X3Fr2P42u7+7C/PIlVjefqpkdhzKbR8VnDkCFyJ6qw="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCaNXYZA/229gY089PTtWsBrl3os+PXjNFBFlmY5CBC7AIhAIYl6dJi2iSz9cF2SipwE8yN7iJBMuPR4MHyoHnExsfv"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.5.1.tgz",
+     "unpackedSize": 265688
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "169e8c85a98f92b81ab07220aa695559fc8f2b42",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.5.1"
+   },
+   "2.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.6.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.6.0_1788383264335_0.6508078248215425"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.6.0"
+     },
+     "fileCount": 47,
+     "integrity": "sha512-ZT0DsDvdKAsfMVLQhIVFaeA7yUi+rw6Nd/syEMEkKCNyUgLEvW6Vp+zLfoNolE5YxNSVT90jNmHqVlQIy+8M0g==",
+     "shasum": "287f48225ba3c659c98cf18596664a63a64d6914",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCi9L8YrN5ZkFtkqniypH6eAX2CfMwKgGhe7sEGBjxaugIhAJ7VCe1H7Y6wFqIzgrctUx+UC57eFzvZrhEUs42XHVrz"
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCUyDW3C8HkDRWXgFnGmXlXV6dXx1lRUNk9Q+GPKrKB+wIgJrt6uE521CN41z2VMpfypCojcxi05B9iZzwn9egZiLk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.6.0.tgz",
+     "unpackedSize": 306818
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "cd3d9f30bb773d903ab9ebf2c99acd07c93c2c7e",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.6.0"
+   },
+   "2.7.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.7.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.7.0_1788384655092_0.8205016224636437"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.7.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-UnBBrlbpvCLMg6BioyiHd1BpyCXClV+VXOsRCF3LInFaIiUes5rJGQDt1hEK7lO2K34OFP5cGwYh83JTPmeEqQ==",
+     "shasum": "6fe823ee34065a23d4b7123b798374fd91459eaa",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQC8IRyu4XcQHcWHgXM+g6HSTAGfkzmqskNj6BvHSv8xoAIgVavlMmZT+k4MHceI8JvDj7zDAOdcP9bfjAnBGxtNZJ8="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCaYXt2MBglZN3CPpoww42jXZazfUV7fQHS5SZzLor4xAIhAJgNkwOfo2Ra8KnkvJt3vIQRQ44bFkipahhw0P8JgivP"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.7.0.tgz",
+     "unpackedSize": 337537
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "6eb352a3d775a85a2d40d4ef6754e621950bef9c",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.7.0"
+   },
+   "2.8.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.8.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.8.0_1788394525780_0.23969199558491106"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.8.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-sCv0a6Y1kJz10qcog7bIRK6nKVa4aj9qDentM/Upsh+t7NBlonOC4WqbXwAFdsBtFM4rOrE+CXrWdzsgLbQTPA==",
+     "shasum": "7feeebb73f4b65ef4995592c5d9a1a7de177efc5",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBAhrZ9WXw6IJyIwWV3140Z8o7t93J0eGQgE4C9duvn8AiEA8Gfyha318+79hZLMGVoAqZmOnOd+y5hruyeuYeljdG0="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIHfglKMoQdCbiWM1rCRR/1Aa4J4ff53kpk+sTpTrjqjNAiBnDg+TRFs+9AHAOR0Q/6BeBJ9l5kM4mED/uJMdqe7/RA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.8.0.tgz",
+     "unpackedSize": 340770
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "b4546f1d700757e1161f10fc50cfc4f6e5c176d4",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.8.0"
+   },
+   "2.9.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@cubicecho/graphql-mcp@2.9.0",
+    "_nodeVersion": "26.8.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/graphql-mcp_2.9.0_1788397579134_0.9189544676541312"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:e5751029775a]",
+     "name": "GitHub Actions",
+     "trustedPublisher": {
+      "id": "github",
+      "oidcConfigId": "oidc:7e65a49a-9827-4f94-81fb-2600afe93c55"
+     }
+    },
+    "_npmVersion": "11.17.0",
+    "author": {
+     "name": "Benjamin Van Treese"
+    },
+    "bugs": {
+     "url": "https://github.com/cubicecho/graphql-mcp/issues"
+    },
+    "dependencies": {
+     "@graphql-tools/schema": "^10.1.0"
+    },
+    "description": "Turn a GraphQL schema into a Model Context Protocol (MCP) server: each query/mutation becomes a tool, runnable side-by-side with your GraphQL server.",
+    "devDependencies": {
+     "@biomejs/biome": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.12.0",
+     "@semantic-release/changelog": "^6.0.3",
+     "@semantic-release/commit-analyzer": "^13.0.1",
+     "@semantic-release/git": "^10.0.1",
+     "@semantic-release/github": "^12.0.8",
+     "@semantic-release/npm": "^13.1.5",
+     "@semantic-release/release-notes-generator": "^14.1.1",
+     "@types/node": "^24.0.0",
+     "graphql": "^16.14.0",
+     "semantic-release": "^25.0.5",
+     "typescript": "^5.7.0",
+     "zod": "^4.0.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@cubicecho%2fgraphql-mcp@2.9.0"
+     },
+     "fileCount": 49,
+     "integrity": "sha512-O0VmaVC7e79x4AKH9gtHZDozrXgFomTgEdpDMn8Em8dzHQ3yFTiOUWQOZQPFI7A1EUxYXs+flC8eEFt6MD2aRg==",
+     "shasum": "db59c60b3aa9afeaf1e72159c50415d0a9d5f750",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAaX2UYhiMh73xcj05iOnSRoP0q+BcTM4w+zy3HOfG4nAiBz9wOKt9I0vzPTfUlO2b3ot9xGC/tWQKe/EBmPC+T9Xg=="
+      },
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEH3ap9q/YD4ehnPbdq+p5rR0mkaV7NXBQLTnxHYYPi1AiEAkfxeSjYVixLd6jWlinCLRpm3eH9PWTA92SegEpFTAbk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@cubicecho/graphql-mcp/-/graphql-mcp-2.9.0.tgz",
+     "unpackedSize": 347853
+    },
+    "engines": {
+     "node": ">=22"
+    },
+    "exports": {
+     ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+     }
+    },
+    "gitHead": "097b026f104dad04b875d7c5a0ddfda45770d92c",
+    "homepage": "https://github.com/cubicecho/graphql-mcp#readme",
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:219a3952b444]",
+      "name": "vantreeseba"
+     }
+    ],
+    "name": "@cubicecho/graphql-mcp",
+    "peerDependencies": {
+     "@modelcontextprotocol/sdk": ">=1.12",
+     "graphql": ">=16 <18",
+     "zod": "^3.25 || ^4.0"
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/cubicecho/graphql-mcp.git"
+    },
+    "scripts": {
+     "build": "tsc -p tsconfig.build.json",
+     "check": "biome check .",
+     "coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 \"src/**/*.test.ts\"",
+     "format": "biome format --write .",
+     "lint": "biome lint .",
+     "prepack": "npm run build",
+     "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+     "test:watch": "node --test --watch --experimental-strip-types \"src/**/*.test.ts\"",
+     "typecheck": "tsc --noEmit",
+     "typecheck:tests": "tsc -p tsconfig.tests.json"
+    },
+    "type": "module",
+    "version": "2.9.0"
+   }
+  }
+ },
+ "name": "@cubicecho/graphql-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@cubicecho%2Fgraphql-mcp"
+}

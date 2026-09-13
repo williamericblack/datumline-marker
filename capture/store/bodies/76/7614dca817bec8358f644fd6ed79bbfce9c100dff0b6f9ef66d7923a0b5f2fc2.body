@@ -1,0 +1,2603 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "1.6.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:238275900007]",
+    "name": "omercnet"
+   },
+   {
+    "email": "[redacted-email:d337b8cc395d]",
+    "name": "barsdescope"
+   },
+   {
+    "email": "[redacted-email:306b0032315c]",
+    "name": "nirgur"
+   },
+   {
+    "email": "[redacted-email:bf0eafcbbf48]",
+    "name": "tom-descope"
+   },
+   {
+    "email": "[redacted-email:a11479106607]",
+    "name": "asafshen"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.0.1",
+   "1.0.10",
+   "1.0.11",
+   "1.0.12",
+   "1.0.2",
+   "1.0.3",
+   "1.0.4",
+   "1.0.5",
+   "1.0.6",
+   "1.0.7",
+   "1.0.8",
+   "1.0.9",
+   "1.1.0",
+   "1.2.0",
+   "1.3.0",
+   "1.4.0",
+   "1.4.1",
+   "1.5.0",
+   "1.6.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@descope/mcp-express",
+  "_rev": "19-5f0da805cef3e7f80f52b0d688a098bb",
+  "author": {
+   "name": "Descope",
+   "url": "https://descope.com"
+  },
+  "description": "Descope Express MCP SDK",
+  "dist-tags": {
+   "latest": "1.6.0"
+  },
+  "keywords": [
+   "descope",
+   "mcp",
+   "modelcontextprotocol"
+  ],
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:238275900007]",
+    "name": "omercnet"
+   },
+   {
+    "email": "[redacted-email:d337b8cc395d]",
+    "name": "barsdescope"
+   },
+   {
+    "email": "[redacted-email:306b0032315c]",
+    "name": "nirgur"
+   },
+   {
+    "email": "[redacted-email:bf0eafcbbf48]",
+    "name": "tom-descope"
+   },
+   {
+    "email": "[redacted-email:a11479106607]",
+    "name": "asafshen"
+   }
+  ],
+  "name": "@descope/mcp-express",
+  "readme": "# Descope MCP Express SDK\n\n![Descope Banner](https://github.com/descope/.github/assets/32936811/d904d37e-e3fa-4331-9f10-2880bb708f64)\n\nDrop\u2011in Express middleware and helpers to add secure auth to your Model Context Protocol (MCP) server with Descope. Ship an authenticated /mcp endpoint and register tools in minutes.\n\n## Table of Contents\n\n- Prerequisites\n- Installation\n- Quick Start\n- Creating Authenticated Tools\n- Which API should I use?\n- Features\n- OAuth Implementation\n- Advanced Usage\n  - Legacy Authorization Server Mode (not recommended)\n  - Verify Token Options\n- Migrating from an existing MCP server\n- Migration from v0.0.x\n- Attribution\n- License\n\n## Prerequisites\n\n- A Descope project\n- An Express app\n- Node.js 18+\n\n## Installation\n\n```bash\nnpm install @descope/mcp-express\n```\n\n## Quick Start\n\n> Before you get started, you must create an [MCP Server](https://app.descope.com/agentic-hub/mcp-servers) in the Descope Console and get the Discovery URL of your new server.\n\n1. Create `.env`\n\n```bash\nSERVER_URL=http://localhost:3000\n# Recommended: MCP Server Discovery URL\nDESCOPE_MCP_SERVER_WELL_KNOWN_URL=https://api.descope.com/v1/apps/agentic/<project>/<mcp-server-id>/.well-known/openid-configuration\n\n# Optional (advanced): issuer URL \u2014 path must be `/v1/apps/agentic/<project>/<mcp-server-id>` or `/v1/apps/<project>`\n# DESCOPE_MCP_SERVER_ISSUER=https://api.descope.com/v1/apps/agentic/<project>/<mcp-server-id>\n\n# Optional: override derived values (existing setups)\n# DESCOPE_PROJECT_ID=your_project_id\n# DESCOPE_BASE_URL=https://api.descope.com\n```\n\n2. Minimal server\n\n```typescript\nimport \"dotenv/config\";\nimport express from \"express\";\nimport { descopeMcpAuthRouter, defineTool, DescopeMcpProvider } from \"@descope/mcp-express\";\nimport { z } from \"zod\";\n\nconst app = express();\n// Required: so /mcp can read JSON bodies\napp.use(express.json());\n\n// Optional: explicit provider config (env work out of the box)\nconst provider = new DescopeMcpProvider({\n  serverUrl: process.env.SERVER_URL,\n  descopeMcpServerWellKnownUrl: process.env.DESCOPE_MCP_SERVER_WELL_KNOWN_URL,\n\n  // Backward-compatible fallback:\n  projectId: process.env.DESCOPE_PROJECT_ID,\n  baseUrl: process.env.DESCOPE_BASE_URL,\n});\n\n// Define an authenticated tool (requires 'openid')\nconst hello = defineTool({\n  name: \"hello\",\n  description: \"Say hello to the authenticated user\",\n  input: {\n    name: z.string().describe(\"Name to greet\").optional(),\n  },\n  scopes: [\"openid\"],\n  handler: async (args, extra) => {\n    const result = {\n      message: `Hello ${args.name || \"there\"}!`,\n      authenticatedUser: extra.authInfo.clientId,\n    };\n    return { content: [{ type: \"text\", text: JSON.stringify(result, null, 2) }] };\n  },\n});\n\n// Wire the MCP router and register your tools\napp.use(\n  descopeMcpAuthRouter((server) => {\n    hello(server);\n  }, provider),\n);\n\napp.listen(3000, () => {\n  console.log(\"MCP endpoint: POST http://localhost:3000/mcp\");\n});\n```\n\nPro tips\n\n- Send `Content-Type: application/json` to `/mcp`.\n- `/mcp` requires a valid Bearer token.\n- Metadata endpoints are always on. The `/mcp` handler is wired only when you pass a `toolRegistration` function.\n- Recommended config is `DESCOPE_MCP_SERVER_WELL_KNOWN_URL`; the SDK derives issuer, project ID, and API `baseUrl` (from the URL origin) automatically.\n- Self-provided issuer / discovery URLs must use one of two path shapes only: **`/v1/apps/agentic/<projectId>/<mcpServerId>/...`** (MCP Server) or **`/v1/apps/<projectId>`** (Inbound App).\n- `DESCOPE_PROJECT_ID` is optional when those URLs allow deriving the project ID. Otherwise set `DESCOPE_PROJECT_ID` explicitly.\n- Backward compatibility: if neither discovery nor issuer is set, provide `DESCOPE_PROJECT_ID` (and optional `DESCOPE_BASE_URL`) as before.\n- Advertised OAuth issuer (in `/.well-known/oauth-authorization-server` and `authorization_servers`): for project-only config this stays the historical shape `https://api.descope.com/<projectId>` (via `new URL(projectId, baseUrl)`). When MCP discovery or `DESCOPE_MCP_SERVER_ISSUER` is set, the advertised issuer is the resolved MCP / Descope issuer URL instead.\n\n## Creating Authenticated Tools\n\nPick your flavor: the ergonomic `defineTool` or the flexible `registerAuthenticatedTool`.\n\n- `defineTool` (with input)\n\n```typescript\nimport { defineTool } from \"@descope/mcp-express\";\nimport { z } from \"zod\";\n\nconst getUser = defineTool({\n  name: \"get_user\",\n  description: \"Get user information\",\n  input: { userId: z.string().describe(\"The user ID to fetch\") },\n  scopes: [\"profile\", \"email\"],\n  handler: async (args, extra) => {\n    return {\n      content: [{ type: \"text\", text: JSON.stringify({ userId: args.userId, scopes: extra.authInfo.scopes }, null, 2) }],\n    };\n  },\n});\n```\n\n- `registerAuthenticatedTool`\n  - With input\n\n```typescript\nimport { registerAuthenticatedTool } from \"@descope/mcp-express\";\nimport { z } from \"zod\";\n\nconst getUser = registerAuthenticatedTool(\n  \"get_user\",\n  {\n    description: \"Get user information\",\n    inputSchema: { userId: z.string().describe(\"The user ID to fetch\") },\n  },\n  async (args, extra) => {\n    return { content: [{ type: \"text\", text: JSON.stringify({ userId: args.userId }, null, 2) }] };\n  },\n  [\"profile\", \"email\"],\n);\n```\n\n- Without input\n\n```typescript\nconst whoami = registerAuthenticatedTool(\n  \"whoami\",\n  { description: \"Return authenticated identity info\" },\n  async (extra) => {\n    const result = {\n      clientId: extra.authInfo.clientId,\n      scopes: extra.authInfo.scopes || [],\n    };\n    return { content: [{ type: \"text\", text: JSON.stringify(result, null, 2) }] };\n  },\n  [\"openid\"],\n);\n```\n\n## Which API should I use?\n\nShort answer: choose `defineTool` for brevity and great type inference; choose `registerAuthenticatedTool` if you prefer explicit overloads and a closer-to-the-metal API.\n\n- Same capabilities\n  - `defineTool` is a thin wrapper over `registerAuthenticatedTool`.\n  - Both support input (Zod shape), optional output schema, annotations, and scopes.\n- Why `defineTool`\n  - Concise, single-object config.\n  - Cleaner TypeScript inference for `(args, extra)` when you provide `input`.\n- Why `registerAuthenticatedTool`\n  - Lower-level, mirrors the underlying MCP `registerTool` shape.\n  - Two overloads (with/without input) if you like explicit control.\n\nThere isn\u2019t anything you can do with one that you can\u2019t do with the other. Pick the style you prefer.\n\n## Features\n\nMCP 2025\u201106\u201118 compliant Resource Server.\n\n- Protected Resource Metadata (RFC 8705)\n- Authorization Server Metadata (RFC 8414)\n- `/mcp` endpoint with bearer token authentication\n- Resource Indicator support (RFC 8707)\n\nOptional (Authorization Server)\n\n- `/authorize` endpoint (disabled by default)\n- Dynamic Client Registration (disabled by default)\n- Token and revocation are provided by Descope\n\n## OAuth Implementation\n\nResource Server (always enabled)\n\n- RFC 8705: OAuth 2.0 Protected Resource Metadata\n- RFC 8414: OAuth 2.0 Authorization Server Metadata\n- RFC 8707: Resource Indicators for OAuth 2.0\n\nAuthorization Server (optional)\n\n- RFC 7591: OAuth 2.0 Dynamic Client Registration\n- RFC 7009: OAuth 2.0 Token Revocation (served by Descope)\n\nAll OAuth schemas use Zod for runtime validation.\n\n## Advanced Usage\n\n### Legacy Authorization Server Mode (not recommended)\n\nBy default, this SDK runs as a Resource Server only. That\u2019s the recommended path and aligns with the MCP 2025\u201106\u201118 spec. The features below are for legacy compatibility and testing. Enabling them exposes additional endpoints (/authorize, /register). Consider the added surface area before turning them on.\n\nRequirements\n\n- DESCOPE_PROJECT_ID and SERVER_URL\n- DESCOPE_MANAGEMENT_KEY (required only when enabling Authorization Server features)\n\nExample .env\n\n```bash\nDESCOPE_MCP_SERVER_WELL_KNOWN_URL=https://api.descope.com/v1/apps/agentic/<project>/<server>/.well-known/openid-configuration\nSERVER_URL=http://localhost:3000\n```\n\nConfiguration example\n\n```typescript\nimport { DescopeMcpProvider } from \"@descope/mcp-express\";\n\nconst provider = new DescopeMcpProvider({\n  projectId: process.env.DESCOPE_PROJECT_ID,\n  serverUrl: process.env.SERVER_URL,\n  authorizationServerOptions: {\n    isDisabled: false, // enable Authorization Server mode\n    enableAuthorizeEndpoint: true, // expose /authorize\n    enableDynamicClientRegistration: true, // optionally expose /register\n  },\n  // Only needed if you enable dynamic client registration\n  dynamicClientRegistrationOptions: {\n    authPageUrl: `https://api.descope.com/login/${process.env.DESCOPE_PROJECT_ID}?flow=consent`,\n    permissionScopes: [\n      { name: \"get-schema\", description: \"Allow getting the SQL schema\" },\n      { name: \"run-query\", description: \"Allow executing a SQL query\", required: false },\n    ],\n    nonConfidentialClient: true,\n  },\n});\n```\n\nNotes\n\n- Dynamic Client Registration is a sub-feature of Legacy Authorization Server mode and is disabled by default. Only set `enableDynamicClientRegistration: true` and provide `dynamicClientRegistrationOptions` if you want to expose `/register`.\n\n### Verify Token Options\n\n```typescript\nimport { DescopeMcpProvider } from \"@descope/mcp-express\";\n\nconst provider = new DescopeMcpProvider({\n  verifyTokenOptions: {\n    requiredScopes: [\"get-schema\", \"run-query\"],\n    // resourceIndicator: \"your-resource\", // optional\n    // audience: \"your-audience\", // optional (single value supported currently)\n  },\n});\n```\n\n## Migrating from an existing MCP server\n\nAlready have a plain MCP server using `server.registerTool`? Here\u2019s the simplest path:\n\n1. Put your MCP behind Express\n\n- Add JSON parsing: `app.use(express.json())`.\n- Use `descopeMcpAuthRouter((server) => { /* register tools */ }, provider)`.\n- The router exposes the required metadata endpoints and wires `POST /mcp` with bearer auth when you provide a registration function.\n\n2. Wrap each existing tool\n\n- Before (plain MCP):\n\n```typescript\nserver.registerTool(\"whoami\", { description: \"Return identity\" }, async (_args, _extra) => {\n  const data = { ok: true };\n  return { content: [{ type: \"text\", text: JSON.stringify(data) }] };\n});\n```\n\n- After (defineTool):\n\n```typescript\nconst whoami = defineTool({\n  name: \"whoami\",\n  description: \"Return identity\",\n  scopes: [\"openid\"],\n  handler: async (extra) => {\n    const data = { ok: true };\n    return { content: [{ type: \"text\", text: JSON.stringify(data) }] };\n  },\n});\n\napp.use(\n  descopeMcpAuthRouter((server) => {\n    whoami(server);\n  }, provider),\n);\n```\n\n- After (registerAuthenticatedTool, without input):\n\n```typescript\nconst whoami = registerAuthenticatedTool(\n  \"whoami\",\n  { description: \"Return identity\" },\n  async (extra) => {\n    const data = { ok: true };\n    return { content: [{ type: \"text\", text: JSON.stringify(data) }] };\n  },\n  [\"openid\"],\n);\n```\n\n3. Remove custom wiring\n\n- You no longer need to manage `StreamableHTTPServerTransport` or your own `/.well-known/*` endpoints. The router handles them.\n\n4. Update handler signatures and return type as needed\n\n- With input: `(args, extra) => CallToolResult`.\n- Without input: `(extra) => CallToolResult`.\n- Return `CallToolResult` as `{ content: [{ type: \"text\", text: \"...\" }] }`.\n\n5. Optional: call external APIs on behalf of the user\n\n- Use `extra.getOutboundToken(appId, scopes?)` to fetch outbound tokens.\n\nIf you can\u2019t use the router, the lower-level pieces exist (`descopeMcpBearerAuth` and `createMcpServerHandler` on `POST /mcp`), but the router is the simplest and safest path.\n\n## Migration from v0.0.x\n\n- `/mcp` now uses `StreamableHTTPServerTransport` from the official MCP SDK.\n- Tools are registered via `descopeMcpAuthRouter`.\n- Authorization Server endpoints are disabled by default for security.\n\n## Attribution\n\nThis SDK adapts code from the Model Context Protocol TypeScript SDK (MIT).\n\n## License\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "time": {
+   "1.0.1": "2025-04-09T19:02:48.886Z",
+   "1.0.10": "2025-06-09T17:34:05.660Z",
+   "1.0.11": "2025-06-09T21:33:03.765Z",
+   "1.0.12": "2025-06-10T01:18:27.920Z",
+   "1.0.2": "2025-04-09T19:25:25.235Z",
+   "1.0.3": "2025-04-09T19:29:59.647Z",
+   "1.0.4": "2025-04-18T04:10:21.148Z",
+   "1.0.5": "2025-04-28T19:19:50.734Z",
+   "1.0.6": "2025-05-12T16:00:22.143Z",
+   "1.0.7": "2025-05-13T10:47:40.753Z",
+   "1.0.8": "2025-05-26T01:51:13.466Z",
+   "1.0.9": "2025-06-09T13:48:02.525Z",
+   "1.1.0": "2025-08-07T04:22:00.959Z",
+   "1.2.0": "2025-08-07T22:45:00.329Z",
+   "1.3.0": "2025-08-09T19:18:15.428Z",
+   "1.4.0": "2025-08-12T20:36:57.391Z",
+   "1.4.1": "2025-09-09T18:08:18.434Z",
+   "1.5.0": "2026-05-05T15:29:39.029Z",
+   "1.6.0": "2026-06-04T04:51:23.553Z",
+   "created": "2025-04-09T19:02:48.647Z",
+   "modified": "2026-06-04T04:51:23.723Z"
+  },
+  "versions": {
+   "1.0.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.1",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.1_1744225368707_0.6062160601021926"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.2",
+     "cors": "2.8.5",
+     "dotenv": "16.4.7",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.2"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "@typescript-eslint/eslint-plugin": "^7.1.0",
+     "@typescript-eslint/parser": "^7.1.0",
+     "concurrently": "^9.1.2",
+     "eslint": "^8.57.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-E/Be9oOQdzgc+VhqpsKK/LQkXUgo/SofjydzTP9T+2fxSn/3LBKKokyplwIgx73c6j5LtHqFkxTsQao1/8Xfpw==",
+     "shasum": "57f033d9389344899eef6621d473acf0c77f9317",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBmHaynz5hp3LAM2XJZAI3biiIXqjnWs6eSVwgWK6MMPAiEAhfFVVJb7B+ls9mAqyFPXuMUtafVip+RtHPZ2r7gcHwU="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.1.tgz",
+     "unpackedSize": 9536
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "default": "./dist/esm/*.js",
+      "require": "./dist/cjs/*.js",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./*.js": {
+      "default": "./dist/cjs/*.js",
+      "types": "./dist/cjs/*.d.ts"
+     },
+     "./*.mjs": {
+      "default": "./dist/esm/*.js",
+      "types": "./dist/esm/*.d.ts"
+     }
+    },
+    "gitHead": "8caa0f508458fe5d42f0858b9ecc9c6ba88d5504",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.7.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.1"
+   },
+   "1.0.10": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.10",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.10_1749490445341_0.5093646896583344"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.25.3"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-SZVaCMprWHbjMgole8jmpWs/+0BBRwGEKTJOqrvxIdHAn9wkao7qxTFrVJL/ZjXOIlDRZr9Da2ktvgiF9UI8MA==",
+     "shasum": "a4adc8cb1e23a00c16462144305470901258fb44",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCke+jdZjy6F1bCLPVZ1gT8I3QxPPPebJ1HEX4YBFbgTAIgBZTDOm4yj2Q3LiE1HLZnCqYDxsGcqoVqB1uOqhDGu94="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.10.tgz",
+     "unpackedSize": 202789
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "c11b38b4c8af3b3b9884c37afffbc1cb608384b3",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.11.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.10"
+   },
+   "1.0.11": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.11",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.11_1749504783560_0.9154012285219917"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.25.6"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-H+36dxEQTwRTT3qXgy9q+5OE+vfJQKmtON0nhVEQ4Es2Nup9Ph6UA7rc+Qm/c5vMkJ14ifmy4uvVjqAFUpmkPA==",
+     "shasum": "cb016ecefff77fe95f2c378145a9e28e7d3fcc03",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFKsySi91Ks3S4Ho57WfQOpareUraMgwyM81sHsQQmQ9AiEAowceJowHhTNEJ77rlTvXo46FjOLiEF80O/mJg6VJwE8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.11.tgz",
+     "unpackedSize": 202789
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "50d06f28b3244ab944c92ec9eaec0134171cf32c",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.11.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.11"
+   },
+   "1.0.12": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.12",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.12_1749518307719_0.191488368484648"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.25.7"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-0gxMlK2ehOTt86P4ZKVOJz6E9ZdI9Gatg/QFpuChnonuy2hnwwgm8/sSH2qGQWzDDpKkNf86jDbVnTGUsF5bJg==",
+     "shasum": "82bb5ec671f870a81e8a0e533ac791df54d82b93",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHOBeAmY9oqcBYbXe1nM9noDaUQR6pT+2M4dVsv4Hfe8AiEAqO3Y2hNAMTfSYbdfHgHXh01IG7bytgWuapgv5rnrry0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.12.tgz",
+     "unpackedSize": 202789
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "06f012f8d50863f6febf5b427da2dbb86e320caf",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.11.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.12"
+   },
+   "1.0.2": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.2",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.2_1744226725034_0.5934694434174519"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.2",
+     "cors": "2.8.5",
+     "dotenv": "16.4.7",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.2"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.11.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 3,
+     "integrity": "sha512-RaQvVb541vcPo+uJ8phXHYUtqIV4KGrNWHEuCRyVB4DHFixNcBMcHWeRhFICkOYlDs3S0yzDlqWe/MWWFwxTOg==",
+     "shasum": "fdc989b912e103f81e115ac2447d6e0fb979d672",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDkf/UcpZGJZMsNEc4WtRwfKl7ZX2nD7rkzpZm2FDvNKAIhAL9YdhHF9M5pUN8aP8R/9SgOBYoVuZhAQ1W4Uy+CrTSF"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.2.tgz",
+     "unpackedSize": 9565
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "default": "./dist/esm/*.js",
+      "require": "./dist/cjs/*.js",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./*.js": {
+      "default": "./dist/cjs/*.js",
+      "types": "./dist/cjs/*.d.ts"
+     },
+     "./*.mjs": {
+      "default": "./dist/esm/*.js",
+      "types": "./dist/esm/*.d.ts"
+     }
+    },
+    "gitHead": "f5f20ec66537249146888249996de093e2e7de5b",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.7.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.2"
+   },
+   "1.0.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.3",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.3_1744226999173_0.3615412402988629"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.2",
+     "cors": "2.8.5",
+     "dotenv": "16.4.7",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.2"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.11.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-FplmPZwv7bwj9PoacGQ275rUI5ErOPUns1U8aS3Qa19wwckcdO9vrQa5ZHACyxb3ib11lOAWkkwGtqBU46u82A==",
+     "shasum": "277120709b7b4a545dbfcca6cda7946ed8952a5d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAiCD3IOBHZpF7Feyroxd7KHYQYTlU/nmpC0HrcOc55UAiA418I4CPN4RkOMWbJaPgy6fprrE4c67XFitqbHkaSgWg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.3.tgz",
+     "unpackedSize": 202095
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     },
+     "./*": {
+      "default": "./dist/esm/*.js",
+      "require": "./dist/cjs/*.js",
+      "types": "./dist/esm/*.d.ts"
+     },
+     "./*.js": {
+      "default": "./dist/cjs/*.js",
+      "types": "./dist/cjs/*.d.ts"
+     },
+     "./*.mjs": {
+      "default": "./dist/esm/*.js",
+      "types": "./dist/esm/*.d.ts"
+     }
+    },
+    "gitHead": "e5d06a13081d6b1cfce5e73c75db34887ba26038",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.7.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.3"
+   },
+   "1.0.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.4",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.4_1744949420957_0.8284181308239837"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.2",
+     "cors": "2.8.5",
+     "dotenv": "16.4.7",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.2"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.11.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-VtIZvVfa9fNnpjZg3FxT9vANQAoCSq1rd5+vZr2um0REeT7yitu3713eAT4sOu1UHzcpxw1S9Sa/MXM+QZhfAw==",
+     "shasum": "3e6a2d59b6fe0e0b4ddcddbbe537ec926dd9ad63",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDAeXdLqr5dTFFc2VbjJ5Vo/Zp+QE2Ew0lQpIduc3uNNAiAcDXiE4PGVH0oYQJx0Z7j6hXHnf/0n+WadzgGFlBSFow=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.4.tgz",
+     "unpackedSize": 201779
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "e4c79da48fb63c58d584b1355dc78f8cd116be2d",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.7.1",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.4"
+   },
+   "1.0.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.5",
+    "_nodeVersion": "22.14.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.5_1745867990550_0.23838807358458625"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.5",
+     "cors": "2.8.5",
+     "dotenv": "16.4.7",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.2"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.11.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-dp8NNGyNSgmb0CCv8taC8IEVZg3DQ0ruHe78PWDo/mLK3nEv3uLNjcbK4sagG/MsI7Gjt9A/6jYM8yXWZDGsdQ==",
+     "shasum": "8badd86661ae5f15e73e0ff7cbf1d38191468502",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIET9hPfMLfneuOulN64RuytPAOQtoaHGeC6hisf7eE/iAiBdFTVobeQlzDbr+t12iRNuTmFNUZB00djsjWmwaW4Itg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.5.tgz",
+     "unpackedSize": 201779
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "11dbf86c31393049b770ae42fd5f076db7d52337",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.8.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.5"
+   },
+   "1.0.6": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.6",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.6_1747065621951_0.8202995836030376"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.5",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.3"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-KWXZo2jkfoO9xZvS7OBKKfnzHwJDFMG6rVEQ4h9pGlhKjfkE+fYeZIMuKcPUfyVBgAum8PSmhXqWzcNSdJg43g==",
+     "shasum": "e733c882d5fd3d520a897af1d63ffa0718e876e6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCNi9SKkgW1h6TkP/85eStTDeNiH5KVfLgEHldwhcmB5QIgPNOBSmFgi1sHDpyW3E0cOKZs8UVeBx8Wtj1G4Ls29N0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.6.tgz",
+     "unpackedSize": 202787
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "0548b1fa6aaa36f0be31e2a70edd893b67bec193",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.9.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.6"
+   },
+   "1.0.7": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.7",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.7_1747133260593_0.04219655489334606"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.3"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-W8cTZ30qqiBUih/nMuetrsNxBdbcgEN8lnt0YNHLmLyMK3cZxAD84U/LUyjPh3pg8m81KXKk35AO4X3muOGDVA==",
+     "shasum": "e13b40ea5dc3dec851b6d1a04a8ad87cc7e84851",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAHNEqEjWZ1mDx6vY341KBYnF3N10ALzmoCOmLzHWZsHAiEApUieA1bkWLnkk3BJnf4UG5xLi2MbiuV0NUcy0+Pgdo0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.7.tgz",
+     "unpackedSize": 202787
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "f792d8ae380c1ad017bc70c50e0c8e03b111907c",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.9.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.7"
+   },
+   "1.0.8": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.8",
+    "_nodeVersion": "22.15.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.8_1748224273236_0.5480900567704037"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.24.4"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-miOnuahaQ5FOucUHbsAjgQXcjH/ccA0QT1HUhY3cNK1HCC2RVnGpEJ2Jwwxl4gQQwgyXruMqcKFrziY4xqExfQ==",
+     "shasum": "159105f5918496b1e5a089a459da555a4c3cfa00",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDXnYgLfKnV2MWIkUc/33Q30YutRZv7XEN4sXHWXDHPcAiB1yqzSrnVKDm7v5R9urVLDNS/KalHfoL900s7Ol48ryg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.8.tgz",
+     "unpackedSize": 202788
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "f2da2410bf48f434e573d37f1497eb5650f5a7e2",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.10.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.8"
+   },
+   "1.0.9": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.0.9",
+    "_nodeVersion": "22.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.0.9_1749476882338_0.5168543502204817"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "1.7.6",
+     "cors": "2.8.5",
+     "dotenv": "16.5.0",
+     "express": "4.21.2",
+     "express-rate-limit": "7.5.0",
+     "zod": "3.25.1"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.12.0",
+     "@jest/globals": "^29.7.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^29.5.14",
+     "@types/node": "^22.13.13",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "eslint": "^9.24.0",
+     "globals": "^16.0.0",
+     "jest": "^29.7.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 133,
+     "integrity": "sha512-2FJeXats1+RbZUY4SA6K695L6W66AaJU7GQ4N2hh8ynsLl2CIyXBqUSzVIkvWYuPFPD8KsLxJFHUWhfCOh4Y+Q==",
+     "shasum": "6d6a84788f693f2193cead9376a66a1f943cad18",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIELs1N45wWPiemJPsWhVIBTmdg7xFJH/JhXBFBMLuC2/AiEA4sYcXclPNyjNOMMAc+DhXHQFnApIpF7e+WLDJRD38iw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.0.9.tgz",
+     "unpackedSize": 202788
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "f857ea043c05615bd010432f388817fbc70449de",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.11.0",
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.0.9"
+   },
+   "1.1.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.1.0",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.1.0_1754540520779_0.46042667871336995"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^1.7.11",
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "express": "4.21.2",
+     "zod": "3.25.67"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.13.0",
+     "@eslint/plugin-kit": "^0.3.4",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "cors": "2.8.5",
+     "dotenv": "16.6.1",
+     "eslint": "^9.32.0",
+     "express-rate-limit": "8.0.1",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-OgUU087NfpU9P3HAIHdImhJjLelUTFhWd51Fy9y1858K3ACscQy3McUiyw5el2lgmpY+B+VAdQrbRO3ilfIFcg==",
+     "shasum": "904f74e27fb7b4d752d6e593e9f19fba5acba81d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCQ7c3sI9BOtvnK25vzAXzIM4rOmrUib5ZrbGoffOOA8QIhAOALXTLVwjz2nK2ZRrln8L1WvY8NiCCLY4j7GBNFtkR6"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.1.0.tgz",
+     "unpackedSize": 306385
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "96421c5eb74569b5abf903515907eec37f61c312",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.13.1",
+    "pnpm": {
+     "overrides": {
+      "form-data": ">=4.0.4"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/dev-server.js",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.1.0"
+   },
+   "1.2.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.2.0",
+    "_nodeVersion": "22.17.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.2.0_1754606700101_0.35552732652640917"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.2",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^1.7.11",
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "express": "4.21.2",
+     "zod": "3.25.67"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.13.0",
+     "@eslint/plugin-kit": "^0.3.4",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "cors": "2.8.5",
+     "dotenv": "16.6.1",
+     "eslint": "^9.32.0",
+     "express-rate-limit": "8.0.1",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-RnDKEwFs66iQ4UjeB/3THOoYKJzFWM5vuqbqlpbdhfT7+yL1+dTD9Z5XXAjRFQKNZpASnL2Xeb4Nc/V4rOd5DQ==",
+     "shasum": "0a5709fd31138876a48e6ebd7265e9ff4d5ebb99",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIHFzRw1+YKD2MGY5zvOe36IyWCwiS6GS4u3SWGeonQCxAiEAz/JQCrKyLOhFbzQGYe6Uevu67S/T7fAm3rYIRNDPoFk="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.2.0.tgz",
+     "unpackedSize": 308415
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "4f7202d6638aa62fe366d104ba74ca7e8b34ad63",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.13.1",
+    "pnpm": {
+     "overrides": {
+      "form-data": ">=4.0.4"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/dev-server.js",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.2.0"
+   },
+   "1.3.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.3.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.3.0_1754767095215_0.3840562788901114"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.3",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^1.7.11",
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "express": "4.21.2",
+     "zod": "3.25.67"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.13.0",
+     "@eslint/plugin-kit": "^0.3.4",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "cors": "2.8.5",
+     "dotenv": "16.6.1",
+     "eslint": "^9.32.0",
+     "express-rate-limit": "8.0.1",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-utDJSTN9b6YCemGNb+jmX6s/bQHkxIVC//rBoBoIjq3930pjutJAoDMSNQgH2SDiAHvAJssJmnPJZs9+XWKXhw==",
+     "shasum": "f721fde9c1b0c2466a71dcfb3795356d1cd86391",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEE13zJYPrzYdH1EA5mFtSbQ0n5js01TB5fc49Si4GUMAiEA7JX/qWH2Vwl1ZHBcl8Q2WwAAdo2J9TM3+q/3BacxAFE="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.3.0.tgz",
+     "unpackedSize": 309033
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "75abad0444319520158516a47df0ff38cb17526d",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.13.1",
+    "pnpm": {
+     "overrides": {
+      "form-data": ">=4.0.4"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/dev-server.js",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.3.0"
+   },
+   "1.4.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.4.0",
+    "_nodeVersion": "22.18.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.4.0_1755031017220_0.9919531767224805"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.3",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^1.7.11",
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "express": "4.21.2",
+     "zod": "3.25.67"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.13.0",
+     "@eslint/plugin-kit": "^0.3.4",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "cors": "2.8.5",
+     "dotenv": "16.6.1",
+     "eslint": "^9.32.0",
+     "express-rate-limit": "8.0.1",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-yvVshBF/jNd/NPnzUAs4GvcRun11xPWTUMYHLcglEFVk4vwZaz/OEGfVhRR0G49C9K8KFnBzyKZCBCrr/qTNcw==",
+     "shasum": "b549968c2167fca23c922f12dad0a0720e4a4ca6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEUerMDkp1Lh3Y5eNuPbEtJshsGJGlGQQVN1SmQeCiilAiBtd1GvjVRNQVQaRv2GJU389h2apuawoDYV/bILrYMMeQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.4.0.tgz",
+     "unpackedSize": 306748
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "1e03c84c91a64d81d1553b5ea76176bdfce121ae",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.13.1",
+    "pnpm": {
+     "overrides": {
+      "form-data": ">=4.0.4"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/server.ts",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.4.0"
+   },
+   "1.4.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.4.1",
+    "_nodeVersion": "22.19.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.4.1_1757441298259_0.6805582889299078"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "10.9.3",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^1.7.11",
+     "@modelcontextprotocol/sdk": "^1.15.1",
+     "express": "4.21.2",
+     "zod": "3.25.76"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.24.0",
+     "@eslint/json": "^0.13.0",
+     "@eslint/plugin-kit": "^0.3.4",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^6.0.3",
+     "concurrently": "^9.1.2",
+     "cors": "2.8.5",
+     "dotenv": "17.2.1",
+     "eslint": "^9.32.0",
+     "express-rate-limit": "8.0.1",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "semantic-release": "^24.2.3",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.3.1",
+     "tsx": "^4.19.0",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.29.1"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-GDyjQkh8z+d6fw1IzWNpYFpgetySLPz+UNIpt85/SdvX0bCM8D/72f0LA9LnZs8QNrgG9bU691YB0bpZlP4zDg==",
+     "shasum": "1d9921605ccc790ca44739b0e78aac234e464927",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxWsITqv3ZYQ2my10b9ak3SpC7B8D8YvPmMJ92TAJGOQIhAI8jRqv2N8hyuGHN6CyvbrjoS9UL/PP8tEwAjQdUTeEs"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.4.1.tgz",
+     "unpackedSize": 306748
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "cd7acecf9e5cf54239e42677abf259d5515d550d",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.15.0",
+    "pnpm": {
+     "overrides": {
+      "form-data": ">=4.0.4"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/server.ts",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.4.1"
+   },
+   "1.5.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.5.0",
+    "_nodeVersion": "24.14.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.5.0_1777994978855_0.5263164315319666"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "11.13.0",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "express": "4.22.1",
+     "zod": "3.25.76"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.39.4",
+     "@eslint/json": "^1.2.0",
+     "@eslint/plugin-kit": "^0.7.1",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^7.0.0",
+     "concurrently": "^9.2.1",
+     "cors": "2.8.6",
+     "dotenv": "17.4.2",
+     "eslint": "^9.39.4",
+     "express-rate-limit": "8.3.2",
+     "globals": "^17.0.0",
+     "jest": "^30.3.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.4.9",
+     "tsx": "^4.19.0",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-q5U2xeZGLmoMihYCW8lsK9ADkkuAyl0D67JgNJClxAP9hXExPNiqrRkclntuUoNp1YNYNKMk284NzQE8dlJt0w==",
+     "shasum": "4d0aa12888c512f8eb17f202d279e00a5b015728",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDUxLImoQHCzgAlIHIc88VhC9XqdV0cS0z3co77vcJ99AiAtfdOES/MKHICBWiztVYZ2hRU4UqQw0rHQDDRFxHFvKw=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.5.0.tgz",
+     "unpackedSize": 334464
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "55c31ec0532e43f18bd704f526831a12b4c18189",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.33.0",
+    "pnpm": {
+     "overrides": {
+      "brace-expansion@<1.1.13": ">=1.1.13",
+      "diff": ">=4.0.4",
+      "flatted": ">=3.4.2",
+      "form-data": ">=4.0.4",
+      "glob@>=10.2.0 <10.5.0": ">=10.5.0",
+      "handlebars": ">=4.7.9",
+      "js-yaml": ">=4.1.1",
+      "minimatch@<3.1.4": ">=3.1.4",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=4 <4.0.4": ">=4.0.4",
+      "qs": ">=6.14.2"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/server.ts",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.5.0"
+   },
+   "1.6.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@descope/mcp-express@1.6.0",
+    "_nodeVersion": "24.16.0",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/mcp-express_1.6.0_1780548683413_0.2898715552648816"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:238275900007]",
+     "name": "omercnet"
+    },
+    "_npmVersion": "11.16.0",
+    "author": {
+     "name": "Descope",
+     "url": "https://descope.com"
+    },
+    "dependencies": {
+     "@descope/node-sdk": "^2.5.0",
+     "@modelcontextprotocol/sdk": "^1.25.2",
+     "express": "4.22.2",
+     "zod": "3.25.76"
+    },
+    "description": "Descope Express MCP SDK",
+    "devDependencies": {
+     "@eslint/js": "^9.39.4",
+     "@eslint/json": "^1.2.0",
+     "@eslint/plugin-kit": "^0.7.1",
+     "@jest/globals": "^30.0.0",
+     "@types/cors": "^2.8.17",
+     "@types/express": "^5.0.1",
+     "@types/express-serve-static-core": "^5.0.6",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.13.13",
+     "@types/superagent": "^8.1.9",
+     "@types/supertest": "^7.0.0",
+     "concurrently": "^9.2.1",
+     "cors": "2.8.6",
+     "dotenv": "17.4.2",
+     "eslint": "^9.39.4",
+     "express-rate-limit": "8.5.1",
+     "globals": "^17.0.0",
+     "jest": "^30.3.0",
+     "nodemon": "^3.1.9",
+     "prettier": "^3.2.5",
+     "shx": "^0.4.0",
+     "supertest": "^7.1.0",
+     "ts-jest": "^29.4.9",
+     "tsx": "^4.19.0",
+     "typescript": "^5.8.2",
+     "typescript-eslint": "^8.59.2"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 173,
+     "integrity": "sha512-x/V9/0/KgSQ81NJAY5hk3iPt2dIGUacyfO1zgNblIVVbPQOJzOouqI3fqeoFXowbYCEmwNEpJEXs5awQUY4PHA==",
+     "shasum": "1195309fd91b67eaeb4e99f7fe730e1a60e6d764",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCCxXgkA90PyUljKodA0qTFlOi7F3solqbrAoAmEn+lpAIgWlnhWRu0tByf6hXCdJtS3j8OZKh2GqpjAK451/pzoQ0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@descope/mcp-express/-/mcp-express-1.6.0.tgz",
+     "unpackedSize": 334858
+    },
+    "engines": {
+     "node": ">=18"
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/esm/index.d.ts"
+     }
+    },
+    "gitHead": "aba8847989eac714ef04cb8b5ba6181557308777",
+    "keywords": [
+     "descope",
+     "mcp",
+     "modelcontextprotocol"
+    ],
+    "license": "MIT",
+    "maintainers": [
+     {
+      "email": "[redacted-email:238275900007]",
+      "name": "omercnet"
+     },
+     {
+      "email": "[redacted-email:d337b8cc395d]",
+      "name": "barsdescope"
+     },
+     {
+      "email": "[redacted-email:306b0032315c]",
+      "name": "nirgur"
+     },
+     {
+      "email": "[redacted-email:bf0eafcbbf48]",
+      "name": "tom-descope"
+     },
+     {
+      "email": "[redacted-email:a11479106607]",
+      "name": "asafshen"
+     }
+    ],
+    "name": "@descope/mcp-express",
+    "packageManager": "pnpm@10.33.4",
+    "pnpm": {
+     "overrides": {
+      "brace-expansion@<1.1.13": ">=1.1.13",
+      "brace-expansion@>=5.0.0 <5.0.6": ">=5.0.6",
+      "diff": ">=4.0.4",
+      "flatted": ">=3.4.2",
+      "form-data": ">=4.0.4",
+      "glob@>=10.2.0 <10.5.0": ">=10.5.0",
+      "handlebars": ">=4.7.9",
+      "hono": ">=4.12.18",
+      "js-yaml": ">=4.1.1",
+      "minimatch@<3.1.4": ">=3.1.4",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=4 <4.0.4": ">=4.0.4",
+      "qs": ">=6.15.2"
+     }
+    },
+    "publishConfig": {
+     "access": "public"
+    },
+    "scripts": {
+     "build": "pnpm run \"/build:.*/\"",
+     "build:cjs": "tsc -p tsconfig.cjs.json && echo '{\"type\": \"commonjs\"}' > dist/cjs/package.json",
+     "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\": \"module\"}' > dist/esm/package.json",
+     "dev": "concurrently \"pnpm run watch\" \"nodemon --watch build dist/index.js\"",
+     "dev:examples": "tsx examples/server.ts",
+     "format-check": "prettier . --check",
+     "format-fix": "prettier . --write",
+     "leaks": "bash ./scripts/gitleaks/gitleaks.sh",
+     "lint": "eslint src --ext .ts",
+     "lint:fix": "pnpm run lint --fix",
+     "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest",
+     "watch": "tsc --watch"
+    },
+    "type": "module",
+    "types": "./dist/esm/index.d.ts",
+    "version": "1.6.0"
+   }
+  }
+ },
+ "name": "@descope/mcp-express",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@descope%2Fmcp-express"
+}

@@ -1,0 +1,557 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "2.0.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5682fdcc7ea0]",
+    "name": "jspahrsummers"
+   },
+   {
+    "email": "[redacted-email:1dd9aa386783]",
+    "name": "pcarleton"
+   },
+   {
+    "email": "[redacted-email:adbb23ff7cdd]",
+    "name": "fweinberger"
+   },
+   {
+    "email": "[redacted-email:c4810881fded]",
+    "name": "thedsp"
+   },
+   {
+    "email": "[redacted-email:08c12cb983d2]",
+    "name": "ashwin-ant"
+   },
+   {
+    "email": "[redacted-email:d74683c36241]",
+    "name": "ochafik-ant"
+   },
+   {
+    "email": "[redacted-email:cef9df5daadb]",
+    "name": "cliffhall"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "1.7.3",
+   "1.7.4",
+   "1.7.5",
+   "2.0.0"
+  ]
+ },
+ "manifest": {
+  "_id": "@modelcontextprotocol/server-lazy-auth",
+  "_rev": "6-ef580b6b2802a205aa1daffb21903e7a",
+  "bugs": {
+   "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+  },
+  "description": "MCP App example demonstrating lazy (on-demand) OAuth: public tools work unauthenticated, protected tools return 401 + WWW-Authenticate so the host runs the OAuth flow only when needed",
+  "dist-tags": {
+   "latest": "2.0.0"
+  },
+  "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+  "license": "MIT",
+  "maintainers": [
+   {
+    "email": "[redacted-email:5682fdcc7ea0]",
+    "name": "jspahrsummers"
+   },
+   {
+    "email": "[redacted-email:1dd9aa386783]",
+    "name": "pcarleton"
+   },
+   {
+    "email": "[redacted-email:adbb23ff7cdd]",
+    "name": "fweinberger"
+   },
+   {
+    "email": "[redacted-email:c4810881fded]",
+    "name": "thedsp"
+   },
+   {
+    "email": "[redacted-email:08c12cb983d2]",
+    "name": "ashwin-ant"
+   },
+   {
+    "email": "[redacted-email:d74683c36241]",
+    "name": "ochafik-ant"
+   },
+   {
+    "email": "[redacted-email:cef9df5daadb]",
+    "name": "cliffhall"
+   }
+  ],
+  "name": "@modelcontextprotocol/server-lazy-auth",
+  "readme": "# Example: Lazy Auth Server\n\nAn MCP App example demonstrating **lazy (on-demand) auth**: the server connects and lists tools without any authentication, and only asks for OAuth when a _protected_ tool is actually called \u2014 by answering `401` with a `WWW-Authenticate` header. A public MCP App renders an \"Auth me\" button; clicking it calls a protected tool via [`callServerTool`](https://apps.extensions.modelcontextprotocol.io/api/classes/app.App.html#callservertool). The host sees the 401, runs the OAuth flow, retries, and the result renders inline.\n\nThe embedded OAuth authorization server is a deliberately minimal mock (HS256 JWTs, stateless auth codes, auto-approve consent page) so the whole flow runs from a single process with no external dependencies. It is **not** a production authorization server.\n\n## Tools\n\n| Tool                | Auth          | Description                                                                                           |\n| ------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |\n| `show_auth_button`  | public        | Renders buttons: \"Auth me\" (calls `get_secret`), \"Revoke token\" (calls `revoke_auth_token`)           |\n| `get_secret`        | **protected** | Returns secret data (requires Bearer token)                                                           |\n| `revoke_auth_token` | **protected** | Revokes the caller's **entire auth session** (access + refresh token) \u2192 forces full re-auth           |\n| `elicit_url`        | public        | URL elicitation via `elicitInput` (blocks until the elicitation completes)                            |\n| `elicit_by_error`   | public        | URL elicitation via the `-32042` (`UrlElicitationRequired`) error; succeeds on retry after completion |\n\n## Getting Started\n\n```bash\nnpm install\nnpm start\n# \u2192 MCP endpoint at http://localhost:3097/mcp\n```\n\nTo test with a remote MCP host, expose the server through a public tunnel (see [Testing MCP Apps](../../docs/testing-mcp-apps.md)) and set `PUBLIC_URL` to the tunnel URL so OAuth metadata and callback URLs use it:\n\n```bash\nPUBLIC_URL=https://<your-tunnel-host> npm start\n```\n\nThis example is HTTP-only (no stdio mode): the lazy-auth flow relies on HTTP status codes and OAuth endpoints.\n\n## Environment Variables\n\n| Var                         | Required    | Description                                                                                                                                                      |\n| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `JWT_SECRET`                | recommended | 32+ byte secret for HS256 signing (`openssl rand -hex 32`). A dev-only default is used if unset.                                                                 |\n| `PORT`                      | no          | Local port (default 3097)                                                                                                                                        |\n| `PUBLIC_URL`                | non-local   | Public base URL of the server (e.g. your tunnel URL). Required for non-localhost deployments; client-supplied `Host` headers are only trusted for loopback hosts |\n| `ACCESS_TOKEN_TTL_SECONDS`  | no          | Default access-token lifetime (default **30**, short on purpose so you can watch the host's refresh flow kick in)                                                |\n| `REFRESH_TOKEN_TTL_SECONDS` | no          | Default refresh-token lifetime (default **300**). Between the access and refresh TTLs, calls succeed via silent refresh; past it, a full re-auth is required     |\n| `REACTIVE_AUTH_ONLY`        | no          | Set `1` to remove auth metadata from the root `/.well-known/oauth-*` paths so hosts can't discover auth preemptively \u2014 discovery then only happens via the 401   |\n\n### Per-connection token lifetimes\n\nThe short defaults are great for watching the refresh flow, but slow or automated clients may want tokens that survive a whole session. Any client can request a different access-token lifetime by connecting to a TTL-scoped MCP endpoint path (capped at 24 hours):\n\n```\nhttps://<host>/ttl/3600/mcp     \u2190 tokens for this connection live 1 hour\n```\n\nThis works through [RFC 8707 resource indicators](https://www.rfc-editor.org/rfc/rfc8707): MCP hosts send the MCP server URL as the `resource` parameter in OAuth authorization and token requests, and this server issues tokens for that grant with the lifetime encoded in the path (refresh tokens are extended to at least match). The TTL is a _path_ segment rather than a query param because hosts canonicalize resource indicators and strip query strings. Each TTL endpoint also enforces its value as a maximum token age, so connecting to a path with a _lower_ TTL than a token's issued lifetime forces the refresh flow. To exercise the full **re-auth** flow, call the `revoke_auth_token` tool.\n\n## Mounting under a base path\n\n`createApp()` can also be mounted inside another Express app, so an existing server can host this example at a sub-path of its own origin:\n\n```ts\nimport { createApp } from \"@modelcontextprotocol/server-lazy-auth\";\n\nhostApp.use(\"/lazy-auth\", createApp());\n// \u2192 MCP endpoint at https://<host>/lazy-auth/mcp\n```\n\nAll advertised URLs (OAuth metadata, `WWW-Authenticate` `resource_metadata`, PRM `resource`, elicitation callbacks) include the mount path automatically, derived from Express's `req.baseUrl`. When `PUBLIC_URL` is set, it must include the mount path (e.g. `https://example.com/lazy-auth`).\n\nOne thing the mounted app cannot do for itself: [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414#section-3) / [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) put well-known discovery documents at the _root_ of the origin with the path inserted after the well-known prefix (`/.well-known/oauth-authorization-server/lazy-auth`), and MCP SDK clients only try that insertion form. The host app must rewrite those root paths into the mount before its other routes:\n\n```ts\nhostApp.use((req, _res, next) => {\n  const m = req.url.match(\n    /^\\/\\.well-known\\/(oauth-authorization-server|oauth-protected-resource)\\/lazy-auth(\\/.*)?$/,\n  );\n  if (m) req.url = `/lazy-auth/.well-known/${m[1]}${m[2] ?? \"\"}`;\n  next();\n});\n```\n\nRewriting into the mount (rather than calling the sub-app directly) keeps `req.baseUrl` \u2014 and therefore every advertised URL \u2014 consistent.\n\n## How It Works\n\n1. **Connect without auth** \u2014 `initialize`, `tools/list`, and public tool calls succeed with no `Authorization` header.\n2. **Protected tool \u2192 401** \u2014 when `get_secret` or `revoke_auth_token` is called without a (valid) Bearer token, the server responds `401` with `WWW-Authenticate: Bearer resource_metadata=\"\u2026/auth/prm\"`.\n3. **Discovery** \u2014 the host follows `resource_metadata` to the protected-resource metadata (RFC 9728), which points at the authorization server metadata (RFC 8414).\n4. **OAuth flow** \u2014 the host runs the authorization-code + PKCE flow against the mock `/authorize` and `/token` endpoints (a small consent page keeps the popup visible).\n5. **Retry** \u2014 the host retries the tool call with the Bearer token and the secret renders inline in the app.\n6. **Refresh + revocation** \u2014 access tokens expire after 30 seconds and refresh tokens after 5 minutes by default, so all three states are easy to observe: direct success (<30s), silent refresh (30s\u20135min), and full re-auth (>5min). Connections can request different lifetimes via the `/ttl/<seconds>/mcp` endpoint path (see [Per-connection token lifetimes](#per-connection-token-lifetimes)), and `revoke_auth_token` invalidates the whole session immediately.\n\nThe two `elicit_*` tools demonstrate the complementary pattern of [URL elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation), where the server asks the user to open a URL (e.g. to complete sign-in) either by blocking inside the tool call (`elicit_url`) or by failing with the `-32042` error and succeeding on retry (`elicit_by_error`).\n\n## Architecture\n\n- **Stateless auth codes** \u2014 grant details are encoded _inside_ the authorization code as a 5-minute JWT, so nothing needs to be stored between requests.\n- **Short-lived tokens** \u2014 access tokens default to a **30 second** TTL and refresh tokens to **5 minutes**: first `get_secret` succeeds \u2192 wait >30s \u2192 next call 401s \u2192 host refreshes \u2192 retry succeeds \u2192 wait >5min \u2192 full re-auth. Per-connection overrides via the `/ttl/<seconds>/mcp` endpoint path.\n- **HS256** \u2014 a single shared secret; no key-pair persistence.\n- **Per-request MCP server** \u2014 each `/mcp` request gets a fresh `McpServer` + `StreamableHTTPServerTransport` (stateless, no session IDs).\n- **Session revocation** \u2014 all tokens from one OAuth session share a `sid` claim; `revoke_auth_token` adds the sid to an in-memory revocation list checked by both token verification and the refresh grant.\n\n## Key Files\n\n- [`server.ts`](server.ts) - OAuth endpoints, discovery metadata, and the MCP server with public + protected tools\n- [`main.ts`](main.ts) - HTTP entry point\n- [`mcp-app.html`](mcp-app.html) / [`src/mcp-app.ts`](src/mcp-app.ts) - Public app with the \"Auth me\" button\n- [`secret-app.html`](secret-app.html) / [`src/secret-app.ts`](src/secret-app.ts) - Protected app rendered for `get_secret`\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "directory": "examples/lazy-auth-server",
+   "type": "git",
+   "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+  },
+  "time": {
+   "1.7.3": "2026-06-01T11:27:43.941Z",
+   "1.7.4": "2026-06-05T14:38:27.012Z",
+   "1.7.5": "2026-07-23T11:29:48.634Z",
+   "2.0.0": "2026-09-08T18:30:07.252Z",
+   "created": "2026-06-01T11:27:43.626Z",
+   "modified": "2026-09-08T18:30:07.573Z"
+  },
+  "versions": {
+   "1.7.3": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-lazy-auth@1.7.3",
+    "_nodeVersion": "22.21.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-lazy-auth_1.7.3_1780313263740_0.7618201372717059"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:8fae717b0c67]",
+     "name": "ochafik"
+    },
+    "_npmVersion": "10.9.4",
+    "bin": {
+     "mcp-server-lazy-auth": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "jose": "^6.0.0"
+    },
+    "description": "MCP App example demonstrating lazy (on-demand) OAuth: public tools work unauthenticated, protected tools return 401 + WWW-Authenticate so the host runs the OAuth flow only when needed",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "fileCount": 7,
+     "integrity": "sha512-wl2MxY7ESV9QDvBzp5AJCpbhJtx62NKzYnTgDL8umqpbj5oP8cdQR/GZBpXUoBT50kHZVnia7l+vEXlnupe8xw==",
+     "shasum": "f559e54c3299a11926378bfa2d119cf0e559a2d7",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDsJWMpzIfMJ42o1XyrCRW2qDVU9b3fkjFsNp7sYm5IaAiB0uHPCzg9UAEX7cxkTeEIclhr/96pziFAjmg0HhnQkNQ=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-lazy-auth/-/server-lazy-auth-1.7.3.tgz",
+     "unpackedSize": 3007592
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "4a5f0f97e5b08d9ce6503b125b1d0c47d7a51355",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:fb23a84989a9]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:1ef6a8805403]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:8fae717b0c67]",
+      "name": "ochafik"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-lazy-auth",
+    "repository": {
+     "directory": "examples/lazy-auth-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=secret-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "concurrently \"cross-env INPUT=mcp-app.html vite build --watch\" \"cross-env INPUT=secret-app.html vite build --watch\""
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.3"
+   },
+   "1.7.4": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-lazy-auth@1.7.4",
+    "_nodeVersion": "22.22.3",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-lazy-auth_1.7.4_1780670306841_0.6800264846021793"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server-lazy-auth": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "jose": "^6.0.0"
+    },
+    "description": "MCP App example demonstrating lazy (on-demand) OAuth: public tools work unauthenticated, protected tools return 401 + WWW-Authenticate so the host runs the OAuth flow only when needed",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-lazy-auth@1.7.4"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-9Qa7cNh6hmJntvNwkgN6ngq+7hSDVbz7+nr8EaRYzc4t4HOFEaBvBrPn+iPD9qC8cZSdfitIqE+Yz8bmQN20qw==",
+     "shasum": "4f2130dc2a9440a9be49c669fb9e5f5e92574c4e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIF1qI/OPmU1v4j0cJh/BnCZFvDtbeUu0w2DY/1QY64OsAiEAwAhcRsGjeLmje4QkiWUk/Vc/HbZ+D0iIOcOBvHbneU0="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-lazy-auth/-/server-lazy-auth-1.7.4.tgz",
+     "unpackedSize": 3013772
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "ca1d29894fabbd1558885a9ec8620dcb01d7457e",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-lazy-auth",
+    "repository": {
+     "directory": "examples/lazy-auth-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=secret-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "concurrently \"cross-env INPUT=mcp-app.html vite build --watch\" \"cross-env INPUT=secret-app.html vite build --watch\""
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.4"
+   },
+   "1.7.5": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-lazy-auth@1.7.5",
+    "_nodeVersion": "22.23.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-lazy-auth_1.7.5_1784806188478_0.05933328414871841"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server-lazy-auth": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^1.7.0",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "jose": "^6.0.0"
+    },
+    "description": "MCP App example demonstrating lazy (on-demand) OAuth: public tools work unauthenticated, protected tools return 401 + WWW-Authenticate so the host runs the OAuth flow only when needed",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-lazy-auth@1.7.5"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-0NgZuWcy1yDGGBJ8xGIkiOAkUU2Bq9gRIxRL2AUhJamziCrAC8lGkDxxec+WheyZZ36K5rXHtkbHxpgQ4cORrw==",
+     "shasum": "44c411d49dbbb2efee46e855196bc86539be8880",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIE0DYfiz8bwYpxFhkp1ObH/0BRA6/FKS7uE5ZxEkv2CQAiEAvgWGEsRp1CyyqfUfXzUdOKOaAzW0SNousddU7h5Yg70="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-lazy-auth/-/server-lazy-auth-1.7.5.tgz",
+     "unpackedSize": 3024528
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "92f46a574568a3ddac7600343b7d3c4c4ed7b588",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     },
+     {
+      "email": "[redacted-email:cef9df5daadb]",
+      "name": "cliffhall"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-lazy-auth",
+    "repository": {
+     "directory": "examples/lazy-auth-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=secret-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "concurrently \"cross-env INPUT=mcp-app.html vite build --watch\" \"cross-env INPUT=secret-app.html vite build --watch\""
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "1.7.5"
+   },
+   "2.0.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@modelcontextprotocol/server-lazy-auth@2.0.0",
+    "_nodeVersion": "22.23.2",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/server-lazy-auth_2.0.0_1788892207073_0.02026071565692944"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:d74683c36241]",
+     "name": "ochafik-ant"
+    },
+    "_npmVersion": "10.9.8",
+    "bin": {
+     "mcp-server-lazy-auth": "dist/index.js"
+    },
+    "bugs": {
+     "url": "https://github.com/modelcontextprotocol/ext-apps/issues"
+    },
+    "dependencies": {
+     "@modelcontextprotocol/ext-apps": "^2.0.0",
+     "@modelcontextprotocol/node": "2.0.0",
+     "@modelcontextprotocol/server": "2.0.0",
+     "cors": "^2.8.5",
+     "express": "^5.1.0",
+     "jose": "^6.0.0",
+     "zod": "^4.2.0"
+    },
+    "description": "MCP App example demonstrating lazy (on-demand) OAuth: public tools work unauthenticated, protected tools return 401 + WWW-Authenticate so the host runs the OAuth flow only when needed",
+    "devDependencies": {
+     "@types/cors": "^2.8.19",
+     "@types/express": "^5.0.0",
+     "@types/node": "22.10.0",
+     "concurrently": "^9.2.1",
+     "cross-env": "^10.1.0",
+     "typescript": "^5.9.3",
+     "vite": "^6.0.0",
+     "vite-plugin-singlefile": "^2.3.0"
+    },
+    "directories": {},
+    "dist": {
+     "attestations": {
+      "provenance": {
+       "predicateType": "https://slsa.dev/provenance/v1"
+      },
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@modelcontextprotocol%2fserver-lazy-auth@2.0.0"
+     },
+     "fileCount": 7,
+     "integrity": "sha512-mF8PAUZjf3Sl6+o+3AGYy6J9KCLjz4N9cf1yJ9ZyWYgqoOgiNSkefrLLpIfmdI2qMCsp3BL7IngoLRFL9FtF0w==",
+     "shasum": "812e8a17daa48be175e0924807766e120cc266e8",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCzgp7Xx01i6E+A5AT+C0WTLcK+3tKAWPGZzMudKLxMrQIgSdO2C1mmUeF3AdXVUbncP8PT21W3MhWNxVsksH9j4UI="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@modelcontextprotocol/server-lazy-auth/-/server-lazy-auth-2.0.0.tgz",
+     "unpackedSize": 2772873
+    },
+    "exports": {
+     ".": {
+      "default": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+     }
+    },
+    "gitHead": "352f6ced4d80772e92b4e7a311854481a8d65b04",
+    "homepage": "https://github.com/modelcontextprotocol/ext-apps#readme",
+    "license": "MIT",
+    "main": "dist/server.js",
+    "maintainers": [
+     {
+      "email": "[redacted-email:5682fdcc7ea0]",
+      "name": "jspahrsummers"
+     },
+     {
+      "email": "[redacted-email:1dd9aa386783]",
+      "name": "pcarleton"
+     },
+     {
+      "email": "[redacted-email:adbb23ff7cdd]",
+      "name": "fweinberger"
+     },
+     {
+      "email": "[redacted-email:c4810881fded]",
+      "name": "thedsp"
+     },
+     {
+      "email": "[redacted-email:08c12cb983d2]",
+      "name": "ashwin-ant"
+     },
+     {
+      "email": "[redacted-email:d74683c36241]",
+      "name": "ochafik-ant"
+     },
+     {
+      "email": "[redacted-email:cef9df5daadb]",
+      "name": "cliffhall"
+     }
+    ],
+    "name": "@modelcontextprotocol/server-lazy-auth",
+    "repository": {
+     "directory": "examples/lazy-auth-server",
+     "type": "git",
+     "url": "git+https://github.com/modelcontextprotocol/ext-apps.git"
+    },
+    "scripts": {
+     "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=secret-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --banner \"#!/usr/bin/env node\"",
+     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+     "prepublishOnly": "npm run build",
+     "serve": "bun --watch main.ts",
+     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
+     "watch": "concurrently \"cross-env INPUT=mcp-app.html vite build --watch\" \"cross-env INPUT=secret-app.html vite build --watch\""
+    },
+    "type": "module",
+    "types": "dist/server.d.ts",
+    "version": "2.0.0"
+   }
+  }
+ },
+ "name": "@modelcontextprotocol/server-lazy-auth",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@modelcontextprotocol%2Fserver-lazy-auth"
+}

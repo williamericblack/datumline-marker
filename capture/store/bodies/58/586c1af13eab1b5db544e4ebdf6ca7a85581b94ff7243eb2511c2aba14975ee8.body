@@ -1,0 +1,2259 @@
+{
+ "_capture": "datumline-capture/0.1 - capture only, no assessment",
+ "declared": {
+  "declared_mcp_surface": null,
+  "declared_tool_descriptions_present": false,
+  "latest_version": "0.20.1",
+  "maintainers": [
+   {
+    "email": "[redacted-email:62603a633da4]",
+    "name": "anvanster-personal"
+   }
+  ],
+  "parameter_schemas_present": false,
+  "versions": [
+   "0.13.0",
+   "0.16.3",
+   "0.16.5",
+   "0.16.6",
+   "0.17.0",
+   "0.17.1",
+   "0.17.10",
+   "0.17.2",
+   "0.17.3",
+   "0.17.4",
+   "0.17.5",
+   "0.17.6",
+   "0.17.7",
+   "0.17.8",
+   "0.18.0",
+   "0.18.1",
+   "0.18.2",
+   "0.18.3",
+   "0.18.4",
+   "0.18.5",
+   "0.18.6",
+   "0.19.0",
+   "0.19.1",
+   "0.20.0",
+   "0.20.1"
+  ]
+ },
+ "manifest": {
+  "_id": "@astudioplus/codegraph-mcp",
+  "_rev": "25-4582ce117c9d31cac3507eba5e52e865",
+  "author": {
+   "email": "[redacted-email:62603a633da4]",
+   "name": "Andrey Vasilevsky"
+  },
+  "bugs": {
+   "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+  },
+  "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+  "dist-tags": {
+   "latest": "0.20.1"
+  },
+  "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+  "keywords": [
+   "mcp",
+   "model-context-protocol",
+   "code-intelligence",
+   "code-graph",
+   "ai",
+   "claude",
+   "cursor",
+   "copilot"
+  ],
+  "license": "Apache-2.0",
+  "maintainers": [
+   {
+    "email": "[redacted-email:62603a633da4]",
+    "name": "anvanster-personal"
+   }
+  ],
+  "name": "@astudioplus/codegraph-mcp",
+  "readme": "# CodeGraph MCP Server\n\nCross-language code intelligence for AI agents \u2014 42 tools, 38 languages, persistent memory, documentation intelligence, one-call PR review.\n\n## Install\n\n```bash\nnpm install -g @astudioplus/codegraph-mcp\n```\n\nThe analysis engine is not bundled in the package.\nInstall downloads the engine built for your platform from its GitHub release -\ntagged with the *engine's* version, which an npm-only patch release does not\nmove - and verifies it against the published `.sha256` before installing it\n(on Windows the ONNX Runtime sidecar comes with it).\n\nA failed download never fails the install, because the CLI, the hooks and the\ndocs all still work - it prints a warning instead. Retry it with:\n\n```bash\nnpx codegraph-mcp-fetch-engine          # --force re-downloads an engine that is already present\n```\n\nFor air-gapped machines, or if you vendor the binary yourself, set\n`CODEGRAPH_SKIP_BINARY_FETCH=1` to skip the download and supply the engine one\nof two ways:\n\n- place it at `<package>/bin/codegraph-server-<platform>-<arch>` (`.exe` on\n  Windows) - the path `codegraph-mcp` launches by default; or\n- point `CODEGRAPH_SERVER_PATH` at the engine wherever it already lives. This\n  wins over the bundled path, and `codegraph-mcp` fails with a clear message\n  rather than falling back if nothing is there.\n\n## Usage\n\n### Claude Code\n\nAdd to `~/.claude.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"codegraph\": {\n      \"command\": \"codegraph-mcp\",\n      \"args\": []\n    }\n  }\n}\n```\n\n### Cursor / Windsurf / Cline / Other MCP clients\n\nSame config \u2014 the `codegraph-mcp` command starts the server in MCP (stdio) mode.\n\n### Options\n\nPass flags after `--`:\n\n```json\n{\n  \"mcpServers\": {\n    \"codegraph\": {\n      \"command\": \"codegraph-mcp\",\n      \"args\": [\"--workspace\", \"/path/to/project\", \"--exclude\", \"vendor\"]\n    }\n  }\n}\n```\n\nLeave the transport out of `args`: `codegraph-mcp` already puts the engine in\nMCP (stdio) mode, so `--mcp`, `--stdio` and `--connect` are dropped from\nwhatever the client passes rather than forwarded twice.\n\n| Flag | Default | Description |\n|------|---------|-------------|\n| `--workspace <path>` | current dir | Directories to index (repeatable) |\n| `--exclude <dir>` | \u2014 | Directories to skip (repeatable) |\n| `--embedding-model <model>` | `bge-small` | `bge-small`, `jina-code-v2`, `granite-97m` (32K, multilingual), or `static` (model2vec, ~100\u00d7 faster indexing, ~90% of BGE quality; needs a local model dir - this install downloads one to `~/.codegraph/static_models/jina-code-static-256`, or point `CODEGRAPH_STATIC_MODEL` elsewhere) |\n| `--max-files <n>` | 5000 | Maximum files to index |\n| `--profile <name>` | `all` | Scope tool surface: `core` (8), `graph` (17), `memory` (14), `security` (pro), `all` (42) |\n| `--graph-only` | off | Skip embeddings \u2014 graph + structural tools only. No ONNX model load, 10-50\u00d7 faster indexing. For CI / one-shot graph queries. |\n| `--run-tool <name>` | \u2014 | One-shot: index, run a single tool, print result, exit. No MCP handshake. Pair with `--tool-args '<json>'`. |\n\n### Troubleshooting: embeddings disabled / \"Memory manager not initialized\"\n\nBefore loading the ONNX embedding model, the server checks available memory and\nruns graph-only if under ~1.5 GB, so an OOM-kill can't take down the process.\nIf that check misfires, `index_markdown`, `search_docs`, `memory_*`, and\nsemantic search are unavailable while graph-only tools keep working.\n\n- A reading of `0 MB available` is treated as a detection failure and the model\n  loads anyway.\nOn macOS, reclaimable memory is parked in inactive/speculative/purgeable pages\nthat some memory readers don't count as free, so a healthy Mac can report 0.\n- If embeddings stay disabled even though the machine has plenty of free RAM,\n  set `CODEGRAPH_SKIP_MEMORY_CHECK=1` (also accepts `true`/`yes`) to bypass the\n  check entirely.\n\nBoth apply in MCP mode and one-shot `--run-tool` mode.\n\n### Agent rules (recommended)\n\nPre-configured rule files that teach your AI agent to use CodeGraph tools before falling back to grep / multi-file reads:\n\n\u2192 **[codegraph-rules-for-agents](https://github.com/codegraph-ai/codegraph-rules-for-agents)**\n\n### GitHub Action \u2014 automatic PR review\n\nGet a code-graph analysis comment on every PR \u2014 blast radius, test gaps,\nstale docs, suggested reviewers. Runs **graph-only** (no embeddings, no\nAPI keys, just `GITHUB_TOKEN`). The core invocation:\n\n```bash\ncodegraph-server --graph-only \\\n  --run-tool codegraph_pr_context \\\n  --tool-args '{\"baseBranch\":\"main\",\"format\":\"markdown\"}'\n```\n\nThis prints a ready-to-post markdown PR comment. A copy-paste workflow\ntemplate lives at [`.github/workflows/codegraph-pr.yml`](https://github.com/codegraph-ai/CodeGraph/blob/main/.github/workflows/codegraph-pr.yml) in the main repo.\n\n### Optional: automatic context injection in Claude Code\n\nInstall a PreToolUse hook that nudges Claude to fetch graph context (`get_edit_context`, `analyze_impact`) before editing source files in indexed workspaces. Skips non-source files and ad-hoc edits silently. Never blocks tool calls.\n\n```bash\nnpx codegraph-mcp-install-hooks         # interactive prompt\nnpx codegraph-mcp-install-hooks --dry   # preview the change\nnpx codegraph-mcp-install-hooks --force # skip prompt\nnpx codegraph-mcp-install-hooks --uninstall\n```\n\n## Tools (42)\n\n**Analysis** (11): `get_ai_context`, `get_edit_context`, `get_curated_context`, `analyze_impact`, `analyze_complexity`, `find_circular_deps`, `find_hot_paths`, `find_dead_imports`, `get_module_summary`, `search_by_pattern`, `search_by_error`\n\n**PR review** (1): `pr_context` \u2014 one-call PR analysis: blast radius, test gaps, stale docs, commit hint, suggested reviewers. Supports `format:\"markdown\"` for ready-to-post CI comments.\n\n**Navigation** (13): `symbol_search`, `get_callers`, `get_callees`, `get_detailed_symbol`, `get_symbol_info`, `get_dependency_graph`, `get_call_graph`, `find_by_imports`, `find_by_signature`, `find_entry_points`, `find_implementors`, `find_related_tests`, `traverse_graph`\n\n**Memory** (7): `memory_store`, `memory_get`, `memory_search`, `memory_context`, `memory_list`, `memory_stats`, `memory_invalidate`\n\n**Documentation** (7): `index_markdown`, `search_docs`, `list_doc_sources`, `remove_doc_source`, `verify_design`, `design_gaps`, `generate_architecture_doc`\n\n**Indexing** (3): `reindex_workspace`, `index_files`, `index_directory`\n\nAll tool names are prefixed with `codegraph_` (e.g. `codegraph_symbol_search`).\n\n## Languages (38)\n\n**Systems**: C, C++, Rust, Zig, Objective-C  \n**JVM**: Java, Kotlin, Scala, Groovy, Clojure  \n**Web/Scripting**: TypeScript/JS, Python, Ruby, PHP, Perl, Lua, Elixir, Elm  \n**Web/Style**: CSS  \n**Mobile**: Swift, Dart  \n**Functional**: Haskell, OCaml, Julia, Erlang  \n**Enterprise**: C#, COBOL, Fortran, Go  \n**Blockchain**: Solidity  \n**Shell/Config**: Bash, HCL/Terraform, TOML, YAML, Dockerfile  \n**Hardware**: Verilog/SystemVerilog, Tcl  \n**Data Science**: R\n\n## Telemetry\n\nAnonymous usage telemetry helps improve CodeGraph. Events tracked: tool invocations (name + duration), startup, errors. No file paths, code content, or PII is ever sent.\n\nOpt out: set `CODEGRAPH_TELEMETRY=off` in your environment.\n\n## License\n\nApache-2.0 \u2014 [GitHub](https://github.com/codegraph-ai/CodeGraph)\n",
+  "readmeFilename": "README.md",
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+  },
+  "time": {
+   "0.13.0": "2026-04-05T06:45:22.399Z",
+   "0.16.3": "2026-05-22T07:30:46.540Z",
+   "0.16.5": "2026-05-24T19:24:39.619Z",
+   "0.16.6": "2026-05-25T04:23:48.915Z",
+   "0.17.0": "2026-05-26T00:02:39.023Z",
+   "0.17.1": "2026-05-26T02:37:51.148Z",
+   "0.17.10": "2026-05-31T23:04:55.939Z",
+   "0.17.2": "2026-05-26T06:50:12.262Z",
+   "0.17.3": "2026-05-27T16:14:01.774Z",
+   "0.17.4": "2026-05-27T18:15:57.611Z",
+   "0.17.5": "2026-05-28T17:40:41.866Z",
+   "0.17.6": "2026-05-29T00:10:22.939Z",
+   "0.17.7": "2026-05-30T04:32:35.316Z",
+   "0.17.8": "2026-05-30T22:10:31.602Z",
+   "0.18.0": "2026-06-01T18:45:38.467Z",
+   "0.18.1": "2026-06-02T06:50:38.753Z",
+   "0.18.2": "2026-06-03T00:16:28.865Z",
+   "0.18.3": "2026-06-03T16:55:36.763Z",
+   "0.18.4": "2026-06-04T16:57:06.891Z",
+   "0.18.5": "2026-06-06T05:10:34.787Z",
+   "0.18.6": "2026-06-18T05:18:30.353Z",
+   "0.19.0": "2026-06-30T22:47:44.880Z",
+   "0.19.1": "2026-07-19T19:03:33.114Z",
+   "0.20.0": "2026-08-09T04:18:04.358Z",
+   "0.20.1": "2026-08-10T02:34:39.036Z",
+   "created": "2026-04-05T06:45:20.090Z",
+   "modified": "2026-08-10T02:34:39.186Z"
+  },
+  "versions": {
+   "0.13.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.13.0",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.13.0_1775371520196_0.3166355170544033"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 28 tools, 17 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 10,
+     "integrity": "sha512-0UwZB8mxVLxGjqemGvKu/t6dFnYijf5oPrfOHPqQqz/1wyQQT8CPvRz1eS3iwYXElGEI2kw455hTi31Ki4zB7Q==",
+     "shasum": "eabc2a1e5dd82a8662299e06db7e86ccd789f577",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDYw6bUVEtG9TJVCxm+MMltnJwjrAcefVdKSoasnCcvtAiAGUysHJMSTi6PNKXlQFpPRv9Yd3ufSJqbe8GzrXJBeZg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.13.0.tgz",
+     "unpackedSize": 415808432
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "9cfce465782eaa57a9c3ac9fc1ab057e1c5414c2",
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.13.0"
+   },
+   "0.16.3": {
+    "_from": "file:astudioplus-codegraph-mcp-0.16.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.16.3",
+    "_integrity": "sha512-897PflgDFDFzUnSjI0d6i2WNt9H8oE8Zuo1vvBCxO0uuP5ruSXeMNGwYxxdTHVYOPa7e2Lsveff/2ALDwXHx5w==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.16.3_1779435045268_0.15540198969550434"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.16.3.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 34 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-897PflgDFDFzUnSjI0d6i2WNt9H8oE8Zuo1vvBCxO0uuP5ruSXeMNGwYxxdTHVYOPa7e2Lsveff/2ALDwXHx5w==",
+     "shasum": "7131410c946dd6dc10f9f010c08c74a3f314cb98",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAzqPf9LQ2a0FiTjp3gF4I3ihuyRC9yakOVIoT3q5hHIAiBodmboUybLj6V+4vnl45fQiEjTGO6o2GqEiJp2ZljVvA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.16.3.tgz",
+     "unpackedSize": 589292544
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.16.3"
+   },
+   "0.16.5": {
+    "_from": "file:astudioplus-codegraph-mcp-0.16.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.16.5",
+    "_integrity": "sha512-NgtnZI8aSfBbro4MbGhVAAzP+FMrMDPVWjFLEPHLYNpj4KpGO84wjD0uBXHb/STANlqA+nGrn0BWvJe/Rc46jQ==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.16.5_1779650678298_0.4677633868850608"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.16.5.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 34 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-NgtnZI8aSfBbro4MbGhVAAzP+FMrMDPVWjFLEPHLYNpj4KpGO84wjD0uBXHb/STANlqA+nGrn0BWvJe/Rc46jQ==",
+     "shasum": "e94626993179aa24eab27a44e6c7fb290b1dd651",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIG/sg+5bbEB+0gDJwPwzspog1EncKPKTb6iIOuuUi1PpAiEAiLxNLSD+c+r+VwfFjH6yk4yV6Zt8Ue4OSDJAjNaYXaw="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.16.5.tgz",
+     "unpackedSize": 589507264
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.16.5"
+   },
+   "0.16.6": {
+    "_from": "file:astudioplus-codegraph-mcp-0.16.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.16.6",
+    "_integrity": "sha512-drC4RKkVSAioNwvEHo3emKeyvm2d5qITDlC6IYsTqTHD9HPeiy0dS1MwF3XJDNOZUYo5bWGI5i423bmFlSXVpA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.16.6_1779683027608_0.6775165461117687"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.16.6.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 34 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-drC4RKkVSAioNwvEHo3emKeyvm2d5qITDlC6IYsTqTHD9HPeiy0dS1MwF3XJDNOZUYo5bWGI5i423bmFlSXVpA==",
+     "shasum": "581c8c2fc2f768f34416caff7477ae5cd03fef44",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQDR+vMgIs9MwMM34n/X88Mn19vHKtxdv+QNyD8WV4K+1wIhANnUAxuupUNRl3YFZa3nLZGZxVjuXTGr7tDAmJc9S148"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.16.6.tgz",
+     "unpackedSize": 589584016
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.16.6"
+   },
+   "0.17.0": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.0",
+    "_integrity": "sha512-ODnzysaVH3Q7IhnCcEYBod4l+lg8BuRZc5uE7h5GNmRb4PrMVy3MVeKCblexf5j4ahvF6gijEm0gttq2Nh4OUA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.0_1779753757673_0.19845301689156436"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.0.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 34 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-ODnzysaVH3Q7IhnCcEYBod4l+lg8BuRZc5uE7h5GNmRb4PrMVy3MVeKCblexf5j4ahvF6gijEm0gttq2Nh4OUA==",
+     "shasum": "574e2caaa9980996e0b9f6547f01495d1cf4d78d",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIBiHRTuSfTziBRIfl49abN85I7YqA8Oge0ZsBc63mxRaAiEA/QdCr0RWSiXUughWWT/z0I3XdRHfkLuU20U/zEm1A7Y="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.0.tgz",
+     "unpackedSize": 590445648
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.0"
+   },
+   "0.17.1": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.1",
+    "_integrity": "sha512-hZf/wYV/ZTTY9My5cQipeiBJsNoSFlnWGM301u+lTTG8TiePQVTXgNs7SYCj8c4WXm/uRYkwKPT6r9GucTZmbA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.1_1779763069881_0.07185220161181105"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.1.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 41 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-hZf/wYV/ZTTY9My5cQipeiBJsNoSFlnWGM301u+lTTG8TiePQVTXgNs7SYCj8c4WXm/uRYkwKPT6r9GucTZmbA==",
+     "shasum": "cb47693b6bba5098e199e905747b0723e787557f",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCDx80gvvP8XcmEJR9tglgKN/gVWyu9fWJrdGlNiZHJswIhAMpF3mOwnO9mERXLvzFqbAFkUpvP0cu10CzVl5RPT8yy"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.1.tgz",
+     "unpackedSize": 590464859
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.1"
+   },
+   "0.17.10": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.10.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.10",
+    "_integrity": "sha512-YxkjSdjoJZUYXWURM6J3CFpYOTxqEVINL0BR2exPC4n3I3qmTAtVFH4kD0t8DpT/hbPduTSu032ozK6E/u41Zg==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.10_1780268694655_0.8327493747347707"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.10.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-YxkjSdjoJZUYXWURM6J3CFpYOTxqEVINL0BR2exPC4n3I3qmTAtVFH4kD0t8DpT/hbPduTSu032ozK6E/u41Zg==",
+     "shasum": "004296a7c96d7bfe41a22bfe66c5b3a8b33dd826",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCpXFaLYIubr/mBcLGXYLVT90/1qp1T5EAS7Gh3PGz0CAIgIOy0cQxRgOo49ZQsJP16/RHwnnZ+l3PqVedKE/XonTQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.10.tgz",
+     "unpackedSize": 591329915
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.10"
+   },
+   "0.17.2": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.2",
+    "_integrity": "sha512-MQFhaCq1SeMPSY7RmpVGMKv3Nf/IdW6CPprpVvy8I78xHNWJcAIFzrRR4HadVzisnHZP+eL1e0eQuyyJbJSlew==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.2_1779778210738_0.26342264626453304"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.2.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 41 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-MQFhaCq1SeMPSY7RmpVGMKv3Nf/IdW6CPprpVvy8I78xHNWJcAIFzrRR4HadVzisnHZP+eL1e0eQuyyJbJSlew==",
+     "shasum": "d6be880601cc90cd9c01db05fe4064b43fa37ad9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIDboWIhCicQAt5FBOdjbVc+Jae+Spi6RP5gUkJX57HDtAiARmyqOQv3sO2z8Gxl6c3g7JLqLepWEcUVdCKyHQnmuFA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.2.tgz",
+     "unpackedSize": 590473115
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.2"
+   },
+   "0.17.3": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.3",
+    "_integrity": "sha512-TUlRZ4HiUUUM34rKQ64iBjrm+3yyJCX+I+cKzzYcdJa7eary+tHMyXyHwhJ6RciNgZEkNb38mx0yPWMZ+evCXA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.3_1779898440485_0.38685773868190565"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.3.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 41 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-TUlRZ4HiUUUM34rKQ64iBjrm+3yyJCX+I+cKzzYcdJa7eary+tHMyXyHwhJ6RciNgZEkNb38mx0yPWMZ+evCXA==",
+     "shasum": "dcfe85253de022629e528c64bb672204a938a0a0",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCH2ta6e/J1Feu+kwjTsllViJ8eDsU/WxcbXVNxGWALqwIhAJNsT5Pm5WJT/ZVW5t6Cw3h6z4EUK+pYk6QtphNsuuBj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.3.tgz",
+     "unpackedSize": 590488291
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.3"
+   },
+   "0.17.4": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.4",
+    "_integrity": "sha512-qucKsxBqfPXu0RssPE37ivvPG1abqPC94TchkWuyumN8yRvTf2ElM7Rrgpe2aJ4nusoTihXe1SrpN3eYezCvzQ==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.4_1779905756145_0.4502360531085825"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.4.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 41 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-qucKsxBqfPXu0RssPE37ivvPG1abqPC94TchkWuyumN8yRvTf2ElM7Rrgpe2aJ4nusoTihXe1SrpN3eYezCvzQ==",
+     "shasum": "e8b871e64a756b047477f5ec79a80039119e2e90",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQDg2n/f5XtnsKyteoE5m2Bx3d/S5bfAyAuoGtp0HM5BGwIgO7VbDlapjbMnYZ4ORzHcOWqe9z2D1FhfDsHvRQkMOyA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.4.tgz",
+     "unpackedSize": 590920995
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.4"
+   },
+   "0.17.5": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.5",
+    "_integrity": "sha512-Gqd5wYzuTC2eFUStzXVT1gNeSOF2+NSWrxrBp5grdQS3ChzXn1wNancOCPMLn1PtPzyJmK/xYAMErFpzNrahEA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.5_1779990040586_0.18786755670428934"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.5.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 41 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-Gqd5wYzuTC2eFUStzXVT1gNeSOF2+NSWrxrBp5grdQS3ChzXn1wNancOCPMLn1PtPzyJmK/xYAMErFpzNrahEA==",
+     "shasum": "0b7a3d3459b567688732350366eedc20379fd967",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFCLytZ7nft9lXWDwuKvjuRLBfoP29rEM7kN6aAG2TtNAiEAqtVhctNSVkmQ8RvnvdBovew2dcSjI0Gz3qPHVKnyqts="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.5.tgz",
+     "unpackedSize": 591024463
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.5"
+   },
+   "0.17.6": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.6",
+    "_integrity": "sha512-H3BiMJltxbYLxG0zRM9MYfOMW0KhdHbza0vdVHoNQNExe8LIGavqXVI1Z8qFZ3tOVopVTcJsEUzEu2J7vDkubw==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.6_1780013421280_0.994976389019897"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.6.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-H3BiMJltxbYLxG0zRM9MYfOMW0KhdHbza0vdVHoNQNExe8LIGavqXVI1Z8qFZ3tOVopVTcJsEUzEu2J7vDkubw==",
+     "shasum": "63ed0e8b612be418ddce3bb641083ab90e55570c",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCH3brOHMcjIj/pmFiW5ytpRHUU4fQNBP5m3ACNIQDYPkCIQCn+LI2vL9Bg1YAeFBBehLlGr/zyE4WNARt7Ng9Yl7Qpg=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.6.tgz",
+     "unpackedSize": 591024474
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.6"
+   },
+   "0.17.7": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.7.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.7",
+    "_integrity": "sha512-u6KEYZfgrCWbOLUDYHiakARu5kUCFHPxG0hOZ9ocmhTYz/S7EoUbxhHpqGjDeB8NeSBRgEnbXZaxtHZhuyOpFQ==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.7_1780115553892_0.4752075887742322"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.7.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-u6KEYZfgrCWbOLUDYHiakARu5kUCFHPxG0hOZ9ocmhTYz/S7EoUbxhHpqGjDeB8NeSBRgEnbXZaxtHZhuyOpFQ==",
+     "shasum": "444132d0af0f11df7ee6e3cf794a8825012075df",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQD+LmhQ0Dy9tJHmm1xAj3fgUBzVvIIuAobEhpNjB2NNZwIhAPwJlEAB1McsWJVLlonraSdYqWP6siUvQuRW0aFs98bj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.7.tgz",
+     "unpackedSize": 591067442
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.7"
+   },
+   "0.17.8": {
+    "_from": "file:astudioplus-codegraph-mcp-0.17.8.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.17.8",
+    "_integrity": "sha512-NMaSGBQUF4CB1atgqxyTxJI6hqneb+BM9kj0kEu71p33XEEJlW60syX2F2QiYaKkQ2KBJcniHeWQCd2aFo9uog==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.17.8_1780179030334_0.12281776462434402"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.17.8.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 13,
+     "integrity": "sha512-NMaSGBQUF4CB1atgqxyTxJI6hqneb+BM9kj0kEu71p33XEEJlW60syX2F2QiYaKkQ2KBJcniHeWQCd2aFo9uog==",
+     "shasum": "d2e1eee7caaa35f580f6dbd069fe015d748f37b9",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAXjQa3J3/3gLoAPDRTZhH6bAT0unDnI4b0UDzT2PIZCAiEA94EGKmnFiFFNfOahwGcU40erwB7y0dC+hsK0mXoCvgM="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.17.8.tgz",
+     "unpackedSize": 591145318
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.17.8"
+   },
+   "0.18.0": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.0",
+    "_integrity": "sha512-OACoP9ZrgANxbFq3NbKV6npczUvu36XaNtzZwhJAyTzoLsv6XPmPgwU+f9IelAUkwhNqr8+Sh0pj8OBqw7y0fQ==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.0_1780339536736_0.8949212340024477"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.0.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-OACoP9ZrgANxbFq3NbKV6npczUvu36XaNtzZwhJAyTzoLsv6XPmPgwU+f9IelAUkwhNqr8+Sh0pj8OBqw7y0fQ==",
+     "shasum": "74f35bfe7c4b48f2f3f6dbf203b7f69c3599cae1",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIEgdWI+JR0WCKLse7uoxjfZlJGPqZTGlVDQ14nkz7g9MAiBeDV3Cqpo3F7ZLjb527AcmGS55BWMOtA+ByinB9Bqx2Q=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.0.tgz",
+     "unpackedSize": 598800903
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.0"
+   },
+   "0.18.1": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.1",
+    "_integrity": "sha512-F8Hr2m9Q7esEfMxMIOGYvTyqMoXFoIL7rdDx0peU7OXOjyFJWmldsEdse7EaUVFrvRWvRhhg9rP0F+yEHQzD1g==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.1_1780383037430_0.5298640591141475"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.1.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-F8Hr2m9Q7esEfMxMIOGYvTyqMoXFoIL7rdDx0peU7OXOjyFJWmldsEdse7EaUVFrvRWvRhhg9rP0F+yEHQzD1g==",
+     "shasum": "6ea723b7ad7a408dcca0e751993241b5a771d1d6",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIEuq+djoJS8rpHdY6Xt8OVRXyZWtGizG1mH4tOEZLJ6hAiEA5m7TcEmh01N7wm30P+U6vSjBId9L7DyDMsMvc5KZc6w="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.1.tgz",
+     "unpackedSize": 598821991
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.1"
+   },
+   "0.18.2": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.2.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.2",
+    "_integrity": "sha512-9pUu7c0l+0jlIHwctYAQPHxOTttaYTfGoFd7XYeUBMqHFyRGdIYDGAdGiOYwGXu+fjCdWQGmvPIoFGQDl42CdA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.2_1780445787502_0.3003149172444768"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.2.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-9pUu7c0l+0jlIHwctYAQPHxOTttaYTfGoFd7XYeUBMqHFyRGdIYDGAdGiOYwGXu+fjCdWQGmvPIoFGQDl42CdA==",
+     "shasum": "2c9259300ec3d0d2a9aa1641c3fd1f1609c3a82b",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCxt3C93spVW63WpjMX8lDyFF49YjJHgHWF+BN/nIsz/QIhAINJn/cYN9K0f5N/O/AcVl/ZToazV3xrTb3ubkQbCmY5"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.2.tgz",
+     "unpackedSize": 598826959
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.2"
+   },
+   "0.18.3": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.3.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.3",
+    "_integrity": "sha512-NVnoVAsEn5JnUg7JbCgx67uvjPm+X1DhISkja+2+RZCQbsW/jn5qBjQnIysWClv+cRPNtHemxt62Xy+w44TmFg==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.3_1780505734518_0.27803154387837403"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.3.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-NVnoVAsEn5JnUg7JbCgx67uvjPm+X1DhISkja+2+RZCQbsW/jn5qBjQnIysWClv+cRPNtHemxt62Xy+w44TmFg==",
+     "shasum": "45a805daf570fe3052fcf604e105ae5ab3e5a907",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCh5lvuy4qpDjQz9HLq9e5o11fY3obEg197FIqCRkPy0wIhAITlWEUY1r+AXo80wL10SGQx/b43w4OWkmjlY5ik9JOj"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.3.tgz",
+     "unpackedSize": 598876047
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.3"
+   },
+   "0.18.4": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.4.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.4",
+    "_integrity": "sha512-TB0a8soJ/rdYrhsPd/X5tqh/OKY7Z7k/+C56dwNkCcpWfdJTFvbWqscsK03DvwWgX1fKCp8Zx+AfFs46GBU9gg==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.4_1780592225562_0.15029477614921238"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.4.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-TB0a8soJ/rdYrhsPd/X5tqh/OKY7Z7k/+C56dwNkCcpWfdJTFvbWqscsK03DvwWgX1fKCp8Zx+AfFs46GBU9gg==",
+     "shasum": "a8ebe1d124169d44dea75482f7843bf2fc625046",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIQCajpogKJ9w8mzlmqjypRuGlRuhn6HeszqS1tb1XPEWQwIgJP4gSAVTqIzP4/9luBuYaeKgb/udP89m+FiKFoBbCPQ="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.4.tgz",
+     "unpackedSize": 598903351
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.4"
+   },
+   "0.18.5": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.5.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.5",
+    "_integrity": "sha512-/rejlAXNSmmL6TUHppOCqx4Bm9Yk3PjDTIhvJGMAvvywPyCrdIrTfsui+T35yWp6cLZ/Q4DB7fIbDwH5uwYisQ==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.5_1780722633400_0.062089184263021124"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.5.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-/rejlAXNSmmL6TUHppOCqx4Bm9Yk3PjDTIhvJGMAvvywPyCrdIrTfsui+T35yWp6cLZ/Q4DB7fIbDwH5uwYisQ==",
+     "shasum": "08d4326b24a3103a2217c0334970f458e18c1c72",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFYjY3kT8pwwjAtL8z1yzu3sc0AoGewlKyzHXenYaoS3AiEA0feRDBGnSBsMLzdnWzYUo75nSKETuVIwvvhb3DZnVvg="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.5.tgz",
+     "unpackedSize": 599155039
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.5"
+   },
+   "0.18.6": {
+    "_from": "file:astudioplus-codegraph-mcp-0.18.6.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.18.6",
+    "_integrity": "sha512-o2zCjxQX3prjVKrux2YiQkyDAUMGb41EeDKyDwNWW5alWVjTnj/+0UXFVeL7eo7SZ6McKc64RVM/XobBDByHVg==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.18.6_1781759908691_0.25740035827182006"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.18.6.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-o2zCjxQX3prjVKrux2YiQkyDAUMGb41EeDKyDwNWW5alWVjTnj/+0UXFVeL7eo7SZ6McKc64RVM/XobBDByHVg==",
+     "shasum": "09eb3a40027bd0288f9ee79c514afe5dfbd051a4",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIFMr95RjGpUgFPH3TakMnWGrgu+R7U0oPgEb+4zzaFWAAiEAo05Gnkpm+N44mC0t83ssPsjJ1pM2xZLV+mGtPp57c+8="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.18.6.tgz",
+     "unpackedSize": 599180719
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.18.6"
+   },
+   "0.19.0": {
+    "_from": "file:astudioplus-codegraph-mcp-0.19.0.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.19.0",
+    "_integrity": "sha512-dc2dQc5drY5ZblGwSMwRYaEgNJbqqRkafiFB6jsb4YdwygrrGS0Cb6wP+q4JBKXlaaF3/7w7pZVoGRITNoFasA==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.19.0_1782859663628_0.9081190693561914"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.19.0.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-dc2dQc5drY5ZblGwSMwRYaEgNJbqqRkafiFB6jsb4YdwygrrGS0Cb6wP+q4JBKXlaaF3/7w7pZVoGRITNoFasA==",
+     "shasum": "3cbe8cc23822204d6ec89648dcb16dfe1cee33da",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIDBNHY+yInCEPIharrmZOrGULU3LGZiPbBxQLq3a+FSeAiEAuA88S4CdtnDOYEpJD0oTZe+Sb7KU1C1gakjMEj3NVoA="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.19.0.tgz",
+     "unpackedSize": 497642136
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.19.0"
+   },
+   "0.19.1": {
+    "_from": "file:astudioplus-codegraph-mcp-0.19.1.tgz",
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.19.1",
+    "_integrity": "sha512-94kOM85zTUSejMjmZTJ10QFaleFJ+ffTV9P0lDWYeE8Sjdrr00Ck9hUCT//E5Hy7qc28QDuyeXX0xdnFKgckFw==",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.19.1_1784487811848_0.5428134534444722"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "_resolved": "/Users/anvanster/projects/codegraph/mcp-package/astudioplus-codegraph-mcp-0.19.1.tgz",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 14,
+     "integrity": "sha512-94kOM85zTUSejMjmZTJ10QFaleFJ+ffTV9P0lDWYeE8Sjdrr00Ck9hUCT//E5Hy7qc28QDuyeXX0xdnFKgckFw==",
+     "shasum": "57ee4c2a48c1625c68847811cc42767eff665030",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEQCIAGCL55yHCIQikhIrHenMn9Sk+5jNeP1IJ0fdE6AmTYjAiAryBbbqoBGxtKEuXHr4WKQOmWOp7EoTg+b1O/2C9sEmA=="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.19.1.tgz",
+     "unpackedSize": 497710783
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js"
+    },
+    "version": "0.19.1"
+   },
+   "0.20.0": {
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.20.0",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.20.0_1786249084214_0.2034630080697437"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-fetch-engine": "bin/fetch-engine-cli.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-/X6vyxOPv4VLcQejnadH1+kyD4hjN8u/NIBcywzSSLhPg8R3oMQ2InN4nwgPtpNcEons38NFZBQ8pob73ipfFw==",
+     "shasum": "e0bfca866c1cedf446f6a2e06d1786b38da8b49e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEYCIQCEY9440AchY5CDCVDB2jIhJNus2j8q8JnTnfiVsukd+AIhAN8KS5HKSkZzxnQOwKAJlxtMZW0ljT1PD04WjhgsV2z2"
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.20.0.tgz",
+     "unpackedSize": 68478
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "284c8e541a2d38284ae961d30e26e4e956573779",
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js",
+     "test": "node test/fetch-engine.test.js && node test/wrapper-args.test.js"
+    },
+    "version": "0.20.0"
+   },
+   "0.20.1": {
+    "_hasShrinkwrap": false,
+    "_id": "@astudioplus/codegraph-mcp@0.20.1",
+    "_nodeVersion": "25.6.1",
+    "_npmOperationalInternal": {
+     "host": "s3://npm-registry-packages-npm-production",
+     "tmp": "tmp/codegraph-mcp_0.20.1_1786329278889_0.7535404967723016"
+    },
+    "_npmUser": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "anvanster-personal"
+    },
+    "_npmVersion": "11.9.0",
+    "author": {
+     "email": "[redacted-email:62603a633da4]",
+     "name": "Andrey Vasilevsky"
+    },
+    "bin": {
+     "codegraph-daemon": "bin/codegraph-daemon.js",
+     "codegraph-mcp": "bin/codegraph-mcp.js",
+     "codegraph-mcp-fetch-engine": "bin/fetch-engine-cli.js",
+     "codegraph-mcp-install-hooks": "bin/install-hooks.js"
+    },
+    "bugs": {
+     "url": "https://github.com/codegraph-ai/CodeGraph/issues"
+    },
+    "cpu": [
+     "x64",
+     "arm64"
+    ],
+    "dependencies": {
+     "posthog-node": "^4.18.0"
+    },
+    "description": "CodeGraph MCP server \u2014 cross-language code intelligence with 42 tools, 38 languages",
+    "directories": {},
+    "dist": {
+     "fileCount": 11,
+     "integrity": "sha512-JiXUMNmxNhCAphsdBOL7ma9ZQekLqNb1zjBo55SRKy66qFbCdpYmBNI6zZaQcm+DDnGfyfmkzUg5N40wzkxupw==",
+     "shasum": "0e275b0b00b361943ee0a5d60c5dc4dd7aefbe2e",
+     "signatures": [
+      {
+       "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+       "sig": "MEUCIAKADdRqGYxbRsD/+c1hvKnsa/sObgEaMDhMlLrHP2F4AiEAyngUgBUM6TYb8U2NvCyfOrpc+RDcmc0S9g3laU5whkY="
+      }
+     ],
+     "tarball": "https://registry.npmjs.org/@astudioplus/codegraph-mcp/-/codegraph-mcp-0.20.1.tgz",
+     "unpackedSize": 69589
+    },
+    "engines": {
+     "node": ">=18.0.0"
+    },
+    "gitHead": "489ccf1612555510f8367e3e673181f6a1275fe4",
+    "homepage": "https://github.com/codegraph-ai/CodeGraph#readme",
+    "keywords": [
+     "mcp",
+     "model-context-protocol",
+     "code-intelligence",
+     "code-graph",
+     "ai",
+     "claude",
+     "cursor",
+     "copilot"
+    ],
+    "license": "Apache-2.0",
+    "maintainers": [
+     {
+      "email": "[redacted-email:62603a633da4]",
+      "name": "anvanster-personal"
+     }
+    ],
+    "mcpName": "io.github.codegraph-ai/codegraph",
+    "name": "@astudioplus/codegraph-mcp",
+    "os": [
+     "darwin",
+     "linux",
+     "win32"
+    ],
+    "repository": {
+     "type": "git",
+     "url": "git+https://github.com/codegraph-ai/CodeGraph.git"
+    },
+    "scripts": {
+     "postinstall": "node bin/postinstall.js",
+     "test": "node test/fetch-engine.test.js && node test/wrapper-args.test.js"
+    },
+    "version": "0.20.1"
+   }
+  }
+ },
+ "name": "@astudioplus/codegraph-mcp",
+ "registry": "npm",
+ "source_url": "https://registry.npmjs.org/@astudioplus%2Fcodegraph-mcp"
+}
