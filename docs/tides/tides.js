@@ -54,7 +54,21 @@
   function snapshot(t) { let y = S.snaps[0].year; for (const x of S.snaps) if (t >= x.from) y = x.year; return y; }
   function bloc(name, t) { for (const r of S.rulesC) if (r[0].test(name) && t >= r[2] && t < r[3]) return r[1]; return S.default_bloc; }
   function rule(name, t) { for (const r of S.rulesC) if (r[0].test(name) && t >= r[2] && t < r[3]) return r; return null; }
-  const color = b => (S.blocs[b] || S.blocs[S.default_bloc])[1];
+  // A bloc marked "hatch" (e.g. a war of independence) is drawn as stripes over its base colour,
+  // so it never relies on hue alone to stand apart from its neighbours.
+  const color = b => { const v = S.blocs[b] || S.blocs[S.default_bloc]; return v[2] === "hatch" ? `url(#hatch-${b})` : v[1]; };
+  function hatchDefs() {
+    d3.select("svg defs").remove();
+    const defs = svg.insert("defs", ":first-child");
+    for (const [k, v] of Object.entries(S.blocs)) {
+      if (v[2] !== "hatch") continue;
+      const p = defs.append("pattern").attr("id", "hatch-" + k).attr("patternUnits", "userSpaceOnUse")
+        .attr("width", 6).attr("height", 6).attr("patternTransform", "rotate(45)");
+      p.append("rect").attr("width", 6).attr("height", 6).attr("fill", v[1]);
+      p.append("rect").attr("width", 2.6).attr("height", 6).attr("fill", "#14171f");
+    }
+  }
+  const swatch = v => v[2] === "hatch" ? `repeating-linear-gradient(45deg,${v[1]} 0 3px,#14171f 3px 5px)` : v[1];
 
   function drawStates(t) {
     const s = snapshot(t);
@@ -213,7 +227,7 @@
     d3.selectAll("#views button").classed("on", (v, i) => i === 0);
     const used = new Set(S.rules.map(r => r[1]));
     const items = Object.entries(S.blocs).filter(([k]) => used.has(k) || k === S.default_bloc);
-    d3.select("#legend").html(items.map(([k, v]) => `<span data-b="${k}" style="--c:${v[1]}">${esc(v[0])}</span>`).join("") +
+    d3.select("#legend").html(items.map(([k, v]) => `<span data-b="${k}" style="--c:${swatch(v)}">${esc(v[0])}</span>`).join("") +
       `<span class="b" style="--c:var(--gold)">Event</span>`);
     d3.select("#t").attr("max", Math.round((T1 - T0) / DAY));
     d3.select("#srcbody").html(sourcesHtml());
@@ -238,6 +252,7 @@
     path = d3.geoPath(proj);
     d3.selectAll("#slices button").classed("on", b => b.id === m.id);
     if (!fromHash) history.replaceState(null, "", "#" + m.id);
+    hatchDefs();
     buildUi();
     d3.select("#tip").classed("pinned", false).style("display", "none");
     d3.select("#ticker").selectAll("*").remove();

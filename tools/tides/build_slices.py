@@ -39,7 +39,7 @@ def rnd(obj, nd=3):
     return round(obj, nd)
 
 
-def clip(fc, bbox, tol):
+def clip(fc, bbox, tol, meter_box=None):
     clipbox = box(*bbox)
     by_name = {}
     for f in fc["features"]:
@@ -70,7 +70,10 @@ def clip(fc, bbox, tol):
         polys = [g] if g.geom_type == "Polygon" else list(g.geoms)
         g = MultiPolygon([orient(p, sign=-1.0) for p in polys]) if len(polys) > 1 else orient(polys[0], sign=-1.0)
         m = mapping(g)
-        feats.append({"type": "Feature", "properties": {"n": name, "a": round(g.area, 2)},
+        props = {"n": name, "a": round(g.area, 2)}
+        if meter_box:  # land area inside the meter's region, for "share of Europe" style counters
+            props["m"] = round(g.intersection(box(*meter_box)).area, 3)
+        feats.append({"type": "Feature", "properties": props,
                       "geometry": {"type": m["type"], "coordinates": rnd(m["coordinates"])}})
     return feats
 
@@ -88,7 +91,7 @@ def main():
             y = snap["year"]
             if y not in cache:
                 cache[y] = load_basemap(y, args.basemaps)
-            s["borders"][str(y)] = clip(cache[y], s["clip"], s["simplify"])
+            s["borders"][str(y)] = clip(cache[y], s["clip"], s["simplify"], s.get("meter_box"))
             snap["source"] = {"file": f"geojson/world_{y}.geojson", "repo": BASEMAP_REPO,
                               "commit": BASEMAP_COMMIT, "license": "GPL-3.0",
                               "url": f"https://github.com/{BASEMAP_REPO}/blob/{BASEMAP_COMMIT}/geojson/world_{y}.geojson"}
