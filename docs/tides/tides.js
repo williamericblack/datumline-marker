@@ -8,9 +8,8 @@
   const DAY = 86400000;
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const INLINE = window.TIDES_INLINE || null; // single-file preview build embeds the data here
-  const d = s => Date.UTC(+s.slice(0, 4), s.length > 5 ? +s.slice(5, 7) - 1 : 0, s.length > 8 ? +s.slice(8, 10) : 1);
-  const fmt = s => s.length > 8 ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1]} ${s.slice(0, 4)}`
-    : s.length > 5 ? `${MON[+s.slice(5, 7) - 1]} ${s.slice(0, 4)}` : s;
+  const TT = window.TIDES_TIME, d = TT.parse;
+  const fmt = s => TT.label(s, S && S.bc);
   const wiki = t => "https://en.wikipedia.org/wiki/" + encodeURIComponent(t.replace(/ /g, "_"));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -39,7 +38,7 @@
     if (cache[m.id]) return cache[m.id];
     const raw = INLINE ? INLINE.data[m.id] : await (await fetch(m.file)).json();
     const s = Object.assign({}, raw);
-    s.t0 = d(raw.start); s.t1 = d(raw.end);
+    s.t0 = d(raw.start); s.t1 = d(raw.end); s.bc = raw.start[0] === "-";
     s.rulesC = raw.rules.map(r => [new RegExp(r[0]), r[1], d(r[2]), d(r[3]), r[4]]);
     s.erasC = raw.eras.map(e => [d(e[0]), e[1]]);
     s.evs = raw.events.map(e => ({ n: e[0], ds: e[1], t: d(e[1]), lat: e[2], lon: e[3], sides: e[4], res: e[5], w: e[6], src: e[7] }));
@@ -84,7 +83,7 @@
         .on("click", (e, f) => { e.stopPropagation(); showTip(e, stateTip(f), true); })
         .transition().duration(700).style("opacity", 1);
       sel.attr("d", path);
-      const big = feats.filter(f => f.properties.a > S.labelMin).sort((a, b) => b.properties.a - a.properties.a).slice(0, W() < 640 ? 7 : 14);
+      const big = feats.filter(f => f.properties.a > S.labelMin && !/culture|hunter-gatherers|nomads|tribes|minor states/i.test(f.properties.n)).sort((a, b) => b.properties.a - a.properties.a).slice(0, W() < 640 ? 7 : 14);
       const lab = d3.select("#labels").selectAll("text").data(big, f => f.properties.n);
       lab.exit().remove();
       lab.enter().append("text").attr("class", "lbl").attr("font-size", 10 / kNow()).merge(lab)
@@ -102,7 +101,7 @@
     const n = f.properties.n, r = rule(n, T), b = bloc(n, T);
     return `<b>${esc(n)}</b><br><i>${esc(S.blocs[b][0])}</i>` +
       (r ? `<br><a href="${wiki(r[4])}" target="_blank" rel="noopener">source: ${esc(r[4])} ↗</a>` : "") +
-      `<br><span class="m">border: basemap ${snap}</span>`;
+      `<br><span class="m">border: basemap ${snap < 0 ? -snap + " BC" : snap}</span>`;
   }
 
   const line = d3.line().x(p => proj(p)[0]).y(p => proj(p)[1]).curve(d3.curveCatmullRom.alpha(.6));
@@ -149,8 +148,9 @@
   }
   function hud(t) {
     const D = new Date(t);
-    d3.select("#year").text(D.getUTCFullYear());
-    d3.select("#date").text(`${D.getUTCDate()} ${MON[D.getUTCMonth()]} ${D.getUTCFullYear()}`);
+    const y = TT.year(t, S.bc);
+    d3.select("#year").text(y);
+    d3.select("#date").text(`${D.getUTCDate()} ${MON[D.getUTCMonth()]} ${y}`);
     let era = ""; for (const e of S.erasC) if (t >= e[0]) era = e[1];
     d3.select("#era").text(era);
   }
@@ -233,7 +233,7 @@
     d3.select("#srcbody").html(sourcesHtml());
   }
   function sourcesHtml() {
-    const snaps = S.snaps.map(x => `<li>${x.year} borders (used from ${new Date(x.from).getUTCFullYear()}): <a href="${x.source.url}" target="_blank" rel="noopener">${esc(x.source.repo)}/${esc(x.source.file)}</a> <span class="m">@${x.source.commit.slice(0, 7)} · ${x.source.license}</span></li>`).join("");
+    const snaps = S.snaps.map(x => `<li>${x.year < 0 ? -x.year + " BC" : x.year} borders (used from ${TT.year(x.from, S.bc)}): <a href="${x.source.url}" target="_blank" rel="noopener">${esc(x.source.repo)}/${esc(x.source.file)}</a> <span class="m">@${x.source.commit.slice(0, 7)} · ${x.source.license}</span></li>`).join("");
     const evs = S.evs.map(e => `<li>${fmt(e.ds)} — ${esc(e.n)}: <a href="${wiki(e.src)}" target="_blank" rel="noopener">${esc(e.src)}</a></li>`).join("");
     const ars = S.ars.map(a => `<li>${esc(a.n)}: <a href="${wiki(a.src)}" target="_blank" rel="noopener">${esc(a.src)}</a></li>`).join("");
     const seen = new Set(), rules = S.rules.filter(r => !seen.has(r[4]) && seen.add(r[4]))
@@ -246,7 +246,7 @@
   async function selectSlice(m, fromHash) {
     setPlaying(false);
     S = await loadSlice(m);
-    S.labelMin = { europe: 4, americas: 40, "west-africa": 2 }[S.id] ?? 4;
+    S.labelMin = S.label_min ?? 4;
     T0 = S.t0; T1 = S.t1; T = T0;
     proj = S.projection === "naturalEarth" ? d3.geoNaturalEarth1() : d3.geoMercator();
     path = d3.geoPath(proj);

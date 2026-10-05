@@ -16,9 +16,10 @@ def main(out):
     inline = json.dumps({"manifest": manifest, "data": data}, ensure_ascii=False, separators=(",", ":"))
     html = html.replace('<link rel="stylesheet" href="tides.css">', "<style>\n" + (ROOT / "tides.css").read_text() + "</style>")
     html = html.replace('<script src="vendor/d3.min.js"></script>', f'<script src="{D3_CDN}"></script>')
+    html = html.replace('<script src="time.js"></script>\n', "")
     html = html.replace('<script src="tides.js"></script>',
                         "<script>window.TIDES_INLINE=" + inline.replace("</", "<\\/") + ";</script>\n<script>\n"
-                        + (ROOT / "tides.js").read_text() + "</script>")
+                        + (ROOT / "time.js").read_text() + "\n" + (ROOT / "tides.js").read_text() + "</script>")
     # Artifact hosts wrap the page in their own document skeleton, so drop ours.
     for tag in ("<!DOCTYPE html>", '<html lang="en">', "<head>", "</head>", "<body>", "</body>", "</html>",
                 '<meta charset="utf-8">'):
