@@ -1,19 +1,27 @@
 /* The Evil Guy's Guide to History: the judging panel. All four are original drawings made
  * for TIDES (no existing characters, consoles or mascots). judge(id) returns avatar markup.
- * Mr. ASCII's text portrait is a placeholder until it is regenerated from William's photo.
+ * Mr. ASCII's portrait is a 24-column text rendering of William (his own photo, cropped to him alone,
+ * background masked out). The source photo is not stored in the repository.
  */
 (function () {
   "use strict";
   const ASCII = [
-    "   .-''''-.   ",
-    "  /  .--.  \\  ",
-    " |  ( oo )  | ",
-    " |   '--'   | ",
-    "  \\  \\__/  /  ",
-    "   '-.__.-'   ",
-    "  .-'|  |'-.  ",
-    " /   |  |   \\ ",
-    "|  [EVIL.EXE]|",
+    "                        ",
+    "         ****=--        ",
+    "        #@%*+-:--:      ",
+    "       +###+=-----      ",
+    "       ##+-==-----      ",
+    "       ##+*#=----=      ",
+    "        +=#+----::      ",
+    "        +**=--:::       ",
+    "      +-=*+-:::::..     ",
+    "   -:-+:=#+=---::....:  ",
+    " ....--::+=-=--:........",
+    " ......:::.:=-::........",
+    "........:-:.............",
+    "..........:.............",
+    "........................",
+    "........................",
   ].join("\n");
   const ART = {
     ascii: `<pre class="ascii" aria-hidden="true">${ASCII.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</pre>`,
