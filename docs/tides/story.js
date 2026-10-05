@@ -11,7 +11,7 @@
   const HOOK_MS = 2400, DWELL_MS = 1500, TRAVEL_S = 14, END_HOLD_MS = 600;
   const raw = location.hash.slice(1), opts = raw.split(raw.includes(".") ? "." : "-");
   const LOOK = ["dark", "paper", "relief"].find(x => opts.includes(x)) || "dark";
-  const VOICE = opts.includes("epic") ? "epic" : "deadpan";
+  const VOICE = opts.includes("epic") ? "epic" : opts.includes("panel") ? "panel" : "deadpan";
   const REC = opts.includes("rec");
   document.body.dataset.look = LOOK;
   if (REC) document.body.classList.add("rec");
@@ -113,9 +113,11 @@
     const c = d3.select("#caption");
     c.classed("on", false);
     setTimeout(() => {
-      c.html("").classed("on", true);
-      c.append("small").text(`${TT.label(b.ds, BC)} · ${b.n}`);
-      c.append("span").text(b.text);
+      c.html("").classed("on", true).classed("panel", !!b.judge);
+      if (b.judge) c.append("div").attr("class", "who").html(window.TIDES_JUDGES.art(b.judge));
+      const body = b.judge ? c.append("div").attr("class", "body") : c;
+      body.append("small").text(b.judge ? `${ST.panel.judges[b.judge]} · ${TT.label(b.ds, BC)} · ${b.n}` : `${TT.label(b.ds, BC)} · ${b.n}`);
+      body.append("span").text(b.text);
     }, 120);
   }
   function tick(now) {
@@ -156,15 +158,28 @@
     SL.ars = SL.arrows.map(a => ({ n: a[0], t0: d(a[1]), t1: d(a[2]), pts: a[4].map(p => [p[1], p[0]]) }));
     T0 = d(ST.start); T1 = d(ST.end); T = T0; BC = ST.start[0] === "-";
     rate = (T1 - T0) / TRAVEL_S;
-    const vi = VOICE === "epic" ? 2 : 1;
+    const panel = VOICE === "panel" && ST.panel, vi = VOICE === "epic" ? 2 : 1;
     beats = ST.beats.map(b => {
-      const e = SL.evs.find(x => x.n === b[0]);
-      return { n: b[0].replace("Jena–Auerstedt", "Jena"), ds: e.ds, t: e.t, lat: e.lat, lon: e.lon, text: b[vi] };
+      const e = SL.evs.find(x => x.n === b[0]), pb = panel && ST.panel.beats[b[0]];
+      return { n: b[0].replace("Jena–Auerstedt", "Jena"), ds: e.ds, t: e.t, lat: e.lat, lon: e.lon,
+        text: pb ? pb[1] : b[vi], judge: pb ? pb[0] : null };
     }).sort((a, b) => a.t - b.t);
     ST.leadersC = ST.leaders.map(l => ({ n: l[0], lat: l[1], lon: l[2], t0: d(l[3]), t1: d(l[4]) }));
     document.title = `${ST.title || "TIDES"} · TIDES`;
-    d3.select("#hook p").text(ST.hook[VOICE]);
-    d3.select("#endcard .line").text(ST.end_card);
+    if (panel) {
+      const P = ST.panel, ids = Object.keys(P.judges), total = P.scores.reduce((a, s) => a + s[1], 0);
+      d3.select("#hook").classed("panel", true).html(
+        `<small class="show">${P.title}</small><p></p><div class="row">${ids.map(id => window.TIDES_JUDGES.art(id)).join("")}</div>`);
+      d3.select("#hook p").text(P.hook);
+      d3.select("#endcard").classed("panel", true).select(".line").text(P.verdict);
+      d3.select("#endcard").insert("ol", ".line").attr("class", "scores").html(P.scores.map(([id, sc, why]) =>
+        `<li>${window.TIDES_JUDGES.art(id)}<span class="nm">${P.judges[id]}</span><b>${sc}/10</b><span class="why"></span></li>`).join("")
+        + `<li class="tot"><span class="nm">Total</span><b>${total}/${P.scores.length * 10}</b></li>`);
+      d3.selectAll("#endcard .scores .why").each(function (_, i) { this.textContent = P.scores[i][2]; });
+    } else {
+      d3.select("#hook p").text(ST.hook[VOICE]);
+      d3.select("#endcard .line").text(ST.end_card);
+    }
     d3.select("#explore").attr("href", `index.html#${ST.slice || "europe"}`);
     if (ST.meter.length < 2) d3.select("#m-co").text("");
     document.body.style.setProperty("--hatch", `var(--${ST.hatch || "a"})`);
