@@ -19,16 +19,28 @@ BASEMAP_COMMIT = "da7a4b735ecef70aebdc9c73e409d8a2500d50f3"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CURATED = ROOT / "tools/tides/curated"
 OUT = ROOT / "docs/tides/data"
-SLICES = ["europe", "americas", "west-africa"]
+SLICES = ["europe", "americas", "west-africa", "rome", "mongols", "inca"]
+
+
+def basemap_file(year):
+    """Basemap files name BC years "bc<n>"; a slice writes 200 BC as year -200."""
+    return f"world_bc{-year}.geojson" if year < 0 else f"world_{year}.geojson"
 
 
 def basemap_url(year):
-    return f"https://raw.githubusercontent.com/{BASEMAP_REPO}/{BASEMAP_COMMIT}/geojson/world_{year}.geojson"
+    return f"https://raw.githubusercontent.com/{BASEMAP_REPO}/{BASEMAP_COMMIT}/geojson/{basemap_file(year)}"
+
+
+def date_key(s):
+    """Sort key for TIDES dates, including BC dates written with a leading minus."""
+    neg, parts = s.startswith("-"), s.lstrip("-").split("-")
+    y = int(parts[0])
+    return (-y if neg else y, int(parts[1]) if len(parts) > 1 else 1, int(parts[2]) if len(parts) > 2 else 1)
 
 
 def load_basemap(year, local):
     if local:
-        return json.loads((pathlib.Path(local) / f"world_{year}.geojson").read_text())
+        return json.loads((pathlib.Path(local) / basemap_file(year)).read_text())
     with urllib.request.urlopen(basemap_url(year), timeout=60) as r:
         return json.loads(r.read())
 
@@ -92,10 +104,10 @@ def main():
             if y not in cache:
                 cache[y] = load_basemap(y, args.basemaps)
             s["borders"][str(y)] = clip(cache[y], s["clip"], s["simplify"], s.get("meter_box"))
-            snap["source"] = {"file": f"geojson/world_{y}.geojson", "repo": BASEMAP_REPO,
+            snap["source"] = {"file": f"geojson/{basemap_file(y)}", "repo": BASEMAP_REPO,
                               "commit": BASEMAP_COMMIT, "license": "GPL-3.0",
-                              "url": f"https://github.com/{BASEMAP_REPO}/blob/{BASEMAP_COMMIT}/geojson/world_{y}.geojson"}
-        s["events"].sort(key=lambda e: e[1])
+                              "url": f"https://github.com/{BASEMAP_REPO}/blob/{BASEMAP_COMMIT}/geojson/{basemap_file(y)}"}
+        s["events"].sort(key=lambda e: date_key(e[1]))
         path = OUT / f"{sid}.json"
         path.write_text(json.dumps(s, ensure_ascii=False, separators=(",", ":")))
         manifest.append({"id": sid, "title": s["title"], "period": s["period"], "tagline": s["tagline"],
